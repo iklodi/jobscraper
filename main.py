@@ -34,9 +34,9 @@ async def main():
         
     print("\n=== Step 3: Generating Tailored CVs & Cover Letters ===")
     if not os.environ.get("GEMINI_API_KEY"):
-        print("Skipping generation: GEMINI_API_KEY not set.")
+        print("Warning: GEMINI_API_KEY not found. Skipping generation.")
     else:
-        run_generator()
+        await run_generator()
         
     print("\n=== Step 4: Syncing to GitHub Issues ===")
     if not os.environ.get("GITHUB_TOKEN"):

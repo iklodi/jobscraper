@@ -5,7 +5,7 @@ from docx import Document
 from docx2pdf import convert
 from google import genai
 from google.genai import types
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
@@ -81,7 +81,7 @@ def adapt_cl(base_cl_path, new_cl_path, body_text):
             break
     doc.save(new_cl_path)
 
-def run_generator():
+async def run_generator():
     conn = db.get_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM jobs WHERE status = "to_apply"')
@@ -141,13 +141,13 @@ def run_generator():
         jd_pdf_path = os.path.join(pdf_dir, jd_pdf_filename)
         
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch()
-                page = browser.new_page()
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page()
                 html_content = f"<h1>{title} at {company}</h1><p>{location}</p><hr><pre style='white-space: pre-wrap;'>{description}</pre>"
-                page.set_content(html_content)
-                page.pdf(path=jd_pdf_path)
-                browser.close()
+                await page.set_content(html_content)
+                await page.pdf(path=jd_pdf_path)
+                await browser.close()
         except Exception as pdf_err:
             print(f"Failed to generate JD PDF for {job_id}: {pdf_err}")
             

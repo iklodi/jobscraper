@@ -8,7 +8,7 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'gemini-2.5-flash' # Switched to flash because pro has 0 quota on free tier
+MODEL_NAME = 'gemini-3.1-flash-lite' # Using model with highest free tier limits
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -69,6 +69,7 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     """
     
     max_retries = 3
+    delay = 10
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -79,14 +80,13 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
                 ),
             )
             # Parse the JSON response
-            result = json.loads(response.text)
-            return result
+            return json.loads(response.text)
         except Exception as e:
             error_str = str(e)
             if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
-                delay = 10 * (attempt + 1)
                 print(f"Rate limited (429 RESOURCE_EXHAUSTED). Retrying in {delay} seconds...")
                 time.sleep(delay)
+                delay *= 2
             else:
                 print(f"Error evaluating job: {e}")
                 return None
@@ -136,7 +136,7 @@ def run_evaluation():
             print(f"--> Failed to evaluate.")
             
         # Rate limit to avoid 429 errors (Gemini Free Tier is 15 RPM)
-        time.sleep(4)
+        time.sleep(4.5)
 
 if __name__ == '__main__':
     run_evaluation()

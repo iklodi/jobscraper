@@ -35,6 +35,9 @@ async def main():
     print("\n=== Step 5: Updating Dashboard ===")
     generate_dashboard()
 
+    print("\n=== Step 6: Syncing working data to cvs repo ===")
+    os.system('cd /path/to/cvs && git add . && git commit -m "Auto-update: JDs, generated applications, and dashboard" && git push')
+
     print("\n=== Pipeline Complete ===")
 
 if __name__ == '__main__':

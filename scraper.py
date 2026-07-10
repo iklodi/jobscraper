@@ -78,6 +78,10 @@ async def run_scraper():
                 new_jobs_count = 0
                 for card in job_cards:
                     try:
+                        job_id = await card.get_attribute('data-job-id')
+                        if job_id and db.job_exists(job_id):
+                            continue # Skip entirely if we already scraped this job
+                            
                         await card.click()
                         await asyncio.sleep(1.5)
                         

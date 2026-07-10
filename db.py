@@ -50,6 +50,14 @@ def get_unscored_jobs():
     conn.close()
     return jobs
 
+def job_exists(job_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM jobs WHERE job_id = ?', (job_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
 def update_job_score(job_id, score, reasoning):
     conn = get_connection()
     cursor = conn.cursor()

@@ -2,12 +2,15 @@ import db
 import os
 import json
 from groq import Groq
+from google import genai
+from google.genai import types
 from docx import Document
 import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'llama-3.3-70b-versatile' # Switching to Groq API for extreme speed and reliability
+GROQ_MODEL = 'llama-3.1-8b-instant'
+GEMINI_MODEL = 'gemini-3-flash-preview'
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -29,10 +32,16 @@ def get_evaluation_rules():
 def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("Please set the GROQ_API_KEY environment variable. You can get one for free at console.groq.com")
+        return None
     return Groq(api_key=api_key)
 
-def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text, is_promoted):
+def get_gemini_client():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    return genai.Client(api_key=api_key)
+
+def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text, is_promoted):
     prompt = f"""
     You are an expert tech recruiter and career advisor.
     I want you to evaluate the following job posting against my CV.
@@ -69,24 +78,46 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     max_retries = 5
     delay = 10
     for attempt in range(max_retries):
-        try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.1
-            )
-            # Parse the JSON response
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            error_str = str(e)
-            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or '503' in error_str or 'UNAVAILABLE' in error_str:
-                print(f"API overload (429/503). Retrying in {delay} seconds...")
-                time.sleep(delay)
-                delay *= 2
-            else:
-                print(f"Error evaluating job: {e}")
-                return None
+        error_msg = ""
+        # Try Groq First
+        if groq_client:
+            try:
+                response = groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.1
+                )
+                return json.loads(response.choices[0].message.content)
+            except Exception as e:
+                error_msg += f"Groq Error: {str(e)} | "
+        
+        # Fallback to Gemini
+        if gemini_client:
+            try:
+                response = gemini_client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
+                return json.loads(response.text)
+            except Exception as e:
+                error_msg += f"Gemini Error: {str(e)}"
+        
+        if not groq_client and not gemini_client:
+            print("Error: Neither GROQ_API_KEY nor GEMINI_API_KEY are configured.")
+            return None
+            
+        # If both failed, check if it's a rate limit / overload
+        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or '503' in error_msg or 'UNAVAILABLE' in error_msg or 'rate_limit' in error_msg:
+            print(f"API overload detected on all available providers. Retrying in {delay} seconds...")
+            time.sleep(delay)
+            delay *= 2
+        else:
+            print(f"Error evaluating job: {error_msg}")
+            return None
                 
     print("Max retries exceeded for evaluating job.")
     return None
@@ -101,10 +132,11 @@ def run_evaluation():
     
     print(f"Found {len(unscored_jobs)} jobs to evaluate.")
     
-    try:
-        client = get_groq_client()
-    except Exception as e:
-        print(e)
+    groq_client = get_groq_client()
+    gemini_client = get_gemini_client()
+    
+    if not groq_client and not gemini_client:
+        print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
         return
 
     print("Extracting CV text...")
@@ -121,7 +153,10 @@ def run_evaluation():
         job_id, title, company, description, is_promoted = job
         print(f"Evaluating: {title} at {company} (Promoted: {is_promoted})...")
         
-        result = evaluate_job(client, title, company, description, cv_text, previous_applications, rules_text, is_promoted)
+        result = evaluate_job(
+            groq_client,
+            gemini_client,
+            title, company, description, cv_text, previous_applications, rules_text, is_promoted)
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')

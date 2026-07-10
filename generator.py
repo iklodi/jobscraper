@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
 OUTPUT_DIR = '/path/to/cvs/applications'
-GROQ_MODEL = 'llama-3.1-8b-instant'
+GROQ_MODEL = 'llama-3.3-70b-versatile'
 GEMINI_MODEL = 'gemini-3-flash-preview'
 
 def get_groq_client():
@@ -55,38 +55,50 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
     }}
     """
     
-    result = None
-    error_msg = ""
-    
-    if groq_client:
-        try:
-            response = groq_client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.1
-            )
-            import json
-            result = json.loads(response.choices[0].message.content)
-        except Exception as e:
-            error_msg += f"Groq Error: {str(e)} | "
+    max_retries = 5
+    for attempt in range(max_retries):
+        result = None
+        error_msg = ""
+        
+        if groq_client:
+            try:
+                response = groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.1
+                )
+                import json
+                result = json.loads(response.choices[0].message.content)
+            except Exception as e:
+                error_msg += f"Groq Error: {str(e)} | "
+                
+        if not result and gemini_client:
+            try:
+                response = gemini_client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
+                import json
+                result = json.loads(response.text)
+            except Exception as e:
+                error_msg += f"Gemini Error: {str(e)}"
+                
+        if result:
+            break
             
-    if not result and gemini_client:
-        try:
-            response = gemini_client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
-            import json
-            result = json.loads(response.text)
-        except Exception as e:
-            error_msg += f"Gemini Error: {str(e)}"
-            
-    if not result:
-        raise Exception(f"Failed to generate documents from APIs: {error_msg}")
+        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
+            print("Rate limit reached. Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
+            import time
+            time.sleep(32)
+        elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
+            import time
+            time.sleep(10)
+        else:
+            raise Exception(f"Failed to generate documents from APIs: {error_msg}")
     
     # Aggressive post-processing fallback just in case the AI ignores the prompt
     result['cv_summary'] = result['cv_summary'].replace('—', ' - ').replace('–', ' - ')

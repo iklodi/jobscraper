@@ -9,7 +9,7 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-GROQ_MODEL = 'llama-3.1-8b-instant'
+GROQ_MODEL = 'llama-3.3-70b-versatile'
 GEMINI_MODEL = 'gemini-3-flash-preview'
 
 def extract_text_from_docx(file_path):
@@ -111,8 +111,11 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, c
             return None
             
         # If both failed, check if it's a rate limit / overload
-        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or '503' in error_msg or 'UNAVAILABLE' in error_msg or 'rate_limit' in error_msg:
-            print(f"API overload detected on all available providers. Retrying in {delay} seconds...")
+        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
+            print("Rate limit reached. Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
+            time.sleep(32)
+        elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
+            print(f"API overload detected. Retrying in {delay} seconds...")
             time.sleep(delay)
             delay *= 2
         else:

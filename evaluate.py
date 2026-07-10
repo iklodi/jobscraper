@@ -8,7 +8,7 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'gemini-3.5-flash' # Switching to new model to reset daily quota limits
+MODEL_NAME = 'gemini-3-flash-preview' # Fallback to stable preview model due to 3.5-flash high demand
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -68,7 +68,7 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     }}
     """
     
-    max_retries = 3
+    max_retries = 5
     delay = 10
     for attempt in range(max_retries):
         try:
@@ -83,8 +83,8 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
             return json.loads(response.text)
         except Exception as e:
             error_str = str(e)
-            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
-                print(f"Rate limited (429 RESOURCE_EXHAUSTED). Retrying in {delay} seconds...")
+            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or '503' in error_str or 'UNAVAILABLE' in error_str:
+                print(f"API overload (429/503). Retrying in {delay} seconds...")
                 time.sleep(delay)
                 delay *= 2
             else:

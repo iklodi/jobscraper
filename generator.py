@@ -34,6 +34,12 @@ def generate_tailored_texts(client, job, cv_text):
     Task 1: Write a tailored 3-4 sentence professional summary for my CV that specifically highlights my fit for this role.
     Task 2: Write a tailored, compelling cover letter (around 250 words) addressed to the hiring manager at {company}.
     
+    CRITICAL TONE INSTRUCTIONS:
+    - Write in a highly professional, direct, and human tone.
+    - DO NOT use long dashes (em-dashes "—" or en-dashes "–"). Use commas, semicolons, or regular parentheses instead.
+    - STRICTLY AVOID typical AI clichés and buzzwords (e.g., "delve", "tapestry", "testament", "beacon", "catalyst", "unleash", "elevate", "thrilled to apply", "embark", "spearhead", "pivotal").
+    - Keep sentences concise, factual, and impactful. Do not overcomplicate the sentence structure.
+    
     Your response must be valid JSON in this format:
     {{
         "cv_summary": "...",
@@ -50,7 +56,13 @@ def generate_tailored_texts(client, job, cv_text):
             ),
         )
         import json
-        return json.loads(response.text)
+        result = json.loads(response.text)
+        
+        # Aggressive post-processing fallback just in case the AI ignores the prompt
+        result['cv_summary'] = result['cv_summary'].replace('—', ' - ').replace('–', ' - ')
+        result['cover_letter_body'] = result['cover_letter_body'].replace('—', ' - ').replace('–', ' - ')
+        
+        return result
     except Exception as e:
         print(f"Error generating tailored text: {e}")
         return None

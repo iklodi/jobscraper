@@ -19,6 +19,13 @@ def get_previous_applications():
         return []
     return [f for f in os.listdir(job_dir) if not f.startswith('.')]
 
+def get_evaluation_rules():
+    rules_path = '/path/to/cvs/rules.md'
+    if not os.path.exists(rules_path):
+        return ""
+    with open(rules_path, 'r') as f:
+        return f.read()
+
 def get_gemini_client():
     # Make sure GEMINI_API_KEY is set in your environment variables
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -26,7 +33,7 @@ def get_gemini_client():
         raise ValueError("Please set the GEMINI_API_KEY environment variable.")
     return genai.Client(api_key=api_key)
 
-def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications):
+def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text):
     prompt = f"""
     You are an expert tech recruiter and career advisor.
     I want you to evaluate the following job posting against my CV.
@@ -41,11 +48,7 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     
     Evaluate the fit on a scale of 1 to 10 (10 being a perfect match).
     
-    CRITICAL LOCATION RULES (If these are not met, the score MUST be 1 or 2):
-    1. On-site jobs MUST be in Vaud or Valais (Switzerland).
-    2. Hybrid jobs MUST be in Switzerland (max 2 days onsite if not near Bex).
-    3. Remote jobs can be worldwide, but MUST be from renowned international companies (e.g. UK, US, UAE, Norway) paying Switzerland-comparable salaries.
-    4. Traveling is acceptable and considered a plus or neutral.
+    {rules_text}
     
     Here is a list of job applications I have ALREADY submitted in the past (based on my archive):
     {chr(10).join(previous_applications)}
@@ -101,12 +104,13 @@ def run_evaluation():
         return
 
     previous_applications = get_previous_applications()
+    rules_text = get_evaluation_rules()
 
     for job in unscored_jobs:
         job_id, title, company, description = job
         print(f"Evaluating: {title} at {company}...")
         
-        result = evaluate_job(client, title, company, description, cv_text, previous_applications)
+        result = evaluate_job(client, title, company, description, cv_text, previous_applications, rules_text)
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')

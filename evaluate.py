@@ -8,7 +8,7 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'gemini-2.5-pro' # Or gemini-1.5-pro
+MODEL_NAME = 'gemini-2.5-flash' # Switched to flash because pro has 0 quota on free tier
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)

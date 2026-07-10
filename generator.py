@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
 OUTPUT_DIR = '/path/to/cvs/applications'
-MODEL_NAME = 'gemini-2.5-pro'
+MODEL_NAME = 'gemini-2.5-flash'
 
 def get_gemini_client():
     api_key = os.environ.get("GEMINI_API_KEY")

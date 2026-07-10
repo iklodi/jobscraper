@@ -19,7 +19,7 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 def generate_tailored_texts(client, job, cv_text):
-    job_id, title, company, location, description, link, score, reasoning, status, created_at = job
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
     
     prompt = f"""
     You are an expert career advisor. I am applying for the '{title}' role at '{company}'.
@@ -97,7 +97,7 @@ def run_generator():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     for job in jobs:
-        job_id, title, company, location, description, link, score, reasoning, status, created_at = job
+        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
         print(f"Generating documents for {company} - {title}...")
         
         texts = generate_tailored_texts(client, job, cv_text)

@@ -65,7 +65,12 @@ def adapt_cv(base_cv_path, new_cv_path, summary_text):
     for p in doc.paragraphs:
         if len(p.text) > 100 and not replaced:
             # Assume the first long paragraph is the summary
-            p.text = summary_text
+            if p.runs:
+                p.runs[0].text = summary_text
+                for r in p.runs[1:]:
+                    r.text = ""
+            else:
+                p.text = summary_text
             replaced = True
             break
     doc.save(new_cv_path)
@@ -76,7 +81,12 @@ def adapt_cl(base_cl_path, new_cl_path, body_text):
     replaced = False
     for p in doc.paragraphs:
         if len(p.text) > 50 and not replaced:
-            p.text = body_text
+            if p.runs:
+                p.runs[0].text = body_text
+                for r in p.runs[1:]:
+                    r.text = ""
+            else:
+                p.text = body_text
             replaced = True
             break
     doc.save(new_cl_path)

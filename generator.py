@@ -5,20 +5,19 @@ import datetime
 from docx import Document
 from docx.shared import Pt
 import subprocess
-from google import genai
-from google.genai import types
+from groq import Groq
 from playwright.async_api import async_playwright
 
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
 OUTPUT_DIR = '/path/to/cvs/applications'
-MODEL_NAME = 'gemini-3-flash-preview'
+MODEL_NAME = 'llama-3.3-70b-versatile'
 
-def get_gemini_client():
-    api_key = os.environ.get("GEMINI_API_KEY")
+def get_groq_client():
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("Please set the GEMINI_API_KEY environment variable.")
-    return genai.Client(api_key=api_key)
+        raise ValueError("Please set the GROQ_API_KEY environment variable.")
+    return Groq(api_key=api_key)
 
 def generate_tailored_texts(client, job, cv_text):
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
@@ -48,15 +47,14 @@ def generate_tailored_texts(client, job, cv_text):
     """
     
     try:
-        response = client.models.generate_content(
+        response = client.chat.completions.create(
             model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-            ),
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1
         )
         import json
-        result = json.loads(response.text)
+        result = json.loads(response.choices[0].message.content)
         
         # Aggressive post-processing fallback just in case the AI ignores the prompt
         result['cv_summary'] = result['cv_summary'].replace('—', ' - ').replace('–', ' - ')
@@ -190,7 +188,7 @@ async def run_generator():
         print("No jobs ready for document generation.")
         return
         
-    client = get_gemini_client()
+    client = get_groq_client()
     cv_text = extract_text(CV_PATH)
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -1,14 +1,13 @@
 import db
 import os
 import json
-from google import genai
-from google.genai import types
+from groq import Groq
 from docx import Document
 import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'gemini-3-flash-preview' # Fallback to stable preview model due to 3.5-flash high demand
+MODEL_NAME = 'llama-3.3-70b-versatile' # Switching to Groq API for extreme speed and reliability
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -27,12 +26,11 @@ def get_evaluation_rules():
     with open(rules_path, 'r') as f:
         return f.read()
 
-def get_gemini_client():
-    # Make sure GEMINI_API_KEY is set in your environment variables
-    api_key = os.environ.get("GEMINI_API_KEY")
+def get_groq_client():
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("Please set the GEMINI_API_KEY environment variable.")
-    return genai.Client(api_key=api_key)
+        raise ValueError("Please set the GROQ_API_KEY environment variable. You can get one for free at console.groq.com")
+    return Groq(api_key=api_key)
 
 def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text, is_promoted):
     prompt = f"""
@@ -72,15 +70,14 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     delay = 10
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
+            response = client.chat.completions.create(
                 model=MODEL_NAME,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1
             )
             # Parse the JSON response
-            return json.loads(response.text)
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             error_str = str(e)
             if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or '503' in error_str or 'UNAVAILABLE' in error_str:
@@ -105,7 +102,7 @@ def run_evaluation():
     print(f"Found {len(unscored_jobs)} jobs to evaluate.")
     
     try:
-        client = get_gemini_client()
+        client = get_groq_client()
     except Exception as e:
         print(e)
         return

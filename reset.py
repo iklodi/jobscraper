@@ -1,5 +1,7 @@
 import sqlite3
 import sys
+import os
+import shutil
 
 def reset_job(search_term, status='new'):
     conn = sqlite3.connect('jobs.db')
@@ -26,8 +28,32 @@ def reset_job(search_term, status='new'):
         cursor.execute("UPDATE jobs SET status = ? WHERE company LIKE ?", (status, f"%{search_term}%"))
         updated_count = cursor.rowcount
         
+    # Find matching job IDs to clean up old generated files
+    cursor.execute('SELECT job_id, company, title FROM jobs WHERE job_id = ? OR company LIKE ?', (search_term, f"%{search_term}%"))
+    matched_jobs = cursor.fetchall()
+
     conn.commit()
     conn.close()
+    
+    if updated_count > 0:
+        for j_id, _, _ in matched_jobs:
+            # Delete old Job Description PDF
+            jobs_dir = '/path/to/cvs/jobs'
+            if os.path.exists(jobs_dir):
+                for f in os.listdir(jobs_dir):
+                    if f.startswith(f"{j_id}_"):
+                        try:
+                            os.remove(os.path.join(jobs_dir, f))
+                        except Exception: pass
+                        
+            # Delete old Application Folder
+            apps_dir = '/path/to/cvs/applications'
+            if os.path.exists(apps_dir):
+                for d in os.listdir(apps_dir):
+                    if d.endswith(f"_{j_id}"):
+                        try:
+                            shutil.rmtree(os.path.join(apps_dir, d))
+                        except Exception: pass
     
     print(f"✅ Successfully pushed {updated_count} job(s) back to the '{status}' queue:")
     for company, title in matches:

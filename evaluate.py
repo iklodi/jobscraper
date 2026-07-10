@@ -13,6 +13,12 @@ def extract_text_from_docx(file_path):
     doc = Document(file_path)
     return "\n".join([p.text for p in doc.paragraphs])
 
+def get_previous_applications():
+    job_dir = '/path/to/cvs/jobs'
+    if not os.path.exists(job_dir):
+        return []
+    return [f for f in os.listdir(job_dir) if not f.startswith('.')]
+
 def get_gemini_client():
     # Make sure GEMINI_API_KEY is set in your environment variables
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -20,7 +26,7 @@ def get_gemini_client():
         raise ValueError("Please set the GEMINI_API_KEY environment variable.")
     return genai.Client(api_key=api_key)
 
-def evaluate_job(client, job_title, job_company, job_desc, cv_text):
+def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications):
     prompt = f"""
     You are an expert tech recruiter and career advisor.
     I want you to evaluate the following job posting against my CV.
@@ -40,6 +46,11 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text):
     2. Hybrid jobs MUST be in Switzerland (max 2 days onsite if not near Bex).
     3. Remote jobs can be worldwide, but MUST be from renowned international companies (e.g. UK, US, UAE, Norway) paying Switzerland-comparable salaries.
     4. Traveling is acceptable and considered a plus or neutral.
+    
+    Here is a list of job applications I have ALREADY submitted in the past (based on my archive):
+    {chr(10).join(previous_applications)}
+    
+    CRITICAL DUPLICATE RULE: If this job is highly likely to be the exact same role at the exact same company as one of the past applications in the list above, you MUST score it a 1 and set the reasoning strictly to "Already applied".
     
     Provide a brief reasoning, and list any key missing skills.
     
@@ -89,11 +100,13 @@ def run_evaluation():
         print(f"Error reading CV: {e}")
         return
 
+    previous_applications = get_previous_applications()
+
     for job in unscored_jobs:
         job_id, title, company, description = job
         print(f"Evaluating: {title} at {company}...")
         
-        result = evaluate_job(client, title, company, description, cv_text)
+        result = evaluate_job(client, title, company, description, cv_text, previous_applications)
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')

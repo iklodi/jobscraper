@@ -3,7 +3,11 @@ from scraper import run_scraper
 from evaluate import run_evaluation
 from generator import run_generator
 from github_sync import run_sync
+from dashboard_gen import generate_dashboard
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 async def main():
     print("=== Step 1: Scraping LinkedIn Jobs ===")
@@ -27,6 +31,9 @@ async def main():
         print("Skipping sync: GITHUB_TOKEN not set.")
     else:
         run_sync()
+
+    print("\n=== Step 5: Updating Dashboard ===")
+    generate_dashboard()
 
     print("\n=== Pipeline Complete ===")
 

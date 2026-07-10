@@ -82,7 +82,24 @@ def delete_paragraph(paragraph):
     p.getparent().remove(p)
     paragraph._p = paragraph._element = None
 
-def adapt_cl(base_cl_path, new_cl_path, body_text):
+def replace_text_in_paragraph(paragraph, old_text, new_text):
+    if old_text in paragraph.text:
+        full_text = paragraph.text.replace(old_text, new_text)
+        font_name = "Verdana"
+        font_size = None
+        if paragraph.runs:
+            if paragraph.runs[0].font.name:
+                font_name = paragraph.runs[0].font.name
+            if paragraph.runs[0].font.size:
+                font_size = paragraph.runs[0].font.size
+                
+        paragraph.clear()
+        run = paragraph.add_run(full_text)
+        run.font.name = font_name
+        if font_size:
+            run.font.size = font_size
+
+def adapt_cl(base_cl_path, new_cl_path, body_text, company, location):
     doc = Document(base_cl_path)
     
     start_idx = -1
@@ -92,6 +109,17 @@ def adapt_cl(base_cl_path, new_cl_path, body_text):
             break
             
     if start_idx != -1:
+        # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
+        today_str = datetime.datetime.now().strftime("%d.%m.%Y")
+        for p in doc.paragraphs[:start_idx]:
+            replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
+            replace_text_in_paragraph(p, "Ernst & Young", company)
+            replace_text_in_paragraph(p, "Zurich, Switzerland", location)
+            replace_text_in_paragraph(p, "10.04.2026", today_str)
+            replace_text_in_paragraph(p, "[COMPANY]", company)
+            replace_text_in_paragraph(p, "[LOCATION]", location)
+            replace_text_in_paragraph(p, "[DATE]", today_str)
+
         # Find the reference paragraph for styling (the first actual body paragraph)
         ref_p = doc.paragraphs[start_idx]
         for i in range(start_idx, len(doc.paragraphs)):
@@ -175,7 +203,7 @@ async def run_generator():
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts['cv_summary'])
-        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'])
+        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, location)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

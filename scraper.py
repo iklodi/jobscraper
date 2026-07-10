@@ -101,6 +101,23 @@ async def run_scraper():
                             if added:
                                 new_jobs_count += 1
                                 print(f"Added new job: {title} at {company}")
+                                
+                                # Save Job Description as PDF using Playwright
+                                pdf_dir = '/path/to/cvs/jobs'
+                                os.makedirs(pdf_dir, exist_ok=True)
+                                safe_title = "".join(x for x in title if x.isalnum() or x in " -_")
+                                safe_company = "".join(x for x in company if x.isalnum() or x in " -_")
+                                pdf_filename = f"{job_id}_{safe_company}_{safe_title}.pdf"
+                                pdf_path = os.path.join(pdf_dir, pdf_filename)
+                                
+                                try:
+                                    pdf_page = await browser.new_page()
+                                    html_content = f"<h1>{title} at {company}</h1><p>{job_location}</p><hr><pre style='white-space: pre-wrap;'>{description}</pre>"
+                                    await pdf_page.set_content(html_content)
+                                    await pdf_page.pdf(path=pdf_path)
+                                    await pdf_page.close()
+                                except Exception as pdf_err:
+                                    print(f"Failed to generate PDF for {job_id}: {pdf_err}")
                     except Exception as e:
                         print(f"Error parsing a job card: {e}")
                         

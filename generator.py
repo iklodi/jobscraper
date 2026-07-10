@@ -8,7 +8,7 @@ from google.genai import types
 
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
-OUTPUT_DIR = '/path/to/jobscraper/applications'
+OUTPUT_DIR = '/path/to/cvs/applications'
 MODEL_NAME = 'gemini-2.5-pro'
 
 def get_gemini_client():
@@ -110,10 +110,18 @@ def run_generator():
         
         new_cv_docx = os.path.join(job_dir, f"{today}_{safe_company}_CV.docx")
         new_cl_docx = os.path.join(job_dir, f"{today}_{safe_company}_CoverLetter.docx")
+        new_cv_md = os.path.join(job_dir, f"{today}_{safe_company}_CV.md")
+        new_cl_md = os.path.join(job_dir, f"{today}_{safe_company}_CoverLetter.md")
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts['cv_summary'])
         adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'])
+        
+        # Save MD format
+        with open(new_cv_md, 'w') as f:
+            f.write(extract_text(new_cv_docx))
+        with open(new_cl_md, 'w') as f:
+            f.write(extract_text(new_cl_docx))
         
         # Convert to PDF
         print(f"Converting DOCX to PDF for {company}...")

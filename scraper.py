@@ -114,13 +114,13 @@ async def run_scraper():
                             card_text = await card.inner_text()
                             is_promoted = "Promoted" in card_text
                             
-                            title_elem = await card.query_selector('.job-card-list__title')
+                            title_elem = await card.query_selector('.artdeco-entity-lockup__title, .job-card-list__title')
                             title = await title_elem.inner_text() if title_elem else "Unknown Title"
                             
-                            company_elem = await card.query_selector('.job-card-container__primary-description')
+                            company_elem = await card.query_selector('.artdeco-entity-lockup__subtitle, .job-card-container__primary-description')
                             company = await company_elem.inner_text() if company_elem else "Unknown Company"
                             
-                            location_elem = await card.query_selector('.job-card-container__metadata-item')
+                            location_elem = await card.query_selector('.artdeco-entity-lockup__caption, .job-card-container__metadata-item')
                             job_location = await location_elem.inner_text() if location_elem else "Unknown Location"
                             
                             job_id = await card.get_attribute('data-job-id')

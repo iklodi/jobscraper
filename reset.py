@@ -20,12 +20,12 @@ def reset_job(search_term, status='new'):
         conn.close()
         return
 
-    # Update the jobs
-    cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (status, search_term))
+    # Update the jobs and clear GitHub sync links
+    cursor.execute('UPDATE jobs SET status = ?, issue_number = NULL, issue_url = NULL WHERE job_id = ?', (status, search_term))
     updated_count = cursor.rowcount
     
     if updated_count == 0:
-        cursor.execute("UPDATE jobs SET status = ? WHERE company LIKE ?", (status, f"%{search_term}%"))
+        cursor.execute("UPDATE jobs SET status = ?, issue_number = NULL, issue_url = NULL WHERE company LIKE ?", (status, f"%{search_term}%"))
         updated_count = cursor.rowcount
         
     # Find matching job IDs to clean up old generated files

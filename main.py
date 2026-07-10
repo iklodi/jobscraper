@@ -21,11 +21,16 @@ async def main():
     else:
         print("=== Step 1: Scraping Skipped (--no-scrape flag used) ===")
     
-    print("\n=== Step 2: Evaluating Jobs with Gemini ===")
-    if not os.environ.get("GEMINI_API_KEY"):
-        print("Skipping evaluation: GEMINI_API_KEY not set.")
+    skip_eval = '--no-eval' in sys.argv
+    
+    if not skip_eval:
+        print("\n=== Step 2: Evaluating Jobs with Gemini ===")
+        if not os.environ.get("GEMINI_API_KEY"):
+            print("Warning: GEMINI_API_KEY not found. Skipping evaluation.")
+        else:
+            run_evaluation()
     else:
-        run_evaluation()
+        print("\n=== Step 2: Evaluating Skipped (--no-eval flag used) ===")
         
     print("\n=== Step 3: Generating Tailored CVs & Cover Letters ===")
     if not os.environ.get("GEMINI_API_KEY"):

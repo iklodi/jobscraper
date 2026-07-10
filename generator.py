@@ -5,6 +5,7 @@ from docx import Document
 from docx2pdf import convert
 from google import genai
 from google.genai import types
+from playwright.sync_api import sync_playwright
 
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
@@ -130,6 +131,25 @@ def run_generator():
             convert(new_cl_docx, new_cl_docx.replace('.docx', '.pdf'))
         except Exception as e:
             print(f"PDF conversion failed (requires MS Word on Mac): {e}")
+            
+        # Save Job Description as PDF using Playwright
+        print(f"Saving JD as PDF for {company}...")
+        pdf_dir = '/path/to/cvs/jobs'
+        os.makedirs(pdf_dir, exist_ok=True)
+        safe_title = "".join(x for x in title if x.isalnum() or x in " -_")
+        jd_pdf_filename = f"{job_id}_{safe_company}_{safe_title}.pdf"
+        jd_pdf_path = os.path.join(pdf_dir, jd_pdf_filename)
+        
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                page = browser.new_page()
+                html_content = f"<h1>{title} at {company}</h1><p>{location}</p><hr><pre style='white-space: pre-wrap;'>{description}</pre>"
+                page.set_content(html_content)
+                page.pdf(path=jd_pdf_path)
+                browser.close()
+        except Exception as pdf_err:
+            print(f"Failed to generate JD PDF for {job_id}: {pdf_err}")
             
         # Update status
         cursor.execute('UPDATE jobs SET status = "generated" WHERE job_id = ?', (job_id,))

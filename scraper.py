@@ -57,17 +57,17 @@ async def run_scraper():
                 await page.goto(search_url)
                 
                 try:
-                    await page.wait_for_selector('.jobs-search-results-list', timeout=15000)
+                    await page.wait_for_selector('.job-card-container', timeout=15000)
                 except Exception:
-                    print(f"Timeout waiting for job list for {keyword} in {location}. Skipping...")
+                    print(f"Timeout waiting for job cards for {keyword} in {location}. Skipping...")
                     continue
                 
                 print("Scrolling to load jobs...")
                 for _ in range(5):
                     await page.evaluate('''
-                        const container = document.querySelector('.jobs-search-results-list');
-                        if (container) {
-                            container.scrollTo(0, container.scrollHeight);
+                        const cards = document.querySelectorAll('.job-card-container');
+                        if (cards.length > 0) {
+                            cards[cards.length - 1].scrollIntoView();
                         }
                     ''')
                     await asyncio.sleep(2)

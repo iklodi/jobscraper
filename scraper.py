@@ -90,6 +90,9 @@ async def run_scraper():
                             await card.click()
                             await asyncio.sleep(1.5)
                             
+                            card_text = await card.inner_text()
+                            is_promoted = "Promoted" in card_text
+                            
                             title_elem = await card.query_selector('.job-card-list__title')
                             title = await title_elem.inner_text() if title_elem else "Unknown Title"
                             
@@ -106,7 +109,7 @@ async def run_scraper():
                             description = await desc_elem.inner_text() if desc_elem else ""
                             
                             if job_id and title and description:
-                                added = db.add_job(job_id, title.strip(), company.strip(), job_location.strip(), description.strip(), link)
+                                added = db.add_job(job_id, title.strip(), company.strip(), job_location.strip(), description.strip(), link, is_promoted)
                                 if added:
                                     new_jobs_count += 1
                                     print(f"Added new job: {title} at {company}")

@@ -33,7 +33,7 @@ def get_gemini_client():
         raise ValueError("Please set the GEMINI_API_KEY environment variable.")
     return genai.Client(api_key=api_key)
 
-def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text):
+def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text, is_promoted):
     prompt = f"""
     You are an expert tech recruiter and career advisor.
     I want you to evaluate the following job posting against my CV.
@@ -43,10 +43,12 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     
     Job Title: {job_title}
     Company: {job_company}
+    Is Promoted Job: {is_promoted}
     Job Description:
     {job_desc}
     
     Evaluate the fit on a scale of 1 to 10 (10 being a perfect match).
+    NOTE: If "Is Promoted Job" is True, be slightly more critical of the match, as promoted jobs often have lower organic relevance.
     
     {rules_text}
     
@@ -107,10 +109,10 @@ def run_evaluation():
     rules_text = get_evaluation_rules()
 
     for job in unscored_jobs:
-        job_id, title, company, description = job
-        print(f"Evaluating: {title} at {company}...")
+        job_id, title, company, description, is_promoted = job
+        print(f"Evaluating: {title} at {company} (Promoted: {is_promoted})...")
         
-        result = evaluate_job(client, title, company, description, cv_text, previous_applications, rules_text)
+        result = evaluate_job(client, title, company, description, cv_text, previous_applications, rules_text, is_promoted)
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')

@@ -20,20 +20,25 @@ def init_db():
             score INTEGER,
             reasoning TEXT,
             status TEXT,
-            created_at TIMESTAMP
+            created_at TIMESTAMP,
+            is_promoted BOOLEAN DEFAULT 0
         )
     ''')
+    try:
+        cursor.execute('ALTER TABLE jobs ADD COLUMN is_promoted BOOLEAN DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass # Column already exists
     conn.commit()
     conn.close()
 
-def add_job(job_id, title, company, location, description, link):
+def add_job(job_id, title, company, location, description, link, is_promoted=False):
     conn = get_connection()
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO jobs (job_id, title, company, location, description, link, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'new', ?)
-        ''', (job_id, title, company, location, description, link, datetime.datetime.now()))
+            INSERT INTO jobs (job_id, title, company, location, description, link, status, created_at, is_promoted)
+            VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?)
+        ''', (job_id, title, company, location, description, link, datetime.datetime.now(), is_promoted))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -45,7 +50,7 @@ def add_job(job_id, title, company, location, description, link):
 def get_unscored_jobs():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT job_id, title, company, description FROM jobs WHERE status = "new"')
+    cursor.execute('SELECT job_id, title, company, description, is_promoted FROM jobs WHERE status = "new"')
     jobs = cursor.fetchall()
     conn.close()
     return jobs

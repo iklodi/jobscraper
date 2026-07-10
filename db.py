@@ -1,5 +1,8 @@
 import sqlite3
 import datetime
+import os
+
+MIN_PASS_SCORE = int(os.environ.get('MIN_PASS_SCORE', 9))
 
 DB_FILE = 'jobs.db'
 
@@ -74,7 +77,7 @@ def update_job_score(job_id, score, reasoning):
     conn = get_connection()
     cursor = conn.cursor()
     status = 'scored'
-    if score >= 9:
+    if score >= MIN_PASS_SCORE:
         status = 'to_apply'
     cursor.execute('''
         UPDATE jobs 

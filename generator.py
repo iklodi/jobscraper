@@ -1,7 +1,9 @@
 import db
 import os
+import json
 import datetime
 from docx import Document
+from docx.shared import Pt
 from docx2pdf import convert
 from google import genai
 from google.genai import types
@@ -75,20 +77,57 @@ def adapt_cv(base_cv_path, new_cv_path, summary_text):
             break
     doc.save(new_cv_path)
 
+def delete_paragraph(paragraph):
+    p = paragraph._element
+    p.getparent().remove(p)
+    paragraph._p = paragraph._element = None
+
 def adapt_cl(base_cl_path, new_cl_path, body_text):
     doc = Document(base_cl_path)
-    # Replace the main body of the cover letter
-    replaced = False
-    for p in doc.paragraphs:
-        if len(p.text) > 50 and not replaced:
-            if p.runs:
-                p.runs[0].text = body_text
-                for r in p.runs[1:]:
-                    r.text = ""
-            else:
-                p.text = body_text
-            replaced = True
+    
+    start_idx = -1
+    for i, p in enumerate(doc.paragraphs):
+        if p.text.strip().lower().startswith("dear "):
+            start_idx = i
             break
+            
+    if start_idx != -1:
+        # Find the reference paragraph for styling (the first actual body paragraph)
+        ref_p = doc.paragraphs[start_idx]
+        for i in range(start_idx, len(doc.paragraphs)):
+            if len(doc.paragraphs[i].text) > 50:
+                ref_p = doc.paragraphs[i]
+                break
+                
+        style = ref_p.style
+        alignment = ref_p.alignment
+        font_name = "Verdana"
+        font_size = None
+        if ref_p.runs:
+            if ref_p.runs[0].font.name:
+                font_name = ref_p.runs[0].font.name
+            if ref_p.runs[0].font.size:
+                font_size = ref_p.runs[0].font.size
+        
+        # Delete old letter body
+        paragraphs_to_delete = doc.paragraphs[start_idx:]
+        for p in paragraphs_to_delete:
+            delete_paragraph(p)
+            
+        # Append new tailored letter body
+        for text_block in body_text.split('\n'):
+            text_block = text_block.strip()
+            if not text_block:
+                doc.add_paragraph()
+                continue
+            new_p = doc.add_paragraph(style=style)
+            if alignment is not None:
+                new_p.alignment = alignment
+            run = new_p.add_run(text_block)
+            run.font.name = font_name
+            if font_size:
+                run.font.size = font_size
+
     doc.save(new_cl_path)
 
 async def run_generator():

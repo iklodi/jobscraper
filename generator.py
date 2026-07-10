@@ -4,7 +4,7 @@ import json
 import datetime
 from docx import Document
 from docx.shared import Pt
-from docx2pdf import convert
+import subprocess
 from google import genai
 from google.genai import types
 from playwright.async_api import async_playwright
@@ -130,6 +130,16 @@ def adapt_cl(base_cl_path, new_cl_path, body_text):
 
     doc.save(new_cl_path)
 
+def convert_to_pdf_libreoffice(docx_path):
+    pdf_dir = os.path.dirname(docx_path)
+    subprocess.run([
+        '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+        '--headless',
+        '--convert-to', 'pdf',
+        '--outdir', pdf_dir,
+        docx_path
+    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 async def run_generator():
     conn = db.get_connection()
     cursor = conn.cursor()
@@ -176,10 +186,10 @@ async def run_generator():
         # Convert to PDF
         print(f"Converting DOCX to PDF for {company}...")
         try:
-            convert(new_cv_docx, new_cv_docx.replace('.docx', '.pdf'))
-            convert(new_cl_docx, new_cl_docx.replace('.docx', '.pdf'))
+            convert_to_pdf_libreoffice(new_cv_docx)
+            convert_to_pdf_libreoffice(new_cl_docx)
         except Exception as e:
-            print(f"PDF conversion failed (requires MS Word on Mac): {e}")
+            print(f"PDF conversion failed: {e}")
             
         # Save Job Description as PDF using Playwright
         print(f"Saving JD as PDF for {company}...")

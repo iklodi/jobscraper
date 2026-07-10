@@ -1,0 +1,108 @@
+import db
+import os
+import json
+from google import genai
+from google.genai import types
+from docx import Document
+
+# Configuration
+CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
+MODEL_NAME = 'gemini-2.5-pro' # Or gemini-1.5-pro
+
+def extract_text_from_docx(file_path):
+    doc = Document(file_path)
+    return "\n".join([p.text for p in doc.paragraphs])
+
+def get_gemini_client():
+    # Make sure GEMINI_API_KEY is set in your environment variables
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("Please set the GEMINI_API_KEY environment variable.")
+    return genai.Client(api_key=api_key)
+
+def evaluate_job(client, job_title, job_company, job_desc, cv_text):
+    prompt = f"""
+    You are an expert tech recruiter and career advisor.
+    I want you to evaluate the following job posting against my CV.
+    
+    My CV:
+    {cv_text}
+    
+    Job Title: {job_title}
+    Company: {job_company}
+    Job Description:
+    {job_desc}
+    
+    Evaluate the fit on a scale of 1 to 10 (10 being a perfect match).
+    
+    CRITICAL LOCATION RULES (If these are not met, the score MUST be 1 or 2):
+    1. On-site jobs MUST be in Vaud or Valais (Switzerland).
+    2. Hybrid jobs MUST be in Switzerland (max 2 days onsite if not near Bex).
+    3. Remote jobs can be worldwide, but MUST be from renowned international companies (e.g. UK, US, UAE, Norway) paying Switzerland-comparable salaries.
+    4. Traveling is acceptable and considered a plus or neutral.
+    
+    Provide a brief reasoning, and list any key missing skills.
+    
+    Your response must be valid JSON in the following format:
+    {{
+        "score": 8,
+        "reasoning": "Strong match with enterprise architecture experience...",
+        "missing_skills": ["AWS", "Kubernetes"]
+    }}
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
+        )
+        # Parse the JSON response
+        result = json.loads(response.text)
+        return result
+    except Exception as e:
+        print(f"Error evaluating job: {e}")
+        return None
+
+def run_evaluation():
+    db.init_db()
+    unscored_jobs = db.get_unscored_jobs()
+    
+    if not unscored_jobs:
+        print("No unscored jobs found.")
+        return
+    
+    print(f"Found {len(unscored_jobs)} jobs to evaluate.")
+    
+    try:
+        client = get_gemini_client()
+    except Exception as e:
+        print(e)
+        return
+
+    print("Extracting CV text...")
+    try:
+        cv_text = extract_text_from_docx(CV_PATH)
+    except Exception as e:
+        print(f"Error reading CV: {e}")
+        return
+
+    for job in unscored_jobs:
+        job_id, title, company, description = job
+        print(f"Evaluating: {title} at {company}...")
+        
+        result = evaluate_job(client, title, company, description, cv_text)
+        if result:
+            score = result.get('score', 0)
+            reasoning = result.get('reasoning', '')
+            print(f"--> Score: {score}/10")
+            
+            # Save to DB
+            db.update_job_score(job_id, score, reasoning)
+        else:
+            print(f"--> Failed to evaluate.")
+
+if __name__ == '__main__':
+    run_evaluation()

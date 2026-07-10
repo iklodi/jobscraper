@@ -1,0 +1,7 @@
+venv/
+chrome_profile/
+__pycache__/
+jobs.db
+*.pyc
+.env
+applications/

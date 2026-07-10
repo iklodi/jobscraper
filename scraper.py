@@ -97,7 +97,7 @@ async def run_scraper():
                         job_id = await card.get_attribute('data-job-id')
                         link = f"https://www.linkedin.com/jobs/view/{job_id}/" if job_id else ""
                         
-                        desc_elem = await page.query_selector('.jobs-description-content__text')
+                        desc_elem = await page.query_selector('#job-details')
                         description = await desc_elem.inner_text() if desc_elem else ""
                         
                         if job_id and title and description:

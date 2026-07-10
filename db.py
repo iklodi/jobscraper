@@ -21,13 +21,20 @@ def init_db():
             reasoning TEXT,
             status TEXT,
             created_at TIMESTAMP,
-            is_promoted BOOLEAN DEFAULT 0
+            is_promoted BOOLEAN DEFAULT 0,
+            issue_number INTEGER,
+            issue_url TEXT
         )
     ''')
     try:
         cursor.execute('ALTER TABLE jobs ADD COLUMN is_promoted BOOLEAN DEFAULT 0')
     except sqlite3.OperationalError:
-        pass # Column already exists
+        pass
+    try:
+        cursor.execute('ALTER TABLE jobs ADD COLUMN issue_number INTEGER')
+        cursor.execute('ALTER TABLE jobs ADD COLUMN issue_url TEXT')
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -76,6 +83,32 @@ def update_job_score(job_id, score, reasoning):
     ''', (score, reasoning, status, job_id))
     conn.commit()
     conn.close()
+
+def update_job_issue(job_id, issue_number, issue_url):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE jobs
+        SET issue_number = ?, issue_url = ?, status = "synced"
+        WHERE job_id = ?
+    ''', (issue_number, issue_url, job_id))
+    conn.commit()
+    conn.close()
+
+def update_job_status(job_id, status):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (status, job_id))
+    conn.commit()
+    conn.close()
+
+def get_all_jobs_with_issues():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT job_id, issue_number FROM jobs WHERE issue_number IS NOT NULL')
+    jobs = cursor.fetchall()
+    conn.close()
+    return jobs
 
 if __name__ == '__main__':
     init_db()

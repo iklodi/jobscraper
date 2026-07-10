@@ -4,6 +4,7 @@ import json
 from google import genai
 from google.genai import types
 from docx import Document
+import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
@@ -67,20 +68,31 @@ def evaluate_job(client, job_title, job_company, job_desc, cv_text, previous_app
     }}
     """
     
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-            ),
-        )
-        # Parse the JSON response
-        result = json.loads(response.text)
-        return result
-    except Exception as e:
-        print(f"Error evaluating job: {e}")
-        return None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                ),
+            )
+            # Parse the JSON response
+            result = json.loads(response.text)
+            return result
+        except Exception as e:
+            error_str = str(e)
+            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str:
+                delay = 10 * (attempt + 1)
+                print(f"Rate limited (429 RESOURCE_EXHAUSTED). Retrying in {delay} seconds...")
+                time.sleep(delay)
+            else:
+                print(f"Error evaluating job: {e}")
+                return None
+                
+    print("Max retries exceeded for evaluating job.")
+    return None
 
 def run_evaluation():
     db.init_db()
@@ -122,6 +134,9 @@ def run_evaluation():
             db.update_job_score(job_id, score, reasoning)
         else:
             print(f"--> Failed to evaluate.")
+            
+        # Rate limit to avoid 429 errors (Gemini Free Tier is 15 RPM)
+        time.sleep(4)
 
 if __name__ == '__main__':
     run_evaluation()

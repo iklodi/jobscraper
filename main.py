@@ -36,7 +36,7 @@ async def main():
     generate_dashboard()
 
     print("\n=== Step 6: Syncing working data to cvs repo ===")
-    os.system('cd /path/to/cvs && git add . && git commit -m "Auto-update: JDs, generated applications, and dashboard" && git push')
+    os.system('cd /path/to/cvs && git pull --rebase origin main && git add . && git commit -m "Auto-update: JDs, generated applications, and dashboard" && git push')
 
     print("\n=== Pipeline Complete ===")
 

@@ -8,7 +8,7 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-MODEL_NAME = 'gemini-2.5-flash' # Switching to new model to reset daily quota limits
+MODEL_NAME = 'gemini-3.5-flash' # Switching to new model to reset daily quota limits
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)

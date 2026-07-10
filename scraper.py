@@ -6,17 +6,36 @@ import os
 
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
-SEARCH_KEYWORDS_LIST = [
-    "Enterprise Architect",
-    "Solutions Architect",
-    "Technology Strategy",
-    "Digital Transformation",
-    "AI Manager",
-    "Technical Program Manager",
-    "Head of IT",
-    "Innovation Manager"
-]
-SEARCH_LOCATIONS = ["Switzerland", "Worldwide"]
+def get_search_criteria():
+    criteria_path = '/path/to/cvs/search_criteria.md'
+    keywords = []
+    locations = []
+    if not os.path.exists(criteria_path):
+        return ["Enterprise Architect"], ["Switzerland"]
+        
+    with open(criteria_path, 'r') as f:
+        lines = f.readlines()
+        
+    current_section = None
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith('# Search Keywords'):
+            current_section = 'keywords'
+        elif line.startswith('# Search Locations'):
+            current_section = 'locations'
+        elif line.startswith('- ') and current_section == 'keywords':
+            keywords.append(line[2:].strip())
+        elif line.startswith('- ') and current_section == 'locations':
+            locations.append(line[2:].strip())
+            
+    if not keywords:
+        keywords = ["Enterprise Architect"]
+    if not locations:
+        locations = ["Switzerland"]
+        
+    return keywords, locations
 
 async def run_scraper():
     db.init_db()
@@ -48,8 +67,10 @@ async def run_scraper():
             await page.wait_for_url('**/feed/**', timeout=300000) 
             print("Successfully logged in!")
 
-        for keyword in SEARCH_KEYWORDS_LIST:
-            for location in SEARCH_LOCATIONS:
+        keywords_list, locations_list = get_search_criteria()
+
+        for keyword in keywords_list:
+            for location in locations_list:
                 for page_num in range(3): # Scrape up to 3 pages (75 jobs) per keyword/location combo
                     start = page_num * 25
                     query = urllib.parse.urlencode({'keywords': keyword, 'location': location, 'start': start})

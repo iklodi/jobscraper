@@ -9,10 +9,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import sys
+
 async def main():
-    print("=== Step 1: Scraping LinkedIn Jobs ===")
-    # Note: Make sure headless=True in scraper.py after initial login
-    await run_scraper()
+    skip_scrape = '--no-scrape' in sys.argv
+    
+    if not skip_scrape:
+        print("=== Step 1: Scraping LinkedIn Jobs ===")
+        # Note: Make sure headless=True in scraper.py after initial login
+        await run_scraper()
+    else:
+        print("=== Step 1: Scraping Skipped (--no-scrape flag used) ===")
     
     print("\n=== Step 2: Evaluating Jobs with Gemini ===")
     if not os.environ.get("GEMINI_API_KEY"):

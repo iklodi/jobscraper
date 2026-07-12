@@ -17,10 +17,12 @@ def extract_text_from_docx(file_path):
     return "\n".join([p.text for p in doc.paragraphs])
 
 def get_previous_applications():
-    job_dir = '/path/to/cvs/jobs'
-    if not os.path.exists(job_dir):
-        return []
-    return [f for f in os.listdir(job_dir) if not f.startswith('.')]
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT company, title FROM jobs WHERE status IN ("applied", "interviewing", "offer", "rejected")')
+    rows = cursor.fetchall()
+    conn.close()
+    return [f"{company} - {title}" for company, title in rows]
 
 def get_evaluation_rules():
     rules_path = '/path/to/cvs/rules.md'

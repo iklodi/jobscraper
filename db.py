@@ -60,7 +60,7 @@ def add_job(job_id, title, company, location, description, link, is_promoted=Fal
 def get_unscored_jobs():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT job_id, title, company, description, is_promoted FROM jobs WHERE status = "new"')
+    cursor.execute('SELECT job_id, title, company, location, description, is_promoted FROM jobs WHERE status = "new"')
     jobs = cursor.fetchall()
     conn.close()
     return jobs

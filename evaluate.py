@@ -43,7 +43,7 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
-def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, cv_text, previous_applications, rules_text, is_promoted):
+def evaluate_job(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted):
     prompt = f"""
     You are an expert tech recruiter and career advisor.
     I want you to evaluate the following job posting against my CV.
@@ -53,6 +53,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, c
     
     Job Title: {job_title}
     Company: {job_company}
+    Location: {job_location}
     Is Promoted Job: {is_promoted}
     Job Description:
     {job_desc}
@@ -157,13 +158,13 @@ def run_evaluation():
     rules_text = get_evaluation_rules()
 
     for job in unscored_jobs:
-        job_id, title, company, description, is_promoted = job
-        print(f"Evaluating: {title} at {company} (Promoted: {is_promoted})...")
+        job_id, title, company, location, description, is_promoted = job
+        print(f"Evaluating: {title} at {company} ({location}) (Promoted: {is_promoted})...")
         
         result = evaluate_job(
             groq_client,
             gemini_client,
-            title, company, description, cv_text, previous_applications, rules_text, is_promoted)
+            title, company, location, description, cv_text, previous_applications, rules_text, is_promoted)
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')

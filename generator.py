@@ -14,7 +14,7 @@ CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
 OUTPUT_DIR = '/path/to/cvs/applications'
 GROQ_MODEL = 'llama-3.3-70b-versatile'
-GEMINI_MODEL = 'gemini-3-flash-preview'
+GEMINI_MODEL = 'gemini-3.5-flash'
 
 def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
@@ -60,20 +60,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
         result = None
         error_msg = ""
         
-        if groq_client:
-            try:
-                response = groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.1
-                )
-                import json
-                result = json.loads(response.choices[0].message.content)
-            except Exception as e:
-                error_msg += f"Groq Error: {str(e)} | "
-                
-        if not result and gemini_client:
+        if gemini_client:
             try:
                 response = gemini_client.models.generate_content(
                     model=GEMINI_MODEL,
@@ -85,16 +72,31 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
                 import json
                 result = json.loads(response.text)
             except Exception as e:
-                error_msg += f"Gemini Error: {str(e)}"
+                error_msg += f"Gemini Error: {str(e)} | "
+                
+        if not result and groq_client:
+            try:
+                response = groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.1
+                )
+                import json
+                result = json.loads(response.choices[0].message.content)
+            except Exception as e:
+                error_msg += f"Groq Error: {str(e)}"
                 
         if result:
             break
             
         if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
-            print("Rate limit reached. Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
+            print(f"API Rate Limit Block: {error_msg}")
+            print("Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
             import time
             time.sleep(32)
         elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
+            print(f"API overload detected: {error_msg}")
             import time
             time.sleep(10)
         else:

@@ -10,7 +10,7 @@ import time
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 GROQ_MODEL = 'llama-3.3-70b-versatile'
-GEMINI_MODEL = 'gemini-3-flash-preview'
+GEMINI_MODEL = 'gemini-3.5-flash'
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -79,20 +79,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, c
     delay = 10
     for attempt in range(max_retries):
         error_msg = ""
-        # Try Groq First
-        if groq_client:
-            try:
-                response = groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.1
-                )
-                return json.loads(response.choices[0].message.content)
-            except Exception as e:
-                error_msg += f"Groq Error: {str(e)} | "
-        
-        # Fallback to Gemini
+        # Try Gemini First (Paid Tier)
         if gemini_client:
             try:
                 response = gemini_client.models.generate_content(
@@ -104,7 +91,20 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, c
                 )
                 return json.loads(response.text)
             except Exception as e:
-                error_msg += f"Gemini Error: {str(e)}"
+                error_msg += f"Gemini Error: {str(e)} | "
+        
+        # Fallback to Groq
+        if groq_client:
+            try:
+                response = groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object"},
+                    temperature=0.1
+                )
+                return json.loads(response.choices[0].message.content)
+            except Exception as e:
+                error_msg += f"Groq Error: {str(e)}"
         
         if not groq_client and not gemini_client:
             print("Error: Neither GROQ_API_KEY nor GEMINI_API_KEY are configured.")
@@ -112,10 +112,12 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_desc, c
             
         # If both failed, check if it's a rate limit / overload
         if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
-            print("Rate limit reached. Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
+            print(f"API Rate Limit Block: {error_msg}")
+            print("Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
             time.sleep(32)
         elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
-            print(f"API overload detected. Retrying in {delay} seconds...")
+            print(f"API overload detected: {error_msg}")
+            print(f"Retrying in {delay} seconds...")
             time.sleep(delay)
             delay *= 2
         else:

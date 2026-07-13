@@ -30,7 +30,7 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text):
-    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter = job
     
     prompt = f"""
     You are an expert career advisor. I am applying for the '{title}' role at '{company}'.
@@ -320,7 +320,7 @@ async def run_generator():
     
     total_jobs = len(jobs)
     for idx, job in enumerate(jobs, 1):
-        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
+        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter = job
         print(f"[{idx}/{total_jobs}] Generating documents for {company}: {title}...")
         try:
             texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text)

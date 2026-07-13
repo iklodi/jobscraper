@@ -210,9 +210,10 @@ def run_evaluation():
     previous_applications = get_previous_applications()
     rules_text = get_evaluation_rules()
 
-    for job in unscored_jobs:
+    total_jobs = len(unscored_jobs)
+    for idx, job in enumerate(unscored_jobs, 1):
         job_id, title, company, location, description, is_promoted = job
-        print(f"Evaluating: {title} at {company} ({location}) (Promoted: {is_promoted})...")
+        print(f"[{idx}/{total_jobs}] Evaluating: {title} at {company} ({location}) (Promoted: {is_promoted})...")
         
         result = evaluate_job(
             groq_client,

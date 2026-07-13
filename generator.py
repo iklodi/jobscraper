@@ -318,9 +318,10 @@ async def run_generator():
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    for job in jobs:
+    total_jobs = len(jobs)
+    for idx, job in enumerate(jobs, 1):
         job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
-        print(f"Generating documents for {company}: {title}...")
+        print(f"[{idx}/{total_jobs}] Generating documents for {company}: {title}...")
         try:
             texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text)
         except Exception as e:

@@ -50,6 +50,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - You may freely pull specific achievements and details from the Career Dossier to replace or rewrite bullet points in the CV to perfectly match the JD requirements and tone, but keep it concise.
     - Remove 2-3 completely irrelevant bullet points to ensure the CV strict 2-page limit is preserved.
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
+    - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
     
     Task 3: Write a tailored, compelling cover letter (max 150-200 words) addressed to the hiring manager at {company}.
     

@@ -11,6 +11,7 @@ from google.genai import types
 from playwright.async_api import async_playwright
 
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
+DOSSIER_PATH = '/path/to/cvs/docs/Career_Dossier.md'
 CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
 OUTPUT_DIR = '/path/to/cvs/applications'
 GROQ_MODEL = 'llama-3.3-70b-versatile'
@@ -28,7 +29,7 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
-def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
+def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text):
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
     
     prompt = f"""
@@ -36,12 +37,16 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
     Here is the job description:
     {description}
     
-    Here is my current CV:
+    Here is my current Base CV (the one being customized):
     {cv_text}
     
+    Here is my full Career Dossier (containing all deep historical details of my career):
+    {dossier_text}
+    
     Task 1: Write a tailored 3-4 sentence professional summary for my CV that specifically highlights my fit for this role.
-    Task 2: Customize my CV bullet points and skills. You must output EXACT text from my CV that you want to replace or remove. 
+    Task 2: Customize my CV bullet points and skills. You must output EXACT text from my Base CV that you want to replace or remove. 
     - Replace irrelevant bullet points or skills with customized ones.
+    - You may freely pull specific achievements and details from the Career Dossier to replace or rewrite bullet points in the CV to perfectly match the JD requirements and tone, but keep it concise.
     - Remove 2-3 completely irrelevant bullet points to ensure the CV strict 2-page limit is preserved.
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
     
@@ -271,13 +276,21 @@ async def run_generator():
         return
     cv_text = extract_text(CV_PATH)
     
+    print("Loading Career Dossier...")
+    try:
+        with open(DOSSIER_PATH, 'r', encoding='utf-8') as f:
+            dossier_text = f.read()
+    except Exception as e:
+        print(f"Error reading Career Dossier: {e}")
+        return
+    
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     for job in jobs:
         job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url = job
         print(f"Generating documents for {company}: {title}...")
         try:
-            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text)
+            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text)
         except Exception as e:
             print(f"Error generating texts for job {job_id}: {e}")
             continue

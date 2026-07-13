@@ -8,9 +8,9 @@ from docx import Document
 import time
 
 # Configuration
-CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
+DOSSIER_PATH = '/path/to/cvs/docs/Career_Dossier.md'
 GEMINI_MODELS = [
-    'gemini-3.1-pro-preview',
+#    'gemini-3.1-pro-preview',
     'gemini-3.5-flash',
     'gemini-3-flash-preview',
     'gemini-2.5-flash'
@@ -20,9 +20,6 @@ GROQ_MODELS = [
     'llama-3.1-8b-instant'
 ]
 
-def extract_text_from_docx(file_path):
-    doc = Document(file_path)
-    return "\n".join([p.text for p in doc.paragraphs])
 
 def get_previous_applications():
     conn = db.get_connection()
@@ -195,11 +192,12 @@ def run_evaluation():
         print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
         return
 
-    print("Extracting CV text...")
+    print("Loading Career Dossier...")
     try:
-        cv_text = extract_text_from_docx(CV_PATH)
+        with open(DOSSIER_PATH, 'r', encoding='utf-8') as f:
+            cv_text = f.read()
     except Exception as e:
-        print(f"Error reading CV: {e}")
+        print(f"Error reading Career Dossier: {e}")
         return
 
     previous_applications = get_previous_applications()

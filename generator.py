@@ -157,12 +157,37 @@ def adapt_cv(base_cv_path, new_cv_path, texts):
             continue
             
         # 3. Check Replacements
-        for rep in replacements:
+        for rep in list(replacements):
             old_val = rep.get('old', '').strip()
             new_val = rep.get('new', '')
             if old_val and new_val and old_val in p_text:
-                replace_text_in_paragraph(p, old_val, new_val)
-                break
+                import re
+                # Use regex with word boundaries to prevent partial word replacements like "Architect" replacing inside "Architecture"
+                # If old_val contains special characters, re.escape handles them.
+                pattern = r'\b' + re.escape(old_val) + r'\b'
+                if re.search(pattern, p.text):
+                    full_text = re.sub(pattern, new_val, p.text)
+                    font_name = "Verdana"
+                    font_size = None
+                    if p.runs:
+                        if p.runs[0].font.name:
+                            font_name = p.runs[0].font.name
+                        if p.runs[0].font.size:
+                            font_size = p.runs[0].font.size
+                            
+                    p.clear()
+                    run = p.add_run(full_text)
+                    run.font.name = font_name
+                    if font_size:
+                        run.font.size = font_size
+                    
+                    replacements.remove(rep)
+                    break
+                elif old_val == p_text:
+                    # Fallback for exact matches where word boundaries might fail (e.g. symbols)
+                    replace_text_in_paragraph(p, old_val, new_val)
+                    replacements.remove(rep)
+                    break
                 
     doc.save(new_cv_path)
 

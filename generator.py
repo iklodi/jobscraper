@@ -48,7 +48,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - Replace irrelevant bullet points or skills with customized ones.
     - Customize the main CV title (e.g. "Enterprise Architect") to match the target role if appropriate.
     - You may freely pull specific achievements and details from the Career Dossier to replace or rewrite bullet points in the CV to perfectly match the JD requirements and tone, but keep it concise.
-    - Remove 2-3 completely irrelevant bullet points to ensure the CV strict 2-page limit is preserved.
+    - Ensure you maintain the exact same length as the original CV. For every bullet point you replace or expand, ensure the overall document length does not grow to strictly preserve the 2-page limit.
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
     - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
     

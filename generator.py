@@ -40,7 +40,12 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
     {cv_text}
     
     Task 1: Write a tailored 3-4 sentence professional summary for my CV that specifically highlights my fit for this role.
-    Task 2: Write a tailored, compelling cover letter (around 250 words) addressed to the hiring manager at {company}.
+    Task 2: Customize my CV bullet points and skills. You must output EXACT text from my CV that you want to replace or remove. 
+    - Replace irrelevant bullet points or skills with customized ones.
+    - Remove 2-3 completely irrelevant bullet points to ensure the CV strict 2-page limit is preserved.
+    - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
+    
+    Task 3: Write a tailored, compelling cover letter (max 150-200 words) addressed to the hiring manager at {company}.
     
     CRITICAL TONE INSTRUCTIONS:
     - Write in a highly professional, direct, and human tone.
@@ -51,6 +56,12 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text):
     Your response must be valid JSON in this format:
     {{
         "cv_summary": "...",
+        "cv_replacements": [
+            {{"old": "exact old text to replace", "new": "customized new text"}}
+        ],
+        "cv_removals": [
+            "exact old text to remove entirely"
+        ],
         "cover_letter_body": "..."
     }}
     """
@@ -111,22 +122,42 @@ def extract_text(file_path):
     doc = Document(file_path)
     return "\n".join([p.text for p in doc.paragraphs])
 
-def adapt_cv(base_cv_path, new_cv_path, summary_text):
+def adapt_cv(base_cv_path, new_cv_path, texts):
     doc = Document(base_cv_path)
-    # Very simplistic replacement: we find the first paragraph that looks like a summary
-    # and replace its text. In a real scenario, we might use placeholder tags like {{SUMMARY}}
-    replaced = False
+    summary_text = texts.get('cv_summary', '')
+    replacements = texts.get('cv_replacements', [])
+    removals = texts.get('cv_removals', [])
+    
+    replaced_summary = False
     for p in doc.paragraphs:
-        if len(p.text) > 100 and not replaced:
-            # Assume the first long paragraph is the summary
+        p_text = p.text.strip()
+        if not p_text:
+            continue
+            
+        # 1. Replace Summary
+        if len(p_text) > 100 and not replaced_summary:
             if p.runs:
                 p.runs[0].text = summary_text
                 for r in p.runs[1:]:
                     r.text = ""
             else:
                 p.text = summary_text
-            replaced = True
-            break
+            replaced_summary = True
+            continue
+            
+        # 2. Check Removals
+        if any(rem.strip() and rem.strip() in p_text for rem in removals):
+            delete_paragraph(p)
+            continue
+            
+        # 3. Check Replacements
+        for rep in replacements:
+            old_val = rep.get('old', '').strip()
+            new_val = rep.get('new', '')
+            if old_val and new_val and old_val in p_text:
+                replace_text_in_paragraph(p, old_val, new_val)
+                break
+                
     doc.save(new_cv_path)
 
 def delete_paragraph(paragraph):
@@ -161,15 +192,18 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location):
             break
             
     if start_idx != -1:
+        import re
+        location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
+        
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
         for p in doc.paragraphs[:start_idx]:
             replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
             replace_text_in_paragraph(p, "Ernst & Young", company)
-            replace_text_in_paragraph(p, "Zurich, Switzerland", location)
+            replace_text_in_paragraph(p, "Zurich, Switzerland", location_clean)
             replace_text_in_paragraph(p, "10.04.2026", today_str)
             replace_text_in_paragraph(p, "[COMPANY]", company)
-            replace_text_in_paragraph(p, "[LOCATION]", location)
+            replace_text_in_paragraph(p, "[LOCATION]", location_clean)
             replace_text_in_paragraph(p, "[DATE]", today_str)
 
         # Find the reference paragraph for styling (the first actual body paragraph)
@@ -198,7 +232,6 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location):
         for text_block in body_text.split('\n'):
             text_block = text_block.strip()
             if not text_block:
-                doc.add_paragraph()
                 continue
             new_p = doc.add_paragraph(style=style)
             if alignment is not None:
@@ -260,7 +293,7 @@ async def run_generator():
         new_cl_md = os.path.join(job_dir, f"{today}_{safe_company}_CoverLetter.md")
         
         # Adapt DOCX files
-        adapt_cv(CV_PATH, new_cv_docx, texts['cv_summary'])
+        adapt_cv(CV_PATH, new_cv_docx, texts)
         adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, location)
         
         # Save MD format

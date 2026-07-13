@@ -53,11 +53,16 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     
     Task 3: Write a tailored, compelling cover letter (max 150-200 words) addressed to the hiring manager at {company}.
     
-    CRITICAL TONE INSTRUCTIONS:
+    CRITICAL TONE INSTRUCTIONS (COVER LETTER):
     - Write in a highly professional, direct, and human tone.
     - DO NOT use long dashes (em-dashes "—" or en-dashes "–"). Use commas, semicolons, or regular parentheses instead.
     - STRICTLY AVOID typical AI clichés and buzzwords (e.g., "delve", "tapestry", "testament", "beacon", "catalyst", "unleash", "elevate", "thrilled to apply", "embark", "spearhead", "pivotal").
     - Keep sentences concise, factual, and impactful. Do not overcomplicate the sentence structure.
+    
+    CRITICAL TONE INSTRUCTIONS (CV BULLET POINTS):
+    - NEVER use "I" or first-person structures (e.g. avoid "I coordinate with teams").
+    - For Responsibilities: Use structures without verbs at all (e.g. "Strategic advisory and enterprise architecture leadership for global enterprise accounts") OR use base imperative verbs (e.g. "Drive global demand generation"). NEVER use "-ing" structures.
+    - For Achievements: ALWAYS use simple past tense (e.g. "Acted as trusted advisor bridging technical architecture and business strategy").
     
     Your response must be valid JSON in this format:
     {{

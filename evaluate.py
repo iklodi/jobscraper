@@ -11,7 +11,6 @@ import time
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 GEMINI_MODELS = [
     'gemini-3.1-pro-preview',
-    'gemini-3-pro-preview',
     'gemini-3.5-flash',
     'gemini-3-flash-preview',
     'gemini-2.5-flash'
@@ -102,7 +101,22 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                             response_mime_type="application/json",
                         ),
                     )
-                    return json.loads(response.text)
+                    
+                    text = response.text.strip()
+                    if text.startswith('```json'):
+                        text = text[7:]
+                    elif text.startswith('```'):
+                        text = text[3:]
+                    if text.endswith('```'):
+                        text = text[:-3]
+                    
+                    # Safety catch to only parse what's inside the braces
+                    start = text.find('{')
+                    end = text.rfind('}')
+                    if start != -1 and end != -1:
+                        text = text[start:end+1]
+                        
+                    return json.loads(text)
                 except Exception as e:
                     error_str = str(e).lower()
                     if '429' in error_str or 'resource_exhausted' in error_str or 'quota' in error_str:
@@ -125,7 +139,21 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                         response_format={"type": "json_object"},
                         temperature=0.1
                     )
-                    return json.loads(response.choices[0].message.content)
+                    
+                    text = response.choices[0].message.content.strip()
+                    if text.startswith('```json'):
+                        text = text[7:]
+                    elif text.startswith('```'):
+                        text = text[3:]
+                    if text.endswith('```'):
+                        text = text[:-3]
+                        
+                    start = text.find('{')
+                    end = text.rfind('}')
+                    if start != -1 and end != -1:
+                        text = text[start:end+1]
+                        
+                    return json.loads(text)
                 except Exception as e:
                     error_str = str(e).lower()
                     if '429' in error_str or 'rate_limit' in error_str:

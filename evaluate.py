@@ -9,8 +9,17 @@ import time
 
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-GROQ_MODEL = 'llama-3.3-70b-versatile'
-GEMINI_MODEL = 'gemini-3.5-flash'
+GEMINI_MODELS = [
+    'gemini-3.1-pro',
+    'gemini-2.5-pro',
+    'gemini-3.5-flash',
+    'gemini-3-flash',
+    'gemini-2.5-flash'
+]
+GROQ_MODELS = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant'
+]
 
 def extract_text_from_docx(file_path):
     doc = Document(file_path)
@@ -80,54 +89,65 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     
     max_retries = 5
     delay = 10
+    
     for attempt in range(max_retries):
-        error_msg = ""
-        # Try Gemini First (Paid Tier)
+        # Try all Gemini models in descending order of quality
         if gemini_client:
-            try:
-                response = gemini_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
-                return json.loads(response.text)
-            except Exception as e:
-                error_msg += f"Gemini Error: {str(e)} | "
+            for model_name in GEMINI_MODELS:
+                try:
+                    response = gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    return json.loads(response.text)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if '429' in error_str or 'resource_exhausted' in error_str or 'quota' in error_str:
+                        print(f"  -> Gemini {model_name} rate limited. Cascading to next model...")
+                        continue
+                    elif '503' in error_str or 'unavailable' in error_str:
+                        print(f"  -> Gemini {model_name} overloaded. Cascading to next model...")
+                        continue
+                    else:
+                        print(f"  -> Gemini Error on {model_name}: {e}")
+                        continue
         
-        # Fallback to Groq
+        # Fallback to Groq models
         if groq_client:
-            try:
-                response = groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.1
-                )
-                return json.loads(response.choices[0].message.content)
-            except Exception as e:
-                error_msg += f"Groq Error: {str(e)}"
+            for model_name in GROQ_MODELS:
+                try:
+                    response = groq_client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.1
+                    )
+                    return json.loads(response.choices[0].message.content)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if '429' in error_str or 'rate_limit' in error_str:
+                        print(f"  -> Groq {model_name} rate limited. Cascading...")
+                        continue
+                    elif '503' in error_str:
+                        print(f"  -> Groq {model_name} overloaded. Cascading...")
+                        continue
+                    else:
+                        print(f"  -> Groq Error on {model_name}: {e}")
+                        continue
         
         if not groq_client and not gemini_client:
             print("Error: Neither GROQ_API_KEY nor GEMINI_API_KEY are configured.")
             return None
             
-        # If both failed, check if it's a rate limit / overload
-        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
-            print(f"API Rate Limit Block: {error_msg}")
-            print("Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
-            time.sleep(32)
-        elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
-            print(f"API overload detected: {error_msg}")
-            print(f"Retrying in {delay} seconds...")
-            time.sleep(delay)
-            delay *= 2
-        else:
-            print(f"Error evaluating job: {error_msg}")
-            return None
+        # If we exhausted ALL models in the cascade, we hit a hard wall.
+        print(f"All models exhausted. Sleeping for {delay} seconds to clear quotas before trying again...")
+        time.sleep(delay)
+        delay *= 2
                 
-    print("Max retries exceeded for evaluating job.")
+    print("Max retries exceeded. Could not evaluate job.")
     return None
 
 def run_evaluation():
@@ -175,8 +195,9 @@ def run_evaluation():
         else:
             print(f"--> Failed to evaluate.")
             
-        # Rate limit to avoid 429 errors (Gemini Free Tier is 15 RPM)
-        time.sleep(4.5)
+        # Dynamic Rate limit sleep
+        # We don't want a fixed 4.5s delay if we are using Pro models, but 1.5s should be safe since the cascade handles the rest.
+        time.sleep(1.5)
 
 if __name__ == '__main__':
     run_evaluation()

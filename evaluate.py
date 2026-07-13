@@ -75,11 +75,18 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     
     Provide a brief reasoning, and list any key missing skills.
     
+    If the score you are giving is 8 or higher, you MUST also determine:
+    1. "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR") based on the location, role, and typical market rates. If completely unknown, output "Unknown".
+    2. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
+    If the score is below 8, you may leave these as null.
+    
     Your response must be valid JSON in the following format:
     {{
         "score": 8,
         "reasoning": "Strong match with enterprise architecture experience...",
-        "missing_skills": ["AWS", "Kubernetes"]
+        "missing_skills": ["AWS", "Kubernetes"],
+        "salary_estimate": "130k-160k CHF",
+        "is_recruiter": false
     }}
     """
     
@@ -214,10 +221,14 @@ def run_evaluation():
         if result:
             score = result.get('score', 0)
             reasoning = result.get('reasoning', '')
+            estimated_salary = result.get('salary_estimate', None)
+            is_recruiter = result.get('is_recruiter', None)
             print(f"--> Score: {score}/10")
+            if score >= 8:
+                print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter}")
             
             # Save to DB
-            db.update_job_score(job_id, score, reasoning)
+            db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter)
         else:
             print(f"--> Failed to evaluate.")
             

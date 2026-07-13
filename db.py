@@ -38,6 +38,11 @@ def init_db():
         cursor.execute('ALTER TABLE jobs ADD COLUMN issue_url TEXT')
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute('ALTER TABLE jobs ADD COLUMN estimated_salary TEXT')
+        cursor.execute('ALTER TABLE jobs ADD COLUMN is_recruiter BOOLEAN')
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -73,7 +78,7 @@ def job_exists(job_id):
     conn.close()
     return exists
 
-def update_job_score(job_id, score, reasoning):
+def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None):
     conn = get_connection()
     cursor = conn.cursor()
     status = 'scored'
@@ -81,9 +86,9 @@ def update_job_score(job_id, score, reasoning):
         status = 'to_apply'
     cursor.execute('''
         UPDATE jobs 
-        SET score = ?, reasoning = ?, status = ?
+        SET score = ?, reasoning = ?, status = ?, estimated_salary = ?, is_recruiter = ?
         WHERE job_id = ?
-    ''', (score, reasoning, status, job_id))
+    ''', (score, reasoning, status, estimated_salary, is_recruiter, job_id))
     conn.commit()
     conn.close()
 

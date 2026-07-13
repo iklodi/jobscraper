@@ -10,10 +10,10 @@ import time
 # Configuration
 CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
 GEMINI_MODELS = [
-    'gemini-3.1-pro',
-    'gemini-2.5-pro',
+    'gemini-3.1-pro-preview',
+    'gemini-3-pro-preview',
     'gemini-3.5-flash',
-    'gemini-3-flash',
+    'gemini-3-flash-preview',
     'gemini-2.5-flash'
 ]
 GROQ_MODELS = [

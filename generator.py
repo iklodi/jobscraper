@@ -30,7 +30,10 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text):
-    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter = job
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language = job
+    
+    address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
+    language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}." if jd_language else ""
     
     prompt = f"""
     You are an expert career advisor. I am applying for the '{title}' role at '{company}'.
@@ -52,7 +55,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
     - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
     
-    Task 3: Write a tailored, compelling cover letter (max 150-200 words) addressed to the hiring manager at {company}.
+    Task 3: Write a tailored, compelling cover letter (max 150-200 words) addressed to {address_name} at {company}.
+    {language_instruction}
     
     CRITICAL TONE INSTRUCTIONS (COVER LETTER):
     - Write in a highly professional, direct, and human tone.
@@ -219,7 +223,7 @@ def replace_text_in_paragraph(paragraph, old_text, new_text):
         if font_size:
             run.font.size = font_size
 
-def adapt_cl(base_cl_path, new_cl_path, body_text, company, location):
+def adapt_cl(base_cl_path, new_cl_path, body_text, company, location, hiring_manager_name, jd_language):
     doc = Document(base_cl_path)
     
     start_idx = -1
@@ -230,12 +234,19 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location):
             
     if start_idx != -1:
         import re
-        location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
+        if jd_language and "french" in jd_language.lower():
+            location_clean = "Bex, Suisse"
+        else:
+            location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
         
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
         for p in doc.paragraphs[:start_idx]:
-            replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
+            if hiring_manager_name:
+                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", hiring_manager_name)
+            else:
+                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
+                
             replace_text_in_paragraph(p, "Ernst & Young", company)
             replace_text_in_paragraph(p, "Zurich, Switzerland", location_clean)
             replace_text_in_paragraph(p, "10.04.2026", today_str)
@@ -320,7 +331,7 @@ async def run_generator():
     
     total_jobs = len(jobs)
     for idx, job in enumerate(jobs, 1):
-        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter = job
+        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language = job
         print(f"[{idx}/{total_jobs}] Generating documents for {company}: {title}...")
         try:
             texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text)
@@ -340,7 +351,7 @@ async def run_generator():
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
-        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, location)
+        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, location, hiring_manager_name, jd_language)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

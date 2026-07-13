@@ -78,6 +78,8 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     If the score you are giving is 8 or higher, you MUST also determine:
     1. "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR") based on the location, role, and typical market rates. If completely unknown, output "Unknown".
     2. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
+    3. "hiring_manager_name": The full name of the hiring manager or recruiter, IF it is clearly stated in the job description. If not stated, output null.
+    4. "jd_language": The language the job description is primarily written in (e.g. "English", "French", "German").
     If the score is below 8, you may leave these as null.
     
     Your response must be valid JSON in the following format:
@@ -86,7 +88,9 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
         "reasoning": "Strong match with enterprise architecture experience...",
         "missing_skills": ["AWS", "Kubernetes"],
         "salary_estimate": "130k-160k CHF",
-        "is_recruiter": false
+        "is_recruiter": false,
+        "hiring_manager_name": "Jane Doe",
+        "jd_language": "English"
     }}
     """
     
@@ -224,12 +228,14 @@ def run_evaluation():
             reasoning = result.get('reasoning', '')
             estimated_salary = result.get('salary_estimate', None)
             is_recruiter = result.get('is_recruiter', None)
+            hiring_manager_name = result.get('hiring_manager_name', None)
+            jd_language = result.get('jd_language', None)
             print(f"--> Score: {score}/10")
             if score >= 8:
-                print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter}")
+                print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter} | HM: {hiring_manager_name} | Lang: {jd_language}")
             
             # Save to DB
-            db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter)
+            db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter, hiring_manager_name, jd_language)
         else:
             print(f"--> Failed to evaluate.")
             

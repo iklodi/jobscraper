@@ -58,6 +58,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     Task 3: Write a tailored, compelling cover letter (max 150-200 words). Start with a greeting to {address_name}.
     {language_instruction}
     
+    Task 4: Determine the headquarters city and country of '{company}'. Based on your knowledge of the company or context clues in the JD, output a specific "City, Country" (e.g. "Geneva, Switzerland" or "London, UK"). Do NOT output broad regions like "European Union" or "EMEA". If entirely unknown, just use the country or leave as a plausible major city.
+
     CRITICAL TONE INSTRUCTIONS (COVER LETTER):
     - Write in a highly professional, direct, and human tone.
     - DO NOT use long dashes (em-dashes "—" or en-dashes "–"). Use commas, semicolons, or regular parentheses instead.
@@ -79,7 +81,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
         "cv_removals": [
             "exact old text to remove entirely"
         ],
-        "cover_letter_body": "..."
+        "cover_letter_body": "...",
+        "company_hq": "City, Country"
     }}
     """
     
@@ -352,7 +355,8 @@ async def run_generator():
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
-        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, location, hiring_manager_name, jd_language)
+        company_hq = texts.get('company_hq', location)
+        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, company_hq, hiring_manager_name, jd_language)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

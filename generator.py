@@ -246,11 +246,7 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location, hiring_man
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
         for p in doc.paragraphs[:start_idx]:
-            if hiring_manager_name:
-                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", hiring_manager_name)
-            else:
-                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
-                
+            replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
             replace_text_in_paragraph(p, "Ernst & Young", company)
             replace_text_in_paragraph(p, "Zurich, Switzerland", location_clean)
             replace_text_in_paragraph(p, "10.04.2026", today_str)

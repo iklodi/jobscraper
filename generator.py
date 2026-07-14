@@ -35,15 +35,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
     language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}." if jd_language else ""
     
-    company_context = f"addressed to {address_name} at {company}." if not is_recruiter else f"addressed to {address_name} at the recruiting agency '{company}'."
-    
-    if is_recruiter:
-        company_mention_rule = f"- The job is posted by a recruiter/staffing agency. In the opening, DO NOT say you are applying to work AT '{company}' (since they are just the recruiter). Instead, either use the name of their client company if it's mentioned in the job description, or just mention the role without any company name."
-    else:
-        company_mention_rule = f"- In the opening of the letter, DO NOT mention the company name ('{company}') at all, as it is already obvious from the context. Just mention the role."
-
     prompt = f"""
-    You are an expert career advisor. I am applying for the '{title}' role at '{company}'.
+    You are an expert career advisor. I am applying for the '{title}' role.
     Here is the job description:
     {description}
     
@@ -62,7 +55,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
     - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
     
-    Task 3: Write a tailored, compelling cover letter (max 150-200 words) {company_context}
+    Task 3: Write a tailored, compelling cover letter (max 150-200 words). Start with a greeting to {address_name}.
     {language_instruction}
     
     CRITICAL TONE INSTRUCTIONS (COVER LETTER):
@@ -70,7 +63,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - DO NOT use long dashes (em-dashes "—" or en-dashes "–"). Use commas, semicolons, or regular parentheses instead.
     - STRICTLY AVOID typical AI clichés and buzzwords (e.g., "delve", "tapestry", "testament", "beacon", "catalyst", "unleash", "elevate", "thrilled to apply", "embark", "spearhead", "pivotal").
     - Keep sentences concise, factual, and impactful. Do not overcomplicate the sentence structure.
-    {company_mention_rule}
+    - ABSOLUTELY NEVER mention the company name or recruiter name ('{company}') anywhere in the text of the cover letter. Mention ONLY the role name. No exceptions!
     
     CRITICAL TONE INSTRUCTIONS (CV BULLET POINTS):
     - NEVER use "I" or first-person structures (e.g. avoid "I coordinate with teams").

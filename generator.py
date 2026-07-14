@@ -238,20 +238,20 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location, hiring_man
             
     if start_idx != -1:
         import re
-        if jd_language and "french" in jd_language.lower():
-            location_clean = "Bex, Suisse"
-        else:
-            location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
+        company_location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
         
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
         for p in doc.paragraphs[:start_idx]:
+            if jd_language and "french" in jd_language.lower():
+                replace_text_in_paragraph(p, "Bex, Switzerland", "Bex, Suisse")
+                
             replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
             replace_text_in_paragraph(p, "Ernst & Young", company)
-            replace_text_in_paragraph(p, "Zurich, Switzerland", location_clean)
+            replace_text_in_paragraph(p, "Zurich, Switzerland", company_location_clean)
             replace_text_in_paragraph(p, "10.04.2026", today_str)
             replace_text_in_paragraph(p, "[COMPANY]", company)
-            replace_text_in_paragraph(p, "[LOCATION]", location_clean)
+            replace_text_in_paragraph(p, "[LOCATION]", company_location_clean)
             replace_text_in_paragraph(p, "[DATE]", today_str)
 
         # Find the reference paragraph for styling (the first actual body paragraph)

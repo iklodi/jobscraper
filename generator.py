@@ -395,4 +395,5 @@ async def run_generator():
     conn.close()
 
 if __name__ == '__main__':
-    run_generator()
+    import asyncio
+    asyncio.run(run_generator())

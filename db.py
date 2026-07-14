@@ -126,3 +126,15 @@ def get_all_jobs_with_issues():
 if __name__ == '__main__':
     init_db()
     print("Database initialized.")
+
+def get_competing_jobs(company, exclude_job_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT job_id, title, description, issue_number 
+        FROM jobs 
+        WHERE company = ? AND job_id != ? AND status IN ('to_apply', 'generated', 'synced', 'backlog', 'approved')
+    ''', (company, exclude_job_id))
+    jobs = cursor.fetchall()
+    conn.close()
+    return jobs

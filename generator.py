@@ -54,6 +54,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     - Ensure you maintain the exact same length as the original CV. For every bullet point you replace or expand, ensure the overall document length does not grow to strictly preserve the 2-page limit.
     - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
     - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
+    - CRITICAL RULE: ALL CV content (summary, bullet points, titles, etc.) MUST be written in ENGLISH, even if the job description or cover letter is in another language.
     
     Task 3: Write a tailored, compelling cover letter (max 150-200 words). Start with a greeting to {address_name}.
     {language_instruction}

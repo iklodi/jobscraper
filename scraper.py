@@ -77,7 +77,11 @@ async def run_scraper():
                     search_url = f"https://www.linkedin.com/jobs/search/?{query}"
                     
                     print(f"Searching for jobs: {keyword} in {location} (Page {page_num + 1})")
-                    await page.goto(search_url)
+                    try:
+                        await page.goto(search_url, timeout=60000)
+                    except Exception as e:
+                        print(f"Failed to navigate to {search_url}: {e}. Skipping page...")
+                        continue
                     
                     try:
                         await page.wait_for_selector('.job-card-container', timeout=15000)

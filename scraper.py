@@ -9,7 +9,7 @@ import progress_tracker
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
 def get_search_criteria():
-    criteria_path = os.path.join(os.environ.get('CVS_DIR', '/path/to/cvs'), 'search_criteria.md')
+    criteria_path = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'search_criteria.md')
     keywords = []
     locations = []
     if not os.path.exists(criteria_path):

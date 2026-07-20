@@ -50,6 +50,6 @@ To set up this tool on Windows, follow these steps:
    playwright install chromium
    ```
 4. **LibreOffice Requirement**: Download and install LibreOffice for Windows (required for DOCX to PDF conversion). 
-   *Important*: Open `generator.py` and change the `soffice_path` on line 12 from the Mac path to your Windows path (e.g., `"C:\\Program Files\\LibreOffice\\program\\soffice.exe"`).
-5. **Configuration**: Create a `.env` file in the root directory (you can copy the contents of `.env.example`) and add your API keys.
+   *Important*: Ensure you add `SOFFICE_PATH` to your `.env` file pointing to your Windows path (e.g., `SOFFICE_PATH="C:\Program Files\LibreOffice\program\soffice.exe"`).
+5. **Configuration**: Create a `.env` file in the root directory (you can copy the contents of `.env.example`) and add your API keys and configuration.
 6. **Start the Dashboard**: You can double-click the `start_dashboard.bat` file or run it in the command prompt to automatically activate the environment, launch the web server, and open the dashboard in your browser.

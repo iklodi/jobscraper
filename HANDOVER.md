@@ -57,7 +57,7 @@ MIN_PASS_SCORE=9
 ### 2. Dependencies
 - **Python 3.14+**
 - **Playwright:** Must run `playwright install chromium` after installing python dependencies.
-- **LibreOffice:** Must be installed in the default Mac path (`/Applications/LibreOffice.app/Contents/MacOS/soffice`) for PDF conversion to work.
+- **LibreOffice:** Set the `SOFFICE_PATH` environment variable in your `.env` file to point to your LibreOffice executable (e.g., `/Applications/LibreOffice.app/Contents/MacOS/soffice` for Mac, or `"C:\Program Files\LibreOffice\program\soffice.exe"` for Windows).
 
 ### 3. Base Documents
 The generator requires base documents to function:

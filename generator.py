@@ -13,7 +13,7 @@ import progress_tracker
 from playwright.async_api import async_playwright
 import PyPDF2
 
-CVS_DIR = os.environ.get('CVS_DIR', '/path/to/cvs')
+CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 
 def get_pdf_page_count(pdf_path):
     try:
@@ -293,8 +293,9 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
 
 def convert_to_pdf_libreoffice(docx_path):
     pdf_dir = os.path.dirname(docx_path)
+    soffice_path = os.environ.get('SOFFICE_PATH', '/Applications/LibreOffice.app/Contents/MacOS/soffice')
     subprocess.run([
-        '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+        soffice_path,
         '--headless',
         '--convert-to', 'pdf',
         '--outdir', pdf_dir,

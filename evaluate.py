@@ -8,7 +8,7 @@ from docx import Document
 import time
 import progress_tracker
 
-CVS_DIR = os.environ.get('CVS_DIR', '/path/to/cvs')
+CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', 'Career_Dossier.md')
 
 def load_prompt(filename):

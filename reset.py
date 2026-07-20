@@ -51,7 +51,7 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
         
         # GitHub Sync Removed
         # Clean up files
-        cvs_dir = os.environ.get('CVS_DIR', '/path/to/cvs')
+        cvs_dir = os.environ.get('CVS_DIR', 'cvs')
         jobs_dir = os.path.join(cvs_dir, 'jobs')
         if os.path.exists(jobs_dir):
             for f in os.listdir(jobs_dir):

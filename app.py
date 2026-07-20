@@ -12,7 +12,7 @@ load_dotenv(override=True)
 app = Flask(__name__)
 
 DB_FILE = 'jobs.db'
-CVS_DIR = os.environ.get('CVS_DIR', '/path/to/cvs')
+CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)

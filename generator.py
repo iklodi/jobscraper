@@ -8,12 +8,36 @@ import subprocess
 from groq import Groq
 from google import genai
 from google.genai import types
+import time
+import progress_tracker
 from playwright.async_api import async_playwright
+import PyPDF2
 
-CV_PATH = '/path/to/cvs/docs/Base_CV_Template.docx'
-DOSSIER_PATH = '/path/to/cvs/docs/Career_Dossier.md'
-CL_PATH = '/path/to/cvs/docs/Base_CL_Template.docx' # Using EY as a generic baseline for now
-OUTPUT_DIR = '/path/to/cvs/applications'
+CVS_DIR = os.environ.get('CVS_DIR', '/path/to/cvs')
+
+def get_pdf_page_count(pdf_path):
+    try:
+        with open(pdf_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            return len(reader.pages)
+    except Exception as e:
+        print(f"Error reading PDF page count for {pdf_path}: {e}")
+        return None
+
+def load_prompt(filename):
+    path = os.path.join(CVS_DIR, 'prompts', filename)
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+# Models
+CV_TEMPLATE_NAME = os.environ.get('CV_TEMPLATE_NAME', 'Base_CV_Template.docx')
+DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
+CL_TEMPLATE_NAME = os.environ.get('CL_TEMPLATE_NAME', 'Base_CL_Template.docx')
+
+CV_PATH = os.path.join(CVS_DIR, 'docs', CV_TEMPLATE_NAME)
+DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
+CL_PATH = os.path.join(CVS_DIR, 'docs', CL_TEMPLATE_NAME)
+OUTPUT_DIR = os.path.join(CVS_DIR, 'applications')
 GROQ_MODEL = 'llama-3.3-70b-versatile'
 GEMINI_MODEL = 'gemini-3.5-flash'
 
@@ -29,64 +53,27 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
-def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text):
-    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language = job
+def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None):
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
     language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}." if jd_language else ""
     
-    prompt = f"""
-    You are an expert career advisor. I am applying for the '{title}' role.
-    Here is the job description:
-    {description}
+    candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
-    Here is my current Base CV (the one being customized):
-    {cv_text}
+    prompt_template = load_prompt('generator_prompt.txt')
+    prompt = prompt_template.replace('{title}', title) \
+                            .replace('{company}', company) \
+                            .replace('{description}', description) \
+                            .replace('{cv_text}', cv_text) \
+                            .replace('{dossier_text}', dossier_text) \
+                            .replace('{address_name}', address_name) \
+                            .replace('{candidate_name}', candidate_name) \
+                            .replace('{language_instruction}', language_instruction)
     
-    Here is my full Career Dossier (containing all deep historical details of my career):
-    {dossier_text}
-    
-    Task 1: Write a tailored 3-4 sentence professional summary for my CV that specifically highlights my fit for this role.
-    Task 2: Customize my CV bullet points, skills, and title. You must output EXACT text from my Base CV that you want to replace or remove. 
-    - Replace irrelevant bullet points or skills with customized ones.
-    - Customize the main CV title (e.g. "Enterprise Architect") to match the target role if appropriate.
-    - You may freely pull specific achievements and details from the Career Dossier to replace or rewrite bullet points in the CV to perfectly match the JD requirements and tone, but keep it concise.
-    - Ensure you maintain the exact same length as the original CV. For every bullet point you replace or expand, ensure the overall document length does not grow to strictly preserve the 2-page limit.
-    - CRITICAL RULE: NEVER remove or modify the AIESEC experience under any circumstances. It is vital for networking.
-    - CRITICAL RULE: If you remove all bullet points under a heading like "Achievements:" or "Responsibilities:", you MUST also add that exact heading word (e.g. "Achievements:") to your cv_removals list so it isn't left hanging.
-    - CRITICAL RULE: ALL CV content (summary, bullet points, titles, etc.) MUST be written in ENGLISH, even if the job description or cover letter is in another language.
-    
-    Task 3: Write a tailored, compelling cover letter (max 150-200 words). Start with a greeting to {address_name}.
-    {language_instruction}
-    
-    Task 4: Determine the headquarters city and country of '{company}'. Based on your knowledge of the company or context clues in the JD, output a specific "City, Country" (e.g. "Geneva, Switzerland" or "London, UK"). Do NOT output broad regions like "European Union" or "EMEA". If entirely unknown, just use the country or leave as a plausible major city.
-
-    CRITICAL TONE INSTRUCTIONS (COVER LETTER):
-    - Write in a highly professional, direct, and human tone.
-    - DO NOT use long dashes (em-dashes "—" or en-dashes "–"). Use commas, semicolons, or regular parentheses instead.
-    - STRICTLY AVOID typical AI clichés and buzzwords (e.g., "delve", "tapestry", "testament", "beacon", "catalyst", "unleash", "elevate", "thrilled to apply", "embark", "spearhead", "pivotal").
-    - Keep sentences concise, factual, and impactful. Do not overcomplicate the sentence structure.
-    - ABSOLUTELY NEVER mention the company name or recruiter name ('{company}') anywhere in the text of the cover letter. Mention ONLY the role name. No exceptions!
-    
-    CRITICAL TONE INSTRUCTIONS (CV BULLET POINTS):
-    - NEVER use "I" or first-person structures (e.g. avoid "I coordinate with teams").
-    - For Responsibilities: Use structures without verbs at all (e.g. "Strategic advisory and enterprise architecture leadership for global enterprise accounts") OR use base imperative verbs (e.g. "Drive global demand generation"). NEVER use "-ing" structures.
-    - For Achievements: ALWAYS use simple past tense (e.g. "Acted as trusted advisor bridging technical architecture and business strategy").
-    
-    Your response must be valid JSON in this format:
-    {{
-        "cv_summary": "...",
-        "cv_replacements": [
-            {{"old": "exact old text to replace", "new": "customized new text"}}
-        ],
-        "cv_removals": [
-            "exact old text to remove entirely"
-        ],
-        "cover_letter_body": "...",
-        "company_hq": "City, Country"
-    }}
-    """
-    
+    if custom_instructions:
+        prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER:\n{custom_instructions}\n"
+        
     max_retries = 5
     for attempt in range(max_retries):
         result = None
@@ -228,7 +215,7 @@ def replace_text_in_paragraph(paragraph, old_text, new_text):
         if font_size:
             run.font.size = font_size
 
-def adapt_cl(base_cl_path, new_cl_path, body_text, company, location, hiring_manager_name, jd_language):
+def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, location, hiring_manager_name, jd_language):
     doc = Document(base_cl_path)
     
     start_idx = -1
@@ -247,13 +234,25 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, location, hiring_man
             if jd_language and "french" in jd_language.lower():
                 replace_text_in_paragraph(p, "Bex, Switzerland", "Bex, Suisse")
                 
-            replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{company} Hiring Team")
-            replace_text_in_paragraph(p, "Ernst & Young", company)
-            replace_text_in_paragraph(p, "Zurich, Switzerland", company_location_clean)
+            if display_company and display_company.lower() != "hiring team":
+                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{display_company} Hiring Team")
+                replace_text_in_paragraph(p, "Ernst & Young", display_company)
+                replace_text_in_paragraph(p, "[COMPANY]", display_company)
+            else:
+                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", "Hiring Team")
+                replace_text_in_paragraph(p, "Ernst & Young", "Hiring Team")
+                replace_text_in_paragraph(p, "[COMPANY]", "Hiring Team")
+                
             replace_text_in_paragraph(p, "10.04.2026", today_str)
-            replace_text_in_paragraph(p, "[COMPANY]", company)
-            replace_text_in_paragraph(p, "[LOCATION]", company_location_clean)
             replace_text_in_paragraph(p, "[DATE]", today_str)
+            
+            replace_text_in_paragraph(p, "\nZurich, Switzerland", "")
+            replace_text_in_paragraph(p, "Zurich, Switzerland\n", "")
+            replace_text_in_paragraph(p, "Zurich, Switzerland", "")
+            
+            replace_text_in_paragraph(p, "\n[LOCATION]", "")
+            replace_text_in_paragraph(p, "[LOCATION]\n", "")
+            replace_text_in_paragraph(p, "[LOCATION]", "")
 
         # Find the reference paragraph for styling (the first actual body paragraph)
         ref_p = doc.paragraphs[start_idx]
@@ -302,47 +301,75 @@ def convert_to_pdf_libreoffice(docx_path):
         docx_path
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-async def run_generator():
+async def generate_for_job(job_id, custom_instructions=None):
+    import db
     conn = db.get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM jobs WHERE status = "to_apply"')
-    jobs = cursor.fetchall()
-    
-    if not jobs:
-        print("No jobs ready for document generation.")
-        return
+    cursor.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,))
+    job = cursor.fetchone()
+    if not job:
+        print(f"Job {job_id} not found.")
+        conn.close()
+        return False
         
     groq_client = get_groq_client()
     gemini_client = get_gemini_client()
     
     if not groq_client and not gemini_client:
         print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
-        return
+        conn.close()
+        return False
+        
     cv_text = extract_text(CV_PATH)
-    
-    print("Loading Career Dossier...")
     try:
         with open(DOSSIER_PATH, 'r', encoding='utf-8') as f:
             dossier_text = f.read()
     except Exception as e:
         print(f"Error reading Career Dossier: {e}")
-        return
-    
+        conn.close()
+        return False
+        
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    total_jobs = len(jobs)
-    for idx, job in enumerate(jobs, 1):
-        job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language = job
-        print(f"[{idx}/{total_jobs}] Generating documents for {company}: {title}...")
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
+    print(f"Generating documents for {company}: {title}...")
+    
+    baseline_pdf_path = CV_PATH.replace('.docx', '.pdf')
+    if not os.path.exists(baseline_pdf_path):
+        print("Converting baseline CV to PDF for page counting...")
+        convert_to_pdf_libreoffice(CV_PATH)
+    baseline_page_count = get_pdf_page_count(baseline_pdf_path) or 3
+    
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
         try:
-            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text)
+            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions)
+            if not texts:
+                print(f"AI returned empty result for job {job_id}")
+                cursor.execute('UPDATE jobs SET status = "failed" WHERE job_id = ?', (job_id,))
+                conn.commit()
+                conn.close()
+                return False
         except Exception as e:
             print(f"Error generating texts for job {job_id}: {e}")
-            continue
+            cursor.execute('UPDATE jobs SET status = "failed" WHERE job_id = ?', (job_id,))
+            conn.commit()
+            conn.close()
+            return False
             
         today = datetime.datetime.now().strftime("%Y%m%d")
         safe_company = "".join(x for x in company if x.isalnum())
         job_dir = os.path.join(OUTPUT_DIR, f"{today}_{safe_company}_{job_id}")
+        
+        import shutil
+        if os.path.exists(OUTPUT_DIR):
+            for d in os.listdir(OUTPUT_DIR):
+                if d.endswith(f"_{job_id}"):
+                    try:
+                        shutil.rmtree(os.path.join(OUTPUT_DIR, d))
+                    except Exception as ex:
+                        print(f"Could not delete old directory {d}: {ex}")
+                        
         os.makedirs(job_dir, exist_ok=True)
         
         new_cv_docx = os.path.join(job_dir, f"{today}_{safe_company}_CV.docx")
@@ -353,7 +380,8 @@ async def run_generator():
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
         company_hq = texts.get('company_hq', location)
-        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, company_hq, hiring_manager_name, jd_language)
+        display_company = texts.get('display_company', company)
+        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, jd_language)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:
@@ -362,38 +390,76 @@ async def run_generator():
             f.write(extract_text(new_cl_docx))
         
         # Convert to PDF
-        print(f"Converting DOCX to PDF for {company}...")
+        print(f"Converting DOCX to PDF for {company} (Attempt {attempt})...")
         try:
             convert_to_pdf_libreoffice(new_cv_docx)
             convert_to_pdf_libreoffice(new_cl_docx)
         except Exception as e:
             print(f"PDF conversion failed: {e}")
             
-        # Save Job Description as PDF using Playwright
-        print(f"Saving JD as PDF for {company}...")
-        pdf_dir = '/path/to/cvs/jobs'
-        os.makedirs(pdf_dir, exist_ok=True)
-        safe_title = "".join(x for x in title if x.isalnum() or x in " -_")
-        jd_pdf_filename = f"{job_id}_{safe_company}_{safe_title}.pdf"
-        jd_pdf_path = os.path.join(pdf_dir, jd_pdf_filename)
+        new_cv_pdf = new_cv_docx.replace('.docx', '.pdf')
+        new_page_count = get_pdf_page_count(new_cv_pdf)
         
-        try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch()
-                page = await browser.new_page()
-                html_content = f"<h1>{title} at {company}</h1><p>{location}</p><hr><pre style='white-space: pre-wrap;'>{description}</pre>"
-                await page.set_content(html_content)
-                await page.pdf(path=jd_pdf_path)
-                await browser.close()
-        except Exception as pdf_err:
-            print(f"Failed to generate JD PDF for {job_id}: {pdf_err}")
+        if new_page_count and new_page_count > baseline_page_count:
+            if attempt < max_attempts:
+                print(f"Generated CV is {new_page_count} pages (baseline is {baseline_page_count}). Retrying...")
+                custom_instructions = (custom_instructions or "") + "\n\nCRITICAL: The previous generation was too long. You MUST shorten your bullet point replacements slightly to ensure the CV fits within its original page limit."
+                continue
+            else:
+                print(f"Generated CV is still too long after {max_attempts} attempts. Keeping it.")
+                break
+        else:
+            break
             
-        # Update status
-        cursor.execute('UPDATE jobs SET status = "generated" WHERE job_id = ?', (job_id,))
-        conn.commit()
-        print(f"Finished generating assets for {company}.")
         
+    # Save Job Description as PDF using Playwright
+    print(f"Saving JD as PDF for {company}...")
+    pdf_dir = os.path.join(CVS_DIR, 'jobs')
+    os.makedirs(pdf_dir, exist_ok=True)
+    safe_title = "".join(x for x in title if x.isalnum() or x in " -_")
+    jd_pdf_filename = f"{job_id}_{safe_company}_{safe_title}.pdf"
+    jd_pdf_path = os.path.join(pdf_dir, jd_pdf_filename)
+    
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            page = await browser.new_page()
+            html_content = f"<h1>{title} at {company}</h1><p>{location}</p><hr><pre style='white-space: pre-wrap;'>{description}</pre>"
+            await page.set_content(html_content)
+            await page.pdf(path=jd_pdf_path)
+            await browser.close()
+    except Exception as pdf_err:
+        print(f"Failed to generate JD PDF for {job_id}: {pdf_err}")
+        
+    # Update status
+    cursor.execute('UPDATE jobs SET status = "generated" WHERE job_id = ?', (job_id,))
+    conn.commit()
     conn.close()
+    print(f"Finished generating assets for {company}.")
+    return True
+
+async def run_generator():
+    import db
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT job_id, title, company, description, reasoning, location FROM jobs WHERE status = "to_apply"')
+    unprocessed_jobs = cursor.fetchall()
+    conn.close()
+    
+    if not unprocessed_jobs:
+        print("No jobs ready for document generation.")
+        return
+        
+    total_jobs = len(unprocessed_jobs)
+    for idx, job in enumerate(unprocessed_jobs, 1):
+        if progress_tracker.is_stop_requested():
+            print("Stop requested during generation!")
+            break
+        progress_tracker.set_status("Generating Assets", idx, total_jobs)
+        
+        job_id = job[0]
+        print(f"[{idx}/{total_jobs}] Processing job {job_id}...")
+        await generate_for_job(job_id)
 
 if __name__ == '__main__':
     import asyncio

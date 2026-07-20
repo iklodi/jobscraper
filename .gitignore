@@ -5,3 +5,8 @@ jobs.db
 *.pyc
 .env
 applications/
+.DS_Store
+cron.log
+progress.json
+*.docx
+jobscraper.code-workspace

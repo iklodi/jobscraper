@@ -6,9 +6,15 @@ from google import genai
 from google.genai import types
 from docx import Document
 import time
+import progress_tracker
 
-# Configuration
-DOSSIER_PATH = '/path/to/cvs/docs/Career_Dossier.md'
+CVS_DIR = os.environ.get('CVS_DIR', '/path/to/cvs')
+DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', 'Career_Dossier.md')
+
+def load_prompt(filename):
+    path = os.path.join(CVS_DIR, 'prompts', filename)
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read()
 GEMINI_MODELS = [
 #    'gemini-3.1-pro-preview',
     'gemini-3.5-flash',
@@ -108,51 +114,20 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
-def evaluate_job(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted):
-    prompt = f"""
-    You are an expert tech recruiter and career advisor.
-    I want you to evaluate the following job posting against my CV.
+def evaluate_job(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted, custom_instructions=None):
+    prompt_template = load_prompt('eval_prompt.txt')
+    prompt = prompt_template.replace('{cv_text}', cv_text) \
+                            .replace('{job_title}', job_title) \
+                            .replace('{job_company}', job_company) \
+                            .replace('{job_location}', job_location) \
+                            .replace('{is_promoted}', str(is_promoted)) \
+                            .replace('{job_desc}', job_desc) \
+                            .replace('{rules_text}', rules_text) \
+                            .replace('{previous_applications}', chr(10).join(previous_applications))
     
-    My CV:
-    {cv_text}
+    if custom_instructions:
+        prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER FOR RE-EVALUATION:\n{custom_instructions}\n"
     
-    Job Title: {job_title}
-    Company: {job_company}
-    Location: {job_location}
-    Is Promoted Job: {is_promoted}
-    Job Description:
-    {job_desc}
-    
-    Evaluate the fit on a scale of 1 to 10 (10 being a perfect match).
-    NOTE: If "Is Promoted Job" is True, be slightly more critical of the match, as promoted jobs often have lower organic relevance.
-    
-    {rules_text}
-    
-    Here is a list of job applications I have ALREADY submitted in the past (based on my archive):
-    {chr(10).join(previous_applications)}
-    
-    CRITICAL DUPLICATE RULE: If this job is highly likely to be the exact same role at the exact same company as one of the past applications in the list above, you MUST score it a 1 and set the reasoning strictly to "Already applied".
-    
-    Provide a brief reasoning, and list any key missing skills.
-    
-    If the score you are giving is 8 or higher, you MUST also determine:
-    1. "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR") based on the location, role, and typical market rates. If completely unknown, output "Unknown".
-    2. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
-    3. "hiring_manager_name": The full name of the hiring manager or recruiter, IF it is clearly stated in the job description. If not stated, output null.
-    4. "jd_language": The language the job description is primarily written in (e.g. "English", "French", "German").
-    If the score is below 8, you may leave these as null.
-    
-    Your response must be valid JSON in the following format:
-    {{
-        "score": 8,
-        "reasoning": "Strong match with enterprise architecture experience...",
-        "missing_skills": ["AWS", "Kubernetes"],
-        "salary_estimate": "130k-160k CHF",
-        "is_recruiter": false,
-        "hiring_manager_name": "Jane Doe",
-        "jd_language": "English"
-    }}
-    """
     
     max_retries = 5
     delay = 10
@@ -276,6 +251,11 @@ def run_evaluation():
 
     total_jobs = len(unscored_jobs)
     for idx, job in enumerate(unscored_jobs, 1):
+        if progress_tracker.is_stop_requested():
+            print("Stop requested during evaluation!")
+            break
+        progress_tracker.set_status("Evaluating Jobs", idx, total_jobs)
+        
         job_id, title, company, location, description, is_promoted = job
         print(f"[{idx}/{total_jobs}] Evaluating: {title} at {company} ({location}) (Promoted: {is_promoted})...")
         
@@ -299,26 +279,13 @@ def run_evaluation():
                 if competing:
                     c_id, c_title, c_desc, c_issue = competing[0]
                     print(f"--> Found competing active job for {company}: '{c_title}'. Invoking AI comparison...")
-                    comp_prompt = f"""
-                    You are an expert career advisor.
-                    I am considering applying for a new job '{title}' at '{company}', but I already have an active job in my backlog for the exact same company: '{c_title}'.
-                    
-                    New Job Description ('{title}'):
-                    {description}
-                    
-                    Old Job Description ('{c_title}'):
-                    {c_desc}
-                    
-                    My CV:
-                    {cv_text}
-                    
-                    I can only apply to one role at this company. Which one is a STRONGER match for my CV?
-                    Respond in JSON:
-                    {{
-                        "preferred_job": "NEW" or "OLD",
-                        "reasoning": "Detailed explanation..."
-                    }}
-                    """
+                    comp_prompt_template = load_prompt('compare_prompt.txt')
+                    comp_prompt = comp_prompt_template.replace('{title}', title) \
+                                                      .replace('{company}', company) \
+                                                      .replace('{description}', description) \
+                                                      .replace('{c_title}', c_title) \
+                                                      .replace('{c_desc}', c_desc) \
+                                                      .replace('{cv_text}', cv_text)
                     comp_result = compare_jobs(groq_client, gemini_client, comp_prompt)
                     if comp_result:
                         pref = comp_result.get('preferred_job', 'OLD')
@@ -341,6 +308,58 @@ def run_evaluation():
         # Dynamic Rate limit sleep
         # We don't want a fixed 4.5s delay if we are using Pro models, but 1.5s should be safe since the cascade handles the rest.
         time.sleep(1.5)
+
+def evaluate_single_job(job_id, custom_instructions=None):
+    db.init_db()
+    conn = db.get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT job_id, title, company, location, description, is_promoted FROM jobs WHERE job_id = ?', (job_id,))
+    job = cursor.fetchone()
+    conn.close()
+    
+    if not job:
+        print(f"Job {job_id} not found.")
+        return False
+        
+    groq_client = get_groq_client()
+    gemini_client = get_gemini_client()
+    
+    if not groq_client and not gemini_client:
+        print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
+        return False
+        
+    try:
+        with open(DOSSIER_PATH, 'r', encoding='utf-8') as f:
+            cv_text = f.read()
+    except Exception as e:
+        print(f"Error reading Career Dossier: {e}")
+        return False
+        
+    previous_applications = get_previous_applications()
+    rules_text = get_evaluation_rules()
+    
+    job_id, title, company, location, description, is_promoted = job
+    print(f"Evaluating: {title} at {company} ({location}) (Promoted: {is_promoted})...")
+    
+    result = evaluate_job(
+        groq_client,
+        gemini_client,
+        title, company, location, description, cv_text, previous_applications, rules_text, is_promoted, custom_instructions)
+        
+    if result:
+        score = result.get('score', 0)
+        reasoning = result.get('reasoning', '')
+        estimated_salary = result.get('salary_estimate', None)
+        is_recruiter = result.get('is_recruiter', None)
+        hiring_manager_name = result.get('hiring_manager_name', None)
+        jd_language = result.get('jd_language', None)
+        print(f"--> Score: {score}/10")
+        
+        db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter, hiring_manager_name, jd_language)
+        return True
+    else:
+        print("Failed to evaluate.")
+        return False
 
 if __name__ == '__main__':
     run_evaluation()

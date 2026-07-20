@@ -6,31 +6,23 @@ import shutil
 from github import Github, Auth
 from dotenv import load_dotenv
 
-def close_github_issue(issue_number):
-    load_dotenv()
-    token = os.environ.get("GITHUB_TOKEN")
-    repo_name = os.environ.get("GITHUB_REPO", "your_username/your_repo")
-    if not token or not issue_number: return False
-    
-    try:
-        auth = Auth.Token(token)
-        g = Github(auth=auth)
-        repo = g.get_repo(repo_name)
-        issue = repo.get_issue(int(issue_number))
-        if issue.state != "closed":
-            issue.edit(state="closed")
-        return True
-    except Exception as e:
-        print(f"  -> Failed to close GitHub issue #{issue_number}: {e}")
-        return False
 
-def reset_jobs(search_term=None, score=None, status='new'):
+
+def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
     conn = sqlite3.connect('jobs.db')
     cursor = conn.cursor()
     
     matches = []
     
-    if score is not None:
+    if reset_all:
+        # Prevent resetting jobs we've already applied to or explicitly rejected
+        cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE status NOT IN ('new', 'applied', 'interviewing', 'offer', 'rejected')")
+        matches = cursor.fetchall()
+        if not matches:
+            print("❌ No active evaluated jobs found to reset.")
+            return
+    
+    elif score is not None:
         # Prevent resetting jobs we've already applied to or explicitly rejected
         cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE score = ? AND status NOT IN ('applied', 'interviewing', 'offer', 'rejected')", (score,))
         matches = cursor.fetchall()
@@ -47,7 +39,7 @@ def reset_jobs(search_term=None, score=None, status='new'):
             print(f"❌ No jobs found matching '{search_term}'.")
             return
     else:
-        print("❌ You must provide either a search term or a --score.")
+        print("❌ You must provide either a search term, --score, or --all.")
         return
 
     # Process all matches
@@ -57,20 +49,17 @@ def reset_jobs(search_term=None, score=None, status='new'):
     for j_id, company, title, issue_number in matches:
         print(f"Resetting: {company} - {title}")
         
-        # Close GitHub issue safely
-        if issue_number:
-            if close_github_issue(issue_number):
-                print(f"  -> Closed GitHub issue #{issue_number}")
-                
+        # GitHub Sync Removed
         # Clean up files
-        jobs_dir = '/path/to/cvs/jobs'
+        cvs_dir = os.environ.get('CVS_DIR', '/path/to/cvs')
+        jobs_dir = os.path.join(cvs_dir, 'jobs')
         if os.path.exists(jobs_dir):
             for f in os.listdir(jobs_dir):
                 if f.startswith(f"{j_id}_"):
                     try: os.remove(os.path.join(jobs_dir, f))
                     except: pass
                     
-        apps_dir = '/path/to/cvs/applications'
+        apps_dir = os.path.join(cvs_dir, 'applications')
         if os.path.exists(apps_dir):
             for d in os.listdir(apps_dir):
                 if d.endswith(f"_{j_id}"):
@@ -92,14 +81,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Reset jobs in the database to be re-evaluated or regenerated.")
     parser.add_argument("search_term", nargs="?", help="Job ID or Company Name to reset")
     parser.add_argument("--score", type=int, help="Reset all active jobs matching this exact score (e.g., 9)")
+    parser.add_argument("--all", action="store_true", help="Reset ALL active evaluated jobs")
     parser.add_argument("--to-apply", action="store_true", help="Push to the 'to_apply' queue instead of 'new'")
     
     args = parser.parse_args()
     
-    if not args.search_term and args.score is None:
+    if not args.search_term and args.score is None and not args.all:
         parser.print_help()
         sys.exit(1)
         
     status = 'to_apply' if args.to_apply else 'new'
     
-    reset_jobs(search_term=args.search_term, score=args.score, status=status)
+    reset_jobs(search_term=args.search_term, score=args.score, reset_all=args.all, status=status)

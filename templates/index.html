@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Scraper Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="background-blob blob-1"></div>
+    <div class="background-blob blob-2"></div>
+    <div class="background-blob blob-3"></div>
+    
+    <div class="container">
+        <header>
+            <h1>💼 Job Application Pipeline</h1>
+            <div style="display: flex; align-items: center; gap: 1.5rem;">
+                <button class="btn" onclick="manualRefresh(this)">🔄 Refresh</button>
+                <div class="pipeline-controls" style="display: flex; gap: 0.5rem; position: relative;">
+                    <style>
+                        .pipeline-status-box {
+                            display: none;
+                            position: absolute;
+                            top: 110%;
+                            left: 0;
+                            background: var(--glass-bg);
+                            border: 1px solid var(--glass-border);
+                            padding: 10px;
+                            border-radius: 8px;
+                            z-index: 100;
+                            min-width: 220px;
+                            backdrop-filter: blur(15px);
+                            pointer-events: none;
+                        }
+                        .pipeline-controls:hover .pipeline-status-box.active {
+                            display: block;
+                        }
+                    </style>
+                    <button id="run-scraper-btn" class="btn btn-primary" onclick="triggerScrape('full')">Run Pipeline</button>
+                    <button id="run-eval-btn" class="btn" onclick="triggerScrape('eval_only')">Run Evaluations Only</button>
+                    <button id="stop-pipeline-btn" class="btn" style="display: none; background-color: #ef4444; border-color: #ef4444;" onclick="stopScrape()">Stop</button>
+                    <div id="pipeline-status-hover" class="pipeline-status-box">
+                        <div style="font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;" id="pipeline-status-stage">Initializing...</div>
+                        <div style="font-size: 0.85rem;" id="pipeline-status-progress">Starting up...</div>
+                    </div>
+                </div>
+                <div class="stats-container" id="stats-container">
+                    <!-- Stats will be injected here -->
+                </div>
+            </div>
+        </header>
+
+        <main class="kanban-board" id="kanban-board">
+            <div class="kanban-column" id="col-new" data-status="new">
+                <h2>Pending Eval</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-backlog" data-status="to_apply">
+                <h2>To Do (Backlog)</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-failed" data-status="failed">
+                <h2>Failed</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-approved" data-status="approved">
+                <h2>Approved</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-applied" data-status="applied">
+                <h2>Applied</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-interviewing" data-status="interviewing">
+                <h2>Interviewing</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+
+            <div class="kanban-column" id="col-rejected" data-status="rejected">
+                <h2>Rejected</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Job Details Modal -->
+    <div id="job-modal" class="modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -3,11 +3,13 @@ from playwright.async_api import async_playwright
 import db
 import urllib.parse
 import os
+import difflib
+import progress_tracker
 
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
 def get_search_criteria():
-    criteria_path = '/path/to/cvs/search_criteria.md'
+    criteria_path = os.path.join(os.environ.get('CVS_DIR', '/path/to/cvs'), 'search_criteria.md')
     keywords = []
     locations = []
     if not os.path.exists(criteria_path):
@@ -68,10 +70,21 @@ async def run_scraper():
             print("Successfully logged in!")
 
         keywords_list, locations_list = get_search_criteria()
+        keyword_stats = {k: 0 for k in keywords_list}
+        session_total_added = 0
+        total_pages = len(keywords_list) * len(locations_list) * 3
+        pages_processed = 0
 
         for keyword in keywords_list:
             for location in locations_list:
                 for page_num in range(3): # Scrape up to 3 pages (75 jobs) per keyword/location combo
+                    if progress_tracker.is_stop_requested():
+                        print("Stop requested during scraping!")
+                        await browser.close()
+                        return keyword_stats
+                    
+                    pages_processed += 1
+                    progress_tracker.set_status(f"Scraping '{keyword}'", pages_processed, total_pages)
                     start = page_num * 25
                     query = urllib.parse.urlencode({'keywords': keyword, 'location': location, 'start': start})
                     search_url = f"https://www.linkedin.com/jobs/search/?{query}"
@@ -133,17 +146,35 @@ async def run_scraper():
                             desc_elem = await page.query_selector('#job-details')
                             description = await desc_elem.inner_text() if desc_elem else ""
                             
+                            def is_duplicate(comp, desc):
+                                existing_descs = db.get_jobs_by_company(comp)
+                                for old_desc in existing_descs:
+                                    ratio = difflib.SequenceMatcher(None, desc, old_desc).ratio()
+                                    if ratio > 0.90:
+                                        return True
+                                return False
+                            
                             if job_id and title and description:
+                                if is_duplicate(company.strip(), description.strip()):
+                                    print(f"Skipping duplicate job ({job_id}): {title} at {company}")
+                                    continue
+                                
                                 added = db.add_job(job_id, title.strip(), company.strip(), job_location.strip(), description.strip(), link, is_promoted)
                                 if added:
                                     new_jobs_count += 1
-                                    print(f"Added new job: {title} at {company}")
+                                    session_total_added += 1
+                                    print(f"[{session_total_added}] Added new job ({job_id}): {title} at {company}")
                         except Exception as e:
                             print(f"Error parsing a job card: {e}")
+                            
+                    if keyword not in keyword_stats:
+                        keyword_stats[keyword] = 0
+                    keyword_stats[keyword] += new_jobs_count
                             
                     print(f"Finished scraping '{keyword}' in {location} (Page {page_num + 1}). Added {new_jobs_count} new jobs.")
                     await asyncio.sleep(3)
         await browser.close()
+        return keyword_stats
 
 if __name__ == '__main__':
     asyncio.run(run_scraper())

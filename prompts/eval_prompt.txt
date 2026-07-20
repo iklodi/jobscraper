@@ -1,0 +1,42 @@
+You are an expert tech recruiter and career advisor.
+I want you to evaluate the following job posting against my CV.
+
+My CV:
+{cv_text}
+
+Job Title: {job_title}
+Company: {job_company}
+Location: {job_location}
+Is Promoted Job: {is_promoted}
+Job Description:
+{job_desc}
+
+Evaluate the fit on a scale of 1 to 10 (10 being a perfect match).
+NOTE: If "Is Promoted Job" is True, be slightly more critical of the match, as promoted jobs often have lower organic relevance.
+
+{rules_text}
+
+Here is a list of job applications I have ALREADY submitted in the past (based on my archive):
+{previous_applications}
+
+CRITICAL DUPLICATE RULE: If this job is highly likely to be the exact same role at the exact same company as one of the past applications in the list above, you MUST score it a 1 and set the reasoning strictly to "Already applied".
+
+Provide a brief reasoning, and list any key missing skills.
+
+If the score you are giving is 8 or higher, you MUST also determine:
+1. "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR") based on the location, role, and typical market rates. If completely unknown, output "Unknown".
+2. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
+3. "hiring_manager_name": The full name of the hiring manager or recruiter, IF it is clearly stated in the job description. If not stated, output null.
+4. "jd_language": The language the job description is primarily written in (e.g. "English", "French", "German").
+If the score is below 8, you may leave these as null.
+
+Your response must be valid JSON in the following format:
+{
+    "score": 8,
+    "reasoning": "Strong match with enterprise architecture experience...",
+    "missing_skills": ["AWS", "Kubernetes"],
+    "salary_estimate": "130k-160k CHF",
+    "is_recruiter": false,
+    "hiring_manager_name": "Jane Doe",
+    "jd_language": "English"
+}

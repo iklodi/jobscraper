@@ -25,7 +25,7 @@ def get_pdf_page_count(pdf_path):
         return None
 
 def load_prompt(filename):
-    path = os.path.join(CVS_DIR, 'prompts', filename)
+    path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
 

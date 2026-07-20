@@ -1,0 +1,18 @@
+You are an expert career advisor.
+I am considering applying for a new job '{title}' at '{company}', but I already have an active job in my backlog for the exact same company: '{c_title}'.
+
+New Job Description ('{title}'):
+{description}
+
+Old Job Description ('{c_title}'):
+{c_desc}
+
+My CV:
+{cv_text}
+
+I can only apply to one role at this company. Which one is a STRONGER match for my CV?
+Respond in JSON:
+{
+    "preferred_job": "new",
+    "reasoning": "brief explanation"
+}

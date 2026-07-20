@@ -417,3 +417,32 @@ h1 {
     from { opacity: 0; transform: scale(0.95); }
     to { opacity: 1; transform: scale(1); }
 }
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .container {
+        padding: 1rem;
+    }
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    header > div {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+    .kanban-board {
+        scroll-snap-type: x mandatory;
+        padding-bottom: 2rem;
+        -webkit-overflow-scrolling: touch;
+    }
+    .kanban-column {
+        flex: 0 0 85vw;
+        scroll-snap-align: center;
+    }
+    .glass-panel {
+        width: 95%;
+        padding: 1.5rem;
+    }
+}

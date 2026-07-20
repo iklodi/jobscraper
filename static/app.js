@@ -69,6 +69,13 @@ function renderStats() {
     `;
 }
 
+let columnLimits = {};
+
+window.loadMore = function(status) {
+    columnLimits[status] = (columnLimits[status] || 100) + 100;
+    renderBoard();
+};
+
 function renderBoard() {
     const columns = {
         'new': document.querySelector('#col-new .kanban-cards'),
@@ -85,28 +92,52 @@ function renderBoard() {
         if(col) col.innerHTML = '';
     });
 
+    // Group jobs by status
+    const groupedJobs = {
+        'new': [], 'to_apply': [], 'failed': [], 'approved': [], 'applied': [], 'interviewing': [], 'rejected': []
+    };
+
     allJobs.forEach(job => {
         let status = job.status;
-        // Map generated/synced/backlog to 'to_apply'
         if (['generated', 'synced', 'backlog'].includes(status)) {
             status = 'to_apply';
         }
-        
-        // Map 'scored' to 'rejected' because it means it didn't pass the MIN_PASS_SCORE threshold
         if (status === 'scored') {
             status = 'rejected';
         }
-        
-        const col = columns[status] || columns['new'];
-        if (col) {
-            col.appendChild(createCard(job));
+        if (groupedJobs[status]) {
+            groupedJobs[status].push(job);
+        } else {
+            groupedJobs['new'].push(job);
         }
     });
     
-    // Update headers with counts
+    // Render columns with limits
     Object.entries(columns).forEach(([status, col]) => {
         if (col) {
-            const count = col.children.length;
+            const jobsInCol = groupedJobs[status] || [];
+            const totalCount = jobsInCol.length;
+            const limit = columnLimits[status] || 100;
+            
+            // Slice the array up to the limit
+            const visibleJobs = jobsInCol.slice(0, limit);
+            visibleJobs.forEach(job => {
+                col.appendChild(createCard(job));
+            });
+            
+            // Add Load More button if needed
+            if (totalCount > limit) {
+                const remaining = totalCount - limit;
+                const loadBtn = document.createElement('button');
+                loadBtn.className = 'btn btn-primary';
+                loadBtn.style.width = '100%';
+                loadBtn.style.marginTop = '10px';
+                loadBtn.innerText = `Load More (${remaining} remaining)`;
+                loadBtn.onclick = () => loadMore(status);
+                col.appendChild(loadBtn);
+            }
+
+            // Update header count with TOTAL count (not visible count)
             const h2 = col.parentElement.querySelector('h2');
             if (h2) {
                 let baseText = h2.getAttribute('data-title');
@@ -114,7 +145,7 @@ function renderBoard() {
                     baseText = h2.innerText.replace(/\s*\(\d+\)$/, '');
                     h2.setAttribute('data-title', baseText);
                 }
-                h2.innerText = `${baseText} (${count})`;
+                h2.innerText = `${baseText} (${totalCount})`;
             }
         }
     });
@@ -360,7 +391,7 @@ window.submitRegen = async function(jobId) {
 
 window.manualRefresh = async function(btn) {
     const originalText = btn.innerText;
-    btn.innerText = '🔄 Refreshing...';
+    btn.innerText = '⏳ Refreshing...';
     btn.disabled = true;
     await fetchJobs();
     
@@ -374,6 +405,26 @@ window.manualRefresh = async function(btn) {
         btn.disabled = false;
     }, 500);
 }
+
+window.pullUpdates = async function(btn) {
+    const origText = btn.textContent;
+    btn.textContent = '⏳ Pulling...';
+    btn.disabled = true;
+    try {
+        const response = await fetch('/api/system/pull', { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            alert('Successfully pulled updates!\n\n' + data.output);
+            window.location.reload();
+        } else {
+            alert('Failed to pull updates:\n\n' + data.error);
+        }
+    } catch (e) {
+        alert('Network error while pulling updates.');
+    }
+    btn.textContent = origText;
+    btn.disabled = false;
+};
 
 // Auto-refresh every 30 seconds unless user is interacting
 setInterval(() => {

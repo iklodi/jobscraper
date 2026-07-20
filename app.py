@@ -199,6 +199,14 @@ def download_file(subpath):
     apps_dir = os.path.join(CVS_DIR, 'applications')
     return send_from_directory(apps_dir, subpath)
 
+@app.route('/api/system/pull', methods=['POST'])
+def pull_updates():
+    try:
+        result = subprocess.run(['git', 'pull', 'origin', 'main'], capture_output=True, text=True, check=True)
+        return jsonify({'success': True, 'output': result.stdout})
+    except subprocess.CalledProcessError as e:
+        return jsonify({'success': False, 'error': e.stderr or e.stdout}), 500
+
 import db
 
 if __name__ == '__main__':

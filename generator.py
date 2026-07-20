@@ -235,24 +235,18 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
                 replace_text_in_paragraph(p, "Bex, Switzerland", "Bex, Suisse")
                 
             if display_company and display_company.lower() != "hiring team":
-                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", f"{display_company} Hiring Team")
-                replace_text_in_paragraph(p, "Ernst & Young", display_company)
                 replace_text_in_paragraph(p, "[COMPANY]", display_company)
             else:
-                replace_text_in_paragraph(p, "Ernst & Young Hiring Team", "Hiring Team")
-                replace_text_in_paragraph(p, "Ernst & Young", "Hiring Team")
                 replace_text_in_paragraph(p, "[COMPANY]", "Hiring Team")
                 
-            replace_text_in_paragraph(p, "10.04.2026", today_str)
             replace_text_in_paragraph(p, "[DATE]", today_str)
             
-            replace_text_in_paragraph(p, "\nZurich, Switzerland", "")
-            replace_text_in_paragraph(p, "Zurich, Switzerland\n", "")
-            replace_text_in_paragraph(p, "Zurich, Switzerland", "")
-            
-            replace_text_in_paragraph(p, "\n[LOCATION]", "")
-            replace_text_in_paragraph(p, "[LOCATION]\n", "")
-            replace_text_in_paragraph(p, "[LOCATION]", "")
+            if location:
+                replace_text_in_paragraph(p, "[LOCATION]", company_location_clean)
+            else:
+                replace_text_in_paragraph(p, "\n[LOCATION]", "")
+                replace_text_in_paragraph(p, "[LOCATION]\n", "")
+                replace_text_in_paragraph(p, "[LOCATION]", "")
 
         # Find the reference paragraph for styling (the first actual body paragraph)
         ref_p = doc.paragraphs[start_idx]

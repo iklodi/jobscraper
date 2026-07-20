@@ -9,7 +9,8 @@ import time
 import progress_tracker
 
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
-DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', 'Career_Dossier.md')
+DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
+DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
 
 def load_prompt(filename):
     path = os.path.join(CVS_DIR, 'prompts', filename)
@@ -96,7 +97,7 @@ def get_previous_applications():
     return [f"{company} - {title}" for company, title in rows]
 
 def get_evaluation_rules():
-    rules_path = '/path/to/cvs/rules.md'
+    rules_path = os.path.join(CVS_DIR, 'rules.md')
     if not os.path.exists(rules_path):
         return ""
     with open(rules_path, 'r') as f:

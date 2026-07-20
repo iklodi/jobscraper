@@ -9,11 +9,19 @@ import progress_tracker
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
 def get_search_criteria():
+    env_keywords = os.environ.get('SEARCH_KEYWORDS')
+    env_locations = os.environ.get('SEARCH_LOCATIONS')
+    
+    if env_keywords and env_locations:
+        keywords = [k.strip() for k in env_keywords.split(',')]
+        locations = [l.strip() for l in env_locations.split(',')]
+        return keywords, locations
+
     criteria_path = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'search_criteria.md')
     keywords = []
     locations = []
     if not os.path.exists(criteria_path):
-        return ["Enterprise Architect"], ["Switzerland"]
+        return ["Software Engineer"], ["Remote"]
         
     with open(criteria_path, 'r') as f:
         lines = f.readlines()
@@ -33,9 +41,9 @@ def get_search_criteria():
             locations.append(line[2:].strip())
             
     if not keywords:
-        keywords = ["Enterprise Architect"]
+        keywords = ["Software Engineer"]
     if not locations:
-        locations = ["Switzerland"]
+        locations = ["Remote"]
         
     return keywords, locations
 

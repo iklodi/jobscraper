@@ -12,7 +12,7 @@ async def debug():
             viewport={"width": 1280, "height": 800}
         )
         page = browser.pages[0] if browser.pages else await browser.new_page()
-        query = urllib.parse.urlencode({'keywords': 'Enterprise Architect', 'location': 'Switzerland'})
+        query = urllib.parse.urlencode({'keywords': 'Software Engineer', 'location': 'Remote'})
         await page.goto(f"https://www.linkedin.com/jobs/search/?{query}")
         
         await page.wait_for_selector('.job-card-container', timeout=15000)

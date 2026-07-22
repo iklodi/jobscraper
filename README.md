@@ -33,16 +33,19 @@ This will:
 1. Scrape new jobs.
 2. Evaluate them using Gemini (scores 1-10).
 3. For jobs > 9, create a tailored CV and Cover Letter in `applications/` and convert them to PDF.
-4. Open a GitHub Issue for each tailored application.
+4. Present evaluated jobs in an interactive **Local Kanban Dashboard** so you can easily review them.
 
-## Windows Installation
-To set up this tool on Windows, follow these steps:
+## Installation
 
-1. **Install Prerequisites**: Ensure Python 3 and Git for Windows are installed.
-2. **Virtual Environment**: Open Command Prompt (cmd) and run:
-   ```cmd
-   python -m venv venv
-   venv\Scripts\activate.bat
+### Windows Users
+See [HANDOVER.md](HANDOVER.md) for detailed step-by-step Windows instructions.
+
+### macOS / Linux Users
+1. **Install Prerequisites**: Ensure Python 3, Git, and LibreOffice are installed.
+2. **Virtual Environment**: Open terminal and run:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 3. **Install Dependencies**:
    ```cmd

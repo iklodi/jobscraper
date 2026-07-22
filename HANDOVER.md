@@ -31,14 +31,11 @@ For jobs marked as `to_apply`, this script uses AI to generate tailored applicat
 - Saves the original job description as a PDF using Playwright.
 - Updates the job status to `generated`.
 
-### 5. The GitHub Sync (`github_sync.py`)
-Acts as a two-way sync between the local SQLite database and a GitHub repository's Issues/Kanban board.
-- **Push:** Creates new GitHub Issues for jobs that passed evaluation. Uploads the generated CV, Cover Letter, and JD PDFs to the issue so the user can easily download and apply.
-- **Pull:** Checks the GitHub Issues for label changes (e.g., `status: backlog`, `status: to_apply`, `status: applied`, `status: rejected`) and syncs those statuses back down to the local SQLite database.
-
-### 6. The Dashboard Generator (`dashboard_gen.py`)
-Generates a local Markdown dashboard (`dashboard.md`) giving a snapshot of the pipeline (Approved to Apply, Backlog, Applied, Rejected). 
-- Automatically commits and pushes itself to the GitHub repository so the user has a live README-style view of their pipeline.
+### 5. The Web Dashboard (`app.py`)
+Provides a sleek, modern, and mobile-friendly local Kanban dashboard running on Flask.
+- Displays all evaluated jobs in categorized lanes (Approved, Backlog, Applied, Rejected).
+- Allows users to seamlessly drag and drop jobs between lanes to track their application status.
+- Automatically saves state changes to the local SQLite database.
 
 ---
 

@@ -249,6 +249,8 @@ def run_evaluation():
 
     previous_applications = get_previous_applications()
     rules_text = get_evaluation_rules()
+    
+    eval_stats = {'score_counts': {}, 'recent_backlog': []}
 
     total_jobs = len(unscored_jobs)
     for idx, job in enumerate(unscored_jobs, 1):
@@ -271,6 +273,16 @@ def run_evaluation():
             is_recruiter = result.get('is_recruiter', None)
             hiring_manager_name = result.get('hiring_manager_name', None)
             jd_language = result.get('jd_language', None)
+            
+            eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
+            if score >= int(os.environ.get('MIN_PASS_SCORE', 9)):
+                eval_stats['recent_backlog'].append({
+                    'job_id': job_id,
+                    'title': title,
+                    'company': company,
+                    'score': score
+                })
+                
             print(f"--> Score: {score}/10")
             if score >= 8:
                 print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter} | HM: {hiring_manager_name} | Lang: {jd_language}")
@@ -309,6 +321,8 @@ def run_evaluation():
         # Dynamic Rate limit sleep
         # We don't want a fixed 4.5s delay if we are using Pro models, but 1.5s should be safe since the cascade handles the rest.
         time.sleep(1.5)
+        
+    return eval_stats
 
 def evaluate_single_job(job_id, custom_instructions=None):
     db.init_db()

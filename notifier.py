@@ -12,8 +12,10 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
     
     lines.append("## Scraping Stats (New Jobs Found)")
     if keyword_stats:
+        total_scraped = sum(keyword_stats.values())
+        lines.append(f"- **Total**: {total_scraped}")
         for kw, count in keyword_stats.items():
-            lines.append(f"- **{kw}**: {count}")
+            lines.append(f"- *{kw}*: {count}")
     else:
         lines.append("- Scraping skipped or no new jobs found.")
     lines.append("")

@@ -57,10 +57,10 @@ MIN_PASS_SCORE=9
 - **LibreOffice:** Set the `SOFFICE_PATH` environment variable in your `.env` file to point to your LibreOffice executable (e.g., `/Applications/LibreOffice.app/Contents/MacOS/soffice` for Mac, or `"C:\Program Files\LibreOffice\program\soffice.exe"` for Windows).
 
 ### 3. Base Documents
-The generator requires base documents to function:
-- **Base CV (.docx):** Must contain a specific `SKILLS` paragraph separated by ` · ` for replacement logic.
-- **Career Dossier (.md):** A detailed markdown file containing the user's deep career history to give the AI context.
-- **Cover Letter Template (.docx):** A base template for the AI to rewrite.
+The generator requires base documents to function (these can be found/edited in `cvs/docs/`):
+- **Base CV (`Base_CV_Template.docx`):** Must contain a specific `Skills` paragraph where skills are separated by ` · ` (e.g., `Python · Go · React`) for replacement logic.
+- **Career Dossier (`Career_Dossier.md`):** A detailed markdown file containing the user's deep career history to give the AI context.
+- **Cover Letter Template (`Base_CL_Template.docx`):** A base template for the AI to rewrite. It must contain the exact placeholders `[COMPANY]`, `[LOCATION]`, and `[DATE]` in the addressee block.
 
 ---
 

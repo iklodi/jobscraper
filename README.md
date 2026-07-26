@@ -56,3 +56,10 @@ See [HANDOVER.md](HANDOVER.md) for detailed step-by-step Windows instructions.
    *Important*: Ensure you add `SOFFICE_PATH` to your `.env` file pointing to your Windows path (e.g., `SOFFICE_PATH="C:\Program Files\LibreOffice\program\soffice.exe"`).
 5. **Configuration**: Create a `.env` file in the root directory (you can copy the contents of `.env.example`) and add your API keys and configuration.
 6. **Start the Dashboard**: You can double-click the `start_dashboard.bat` file or run it in the command prompt to automatically activate the environment, launch the web server, and open the dashboard in your browser.
+
+## Customizing Templates
+The repository comes with default, fictitious templates out-of-the-box in the `cvs/docs/` directory. To use this tool for yourself, you must replace these with your own information:
+
+1. **`cvs/docs/Base_CV_Template.docx`**: Replace this with your own CV. Ensure you have a paragraph named `Skills` where your skills are separated by a middle dot (` · `), as the AI uses this to dynamically inject tailored skills!
+2. **`cvs/docs/Base_CL_Template.docx`**: Replace this with your own Cover Letter. **Crucial**: Keep the exact text `[COMPANY]`, `[LOCATION]`, and `[DATE]` in the addressee block so the AI can automatically replace them for each application.
+3. **`cvs/docs/Career_Dossier.md`**: Update this markdown file with your own career history, strengths, and goals. The AI reads this to understand your background and answer "Why are you a good fit?" when rewriting the Cover Letter.

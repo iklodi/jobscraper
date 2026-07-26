@@ -1,17 +1,18 @@
 import asyncio
+import os
+import sys
+import time
+from dotenv import load_dotenv
+
+# Load env before importing internal modules that rely on env vars at module level
+load_dotenv(override=True)
+
 from scraper import run_scraper
 from evaluate import run_evaluation
 from generator import run_generator
-from dotenv import load_dotenv
-import time
 import db
 import notifier
 import progress_tracker
-import os
-
-load_dotenv(override=True)
-
-import sys
 
 async def main():
     progress_tracker.clear_status()

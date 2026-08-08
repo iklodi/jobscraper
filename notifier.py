@@ -79,7 +79,7 @@ def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
         print("Note: Email notification skipped due to missing SMTP configuration in .env.")
         return
         
-    if smtp_user in ["your-email@gmail.com", "your-email@infomaniak.com", "your-email@example.com"] and (not smtp_pass or smtp_pass == "your-email-password" or smtp_pass == "your-app-password"):
+    if smtp_user in ["your-email@gmail.com", "your-email@infomaniak.com"] and (not smtp_pass or smtp_pass == "your-email-password" or smtp_pass == "your-app-password"):
         print("Note: Email notification skipped because SMTP credentials are still the default placeholders.")
         return
 

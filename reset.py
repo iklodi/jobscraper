@@ -3,7 +3,6 @@ import argparse
 import sys
 import os
 import shutil
-from github import Github, Auth
 from dotenv import load_dotenv
 
 
@@ -16,7 +15,7 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
     
     if reset_all:
         # Prevent resetting jobs we've already applied to or explicitly rejected
-        cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE status NOT IN ('new', 'applied', 'interviewing', 'offer', 'rejected')")
+        cursor.execute("SELECT job_id, company, title FROM jobs WHERE status NOT IN ('new', 'applied', 'interviewing', 'offer', 'rejected')")
         matches = cursor.fetchall()
         if not matches:
             print("❌ No active evaluated jobs found to reset.")
@@ -24,16 +23,16 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
     
     elif score is not None:
         # Prevent resetting jobs we've already applied to or explicitly rejected
-        cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE score = ? AND status NOT IN ('applied', 'interviewing', 'offer', 'rejected')", (score,))
+        cursor.execute("SELECT job_id, company, title FROM jobs WHERE score = ? AND status NOT IN ('applied', 'interviewing', 'offer', 'rejected')", (score,))
         matches = cursor.fetchall()
         if not matches:
             print(f"❌ No active jobs found with score {score}.")
             return
     elif search_term:
-        cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE job_id = ?", (search_term,))
+        cursor.execute("SELECT job_id, company, title FROM jobs WHERE job_id = ?", (search_term,))
         matches = cursor.fetchall()
         if not matches:
-            cursor.execute("SELECT job_id, company, title, issue_number FROM jobs WHERE company LIKE ?", (f"%{search_term}%",))
+            cursor.execute("SELECT job_id, company, title FROM jobs WHERE company LIKE ?", (f"%{search_term}%",))
             matches = cursor.fetchall()
         if not matches:
             print(f"❌ No jobs found matching '{search_term}'.")
@@ -46,10 +45,9 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
     updated_count = len(matches)
     
     print(f"Resetting {updated_count} job(s)...")
-    for j_id, company, title, issue_number in matches:
+    for j_id, company, title in matches:
         print(f"Resetting: {company} - {title}")
-        
-        # GitHub Sync Removed
+
         # Clean up files
         cvs_dir = os.environ.get('CVS_DIR', 'cvs')
         jobs_dir = os.path.join(cvs_dir, 'jobs')
@@ -69,7 +67,7 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
         # Update DB for this specific job, wiping out old evaluations
         cursor.execute('''
             UPDATE jobs 
-            SET status=?, issue_number=NULL, issue_url=NULL, score=NULL, reasoning=NULL 
+            SET status=?, score=NULL, reasoning=NULL
             WHERE job_id=?
         ''', (status, j_id))
 

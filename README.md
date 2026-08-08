@@ -17,10 +17,9 @@ This is an automated agent that scrapes LinkedIn, scores jobs using Gemini, and 
    *After this first run, you can edit `scraper.py` and set `headless=True` to run it in the background.*
 
 3. **Set Environment Variables**:
-   You need API keys for Gemini and GitHub.
+   You need an API key for Gemini.
    ```bash
    export GEMINI_API_KEY="your-google-gemini-key"
-   export GITHUB_TOKEN="your-github-personal-access-token"
    ```
 
 ## Running the Pipeline

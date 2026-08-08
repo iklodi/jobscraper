@@ -24,9 +24,7 @@ def init_db():
             reasoning TEXT,
             status TEXT,
             created_at TIMESTAMP,
-            is_promoted BOOLEAN DEFAULT 0,
-            issue_number INTEGER,
-            issue_url TEXT
+            is_promoted BOOLEAN DEFAULT 0
         )
     ''')
     cursor.execute('''
@@ -43,11 +41,6 @@ def init_db():
     ''')
     try:
         cursor.execute('ALTER TABLE jobs ADD COLUMN is_promoted BOOLEAN DEFAULT 0')
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute('ALTER TABLE jobs ADD COLUMN issue_number INTEGER')
-        cursor.execute('ALTER TABLE jobs ADD COLUMN issue_url TEXT')
     except sqlite3.OperationalError:
         pass
     try:
@@ -113,17 +106,6 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
     conn.commit()
     conn.close()
 
-def update_job_issue(job_id, issue_number, issue_url):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE jobs
-        SET issue_number = ?, issue_url = ?, status = "synced"
-        WHERE job_id = ?
-    ''', (issue_number, issue_url, job_id))
-    conn.commit()
-    conn.close()
-
 def update_job_status(job_id, status):
     conn = get_connection()
     cursor = conn.cursor()
@@ -162,14 +144,6 @@ def get_job_history(job_id):
     conn.close()
     return [dict(h) for h in history]
 
-def get_all_jobs_with_issues():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT job_id, issue_number FROM jobs WHERE issue_number IS NOT NULL')
-    jobs = cursor.fetchall()
-    conn.close()
-    return jobs
-
 if __name__ == '__main__':
     init_db()
     print("Database initialized.")
@@ -178,8 +152,8 @@ def get_competing_jobs(company, exclude_job_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT job_id, title, description, issue_number 
-        FROM jobs 
+        SELECT job_id, title, description
+        FROM jobs
         WHERE company = ? AND job_id != ? AND status IN ('to_apply', 'generated', 'synced', 'backlog', 'approved')
     ''', (company, exclude_job_id))
     jobs = cursor.fetchall()
@@ -197,12 +171,12 @@ def get_status_counts():
 def get_job_links(job_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT link, issue_url FROM jobs WHERE job_id = ?', (job_id,))
+    cursor.execute('SELECT link FROM jobs WHERE job_id = ?', (job_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {'linkedin': row[0], 'github': row[1]}
-    return {'linkedin': None, 'github': None}
+        return {'linkedin': row[0]}
+    return {'linkedin': None}
 
 def get_jobs_by_company(company):
     conn = get_connection()

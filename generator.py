@@ -54,7 +54,7 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None):
-    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
     language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}." if jd_language else ""
@@ -300,7 +300,10 @@ async def generate_for_job(job_id, custom_instructions=None):
     import db
     conn = db.get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,))
+    cursor.execute('''SELECT job_id, title, company, location, description, link, score, reasoning, status,
+                             created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name,
+                             jd_language, application_notes
+                      FROM jobs WHERE job_id = ?''', (job_id,))
     job = cursor.fetchone()
     if not job:
         print(f"Job {job_id} not found.")
@@ -326,7 +329,7 @@ async def generate_for_job(job_id, custom_instructions=None):
         
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, issue_number, issue_url, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
+    job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     print(f"Generating documents for {company}: {title}...")
     
     baseline_pdf_path = CV_PATH.replace('.docx', '.pdf')

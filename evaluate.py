@@ -27,23 +27,6 @@ GROQ_MODELS = [
     'llama-3.1-8b-instant'
 ]
 
-def close_github_issue(issue_number, reason):
-    from github import Github, Auth
-    token = os.environ.get("GITHUB_TOKEN")
-    repo_name = os.environ.get("GITHUB_REPO", "your_username/your_repo")
-    if not token:
-        print("Cannot close GitHub issue: no GITHUB_TOKEN.")
-        return
-    try:
-        g = Github(auth=Auth.Token(token) if hasattr(Auth, 'Token') else token)
-        repo = g.get_repo(repo_name)
-        issue = repo.get_issue(issue_number)
-        issue.create_comment(f"Automated AI Update: Closing this issue because {reason}")
-        issue.edit(state='closed')
-        print(f"Closed issue #{issue_number} on GitHub.")
-    except Exception as e:
-        print(f"Failed to close issue #{issue_number}: {e}")
-
 def compare_jobs(groq_client, gemini_client, comp_prompt):
     max_retries = 3
     delay = 2
@@ -290,7 +273,7 @@ def run_evaluation():
             if score >= int(os.environ.get('MIN_PASS_SCORE', 9)):
                 competing = db.get_competing_jobs(company, job_id)
                 if competing:
-                    c_id, c_title, c_desc, c_issue = competing[0]
+                    c_id, c_title, c_desc = competing[0]
                     print(f"--> Found competing active job for {company}: '{c_title}'. Invoking AI comparison...")
                     comp_prompt_template = load_prompt('compare_prompt.txt')
                     comp_prompt = comp_prompt_template.replace('{title}', title) \
@@ -306,8 +289,6 @@ def run_evaluation():
                         if pref == 'NEW':
                             print(f"--> AI prefers the NEW job. Rejecting old job '{c_title}'...")
                             db.update_job_status(c_id, 'rejected')
-                            if c_issue:
-                                close_github_issue(c_issue, f"we found a better fitting role at the same company: '{title}'. AI Reasoning: {comp_reason}")
                         else:
                             print(f"--> AI prefers the OLD job. Rejecting new job '{title}'...")
                             score = 1

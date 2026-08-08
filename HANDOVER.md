@@ -1,14 +1,14 @@
 # AI Job Application Pipeline - Handover Document
 
 ## Project Overview
-This project is an end-to-end, AI-powered automation pipeline designed to streamline the job search process. It automatically scrapes job postings from LinkedIn based on predefined search criteria, uses Large Language Models (LLMs) to evaluate the job's fit against a candidate's profile, generates highly personalized CVs and Cover Letters for approved roles, and synchronizes the entire workflow to a GitHub repository Kanban board for easy tracking.
+This project is an end-to-end, AI-powered automation pipeline designed to streamline the job search process. It automatically scrapes job postings from LinkedIn based on predefined search criteria, uses Large Language Models (LLMs) to evaluate the job's fit against a candidate's profile, generates highly personalized CVs and Cover Letters for approved roles, and tracks the entire workflow on a local Kanban dashboard.
 
 ## Architecture & Core Components
 
 The pipeline consists of several modular scripts that are orchestrated by a central `main.py` controller. The data state is maintained locally in an SQLite database (`jobs.db`).
 
 ### 1. The Controller (`main.py`)
-Orchestrates the entire pipeline sequentially. It runs the scraper, triggers the evaluator, prompts document generation for approved jobs, builds a local dashboard, and finally syncs everything to GitHub.
+Orchestrates the entire pipeline sequentially. It runs the scraper, triggers the evaluator, prompts document generation for approved jobs, and sends an email summary. Evaluated jobs are tracked on the local Kanban dashboard.
 
 ### 2. The Scraper (`scraper.py`)
 Uses **Playwright (Chromium)** to automate a headless (or headful) browser session on LinkedIn. 
@@ -46,8 +46,6 @@ The pipeline relies on several API keys. You must have a `.env` file in the root
 ```env
 GROQ_API_KEY="your_groq_key"
 GEMINI_API_KEY="your_gemini_key"
-GITHUB_TOKEN="your_github_personal_access_token"
-GITHUB_REPO="your_username/your_repo"
 MIN_PASS_SCORE=9
 ```
 

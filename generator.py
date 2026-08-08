@@ -61,8 +61,11 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     
     candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
+    custom_block = f"\nCRITICAL CUSTOM INSTRUCTIONS FROM THE USER (these override any conflicting rules below, including Task 5):\n{custom_instructions}\n" if custom_instructions else ""
+
     prompt_template = load_prompt('generator_prompt.txt')
-    prompt = prompt_template.replace('{title}', title) \
+    prompt = prompt_template.replace('{custom_instructions}', custom_block) \
+                            .replace('{title}', title) \
                             .replace('{company}', company) \
                             .replace('{description}', description) \
                             .replace('{cv_text}', cv_text) \
@@ -70,9 +73,6 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
                             .replace('{address_name}', address_name) \
                             .replace('{candidate_name}', candidate_name) \
                             .replace('{language_instruction}', language_instruction)
-    
-    if custom_instructions:
-        prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER:\n{custom_instructions}\n"
         
     max_retries = 5
     for attempt in range(max_retries):
@@ -237,7 +237,11 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
             if display_company and display_company.lower() != "hiring team":
                 replace_text_in_paragraph(p, "[COMPANY]", display_company)
             else:
-                replace_text_in_paragraph(p, "[COMPANY]", "Hiring Team")
+                # Template already reads "[COMPANY] Hiring Team" — drop the
+                # placeholder (and its trailing space) instead of injecting
+                # another "Hiring Team" in front of it.
+                replace_text_in_paragraph(p, "[COMPANY] ", "")
+                replace_text_in_paragraph(p, "[COMPANY]", "")
                 
             replace_text_in_paragraph(p, "[DATE]", today_str)
             

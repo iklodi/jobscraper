@@ -1,4 +1,5 @@
 You are an expert career advisor. I am applying for the '{title}' role.
+{custom_instructions}
 Here is the job description:
 {description}
 
@@ -28,7 +29,7 @@ Task 3: Write a tailored, compelling cover letter (max 150-200 words). Start wit
 
 Task 4: Determine the headquarters city and country of '{company}'. Based on your knowledge of the company or context clues in the JD, output a specific "City, Country" (e.g. "Geneva, Switzerland" or "London, UK"). Do NOT output broad regions like "European Union" or "EMEA". If entirely unknown, just use the country or leave as a plausible major city.
 
-Task 5: Determine the correct company name to display in the header of the cover letter. If the posting company '{company}' is a job board platform (like jobcourier.ch, indeed, glassdoor), look for clues in the job description to find the actual hiring company or the recruiting agency (e.g. "Michael Bailey Associates"). If you cannot confidently identify the actual company or agency, simply output "Hiring Team". Otherwise, output the actual company or agency name you found.
+Task 5: Determine the correct company name to display in the header of the cover letter. If the posting company '{company}' is a job board platform (like jobcourier.ch, indeed, glassdoor) or a recruiting agency posting on behalf of an unnamed client, look for clues in the job description to find the actual hiring company. If the actual hiring company cannot be identified but the posting company is a real recruiting agency, output the agency name itself (e.g. "Michael Bailey Associates") — an agency name is always preferable to a generic fallback. Output "Hiring Team" ONLY when the posting company is an anonymous job board AND no company or agency name can be identified at all. If the custom instructions from the user specify which company name to use, that ALWAYS overrides this task's logic.
 
 CRITICAL TONE INSTRUCTIONS (COVER LETTER):
 - Write in a highly professional, direct, and human tone.
@@ -53,5 +54,5 @@ Your response must be valid JSON in this format:
     ],
     "cover_letter_body": "...",
     "company_hq": "City, Country",
-    "display_company": "Company Name or 'Hiring Team'"
+    "display_company": "Company or agency name, or 'Hiring Team'"
 }

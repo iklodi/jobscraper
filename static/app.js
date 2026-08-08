@@ -81,6 +81,7 @@ function renderBoard() {
         'new': document.querySelector('#col-new .kanban-cards'),
         'to_apply': document.querySelector('#col-backlog .kanban-cards'),
         'failed': document.querySelector('#col-failed .kanban-cards'),
+        'account_required': document.querySelector('#col-account-required .kanban-cards'),
         'approved': document.querySelector('#col-approved .kanban-cards'),
         'applied': document.querySelector('#col-applied .kanban-cards'),
         'interviewing': document.querySelector('#col-interviewing .kanban-cards'),
@@ -94,7 +95,7 @@ function renderBoard() {
 
     // Group jobs by status
     const groupedJobs = {
-        'new': [], 'to_apply': [], 'failed': [], 'approved': [], 'applied': [], 'interviewing': [], 'rejected': []
+        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'applied': [], 'interviewing': [], 'rejected': []
     };
 
     allJobs.forEach(job => {
@@ -236,6 +237,13 @@ function openJobDetails(jobId) {
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
+                <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Move to Account Required</button>
+            `;
+        } else if (job.status === 'account_required') {
+            contextButtonsHtml = `
+                <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
+                <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
+                <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
             `;
         } else if (job.status === 'applied') {
             contextButtonsHtml = `

@@ -215,6 +215,41 @@ def replace_text_in_paragraph(paragraph, old_text, new_text):
         if font_size:
             run.font.size = font_size
 
+def sanitize_generated_texts(texts, company, location, jd_language):
+    """Deterministic guards for AI output fields that end up verbatim in the documents."""
+    import re
+
+    # Header company: the posting company beats a generic punt. If it's an agency,
+    # "<Agency> Hiring Team" is still a correct addressee.
+    dc = (texts.get('display_company') or '').strip()
+    if not dc or dc.lower() in ('hiring team', 'unknown', 'n/a', 'none'):
+        texts['display_company'] = company
+
+    # HQ: drop 'Unknown'-style fragments; fall back to the job's location
+    hq = (texts.get('company_hq') or '').strip()
+    parts = [p.strip() for p in hq.split(',')
+             if p.strip() and p.strip().lower() not in ('unknown', 'n/a', 'none')]
+    texts['company_hq'] = ', '.join(parts) if parts else re.sub(r'\s*\([^)]*\)', '', location or '').strip()
+
+    # Greeting: the first line must be a well-formed salutation, never a bare name
+    lines = (texts.get('cover_letter_body') or '').split('\n')
+    starters = ('dear', 'hi', 'hello', 'greetings', 'bonjour', 'cher', 'chère',
+                'madame', 'monsieur', 'sehr geehrte', 'guten tag', 'hallo', 'liebe')
+    for i, line in enumerate(lines):
+        first = line.strip()
+        if not first:
+            continue
+        if any(first.lower().startswith(s) for s in starters):
+            if first[-1] not in ',:':
+                lines[i] = f"{first},"
+        elif len(first) <= 40 and len(first.split()) <= 4 and first[-1] not in '.!?:':
+            jl = (jd_language or '').lower()
+            prefix = 'Bonjour' if 'french' in jl else 'Guten Tag' if 'german' in jl else 'Dear'
+            lines[i] = f"{prefix} {first.rstrip(',')},"
+        break
+    texts['cover_letter_body'] = '\n'.join(lines)
+    return texts
+
 def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, location, hiring_manager_name, jd_language):
     doc = Document(base_cl_path)
     
@@ -381,8 +416,9 @@ async def generate_for_job(job_id, custom_instructions=None):
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
-        company_hq = texts.get('company_hq', location)
-        display_company = texts.get('display_company', company)
+        sanitize_generated_texts(texts, company, location, jd_language)
+        company_hq = texts['company_hq']
+        display_company = texts['display_company']
         adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, jd_language)
         
         # Save MD format

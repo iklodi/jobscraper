@@ -60,15 +60,8 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
         
     return "\n".join(lines)
 
-def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
-    # 1. Generate text
-    md_summary = format_summary(duration, keyword_stats, eval_stats, status_counts)
-    html_summary = markdown.markdown(md_summary)
-    
-    # 2. Print to console
-    print("\n" + md_summary + "\n")
-    
-    # 3. Send email if configured
+def send_email(subject, md_body):
+    """Send a markdown-formatted email using the SMTP settings from .env."""
     smtp_host = os.environ.get('SMTP_HOST')
     smtp_port = os.environ.get('SMTP_PORT', 465)
     smtp_user = os.environ.get('SMTP_USER')
@@ -86,12 +79,12 @@ def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
 
     try:
         msg = EmailMessage()
-        msg['Subject'] = 'AI Job Scraper - Daily Summary'
+        msg['Subject'] = subject
         msg['From'] = smtp_from
         msg['To'] = smtp_to
-        
-        msg.set_content(md_summary)
-        msg.add_alternative(html_summary, subtype='html')
+
+        msg.set_content(md_body)
+        msg.add_alternative(markdown.markdown(md_body), subtype='html')
         
         # Use SSL since default is port 465 usually
         if int(smtp_port) == 465:
@@ -103,6 +96,12 @@ def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
         server.login(smtp_user, smtp_pass)
         server.send_message(msg)
         server.quit()
-        print("Successfully sent email summary.")
+        print(f"Successfully sent email: {subject}")
     except Exception as e:
-        print(f"Failed to send email summary: {e}")
+        print(f"Failed to send email '{subject}': {e}")
+
+
+def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
+    md_summary = format_summary(duration, keyword_stats, eval_stats, status_counts)
+    print("\n" + md_summary + "\n")
+    send_email('AI Job Scraper - Daily Summary', md_summary)

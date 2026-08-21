@@ -5,6 +5,7 @@ import urllib.parse
 import os
 import difflib
 import progress_tracker
+import notifier
 
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
@@ -74,7 +75,21 @@ async def run_scraper():
         if 'login' in page.url:
             print("Please log into LinkedIn in the opened browser window.")
             print("Waiting for you to log in...")
-            await page.wait_for_url('**/feed/**', timeout=300000) 
+            notifier.send_email(
+                'AI Job Scraper - LinkedIn re-login required',
+                "The scraper landed on the LinkedIn login page, so the saved browser session has expired.\n\n"
+                "Connect to the scraper machine over VNC (port 5900) and complete the login "
+                "in the browser window that is already open.\n\n"
+                "This run waits **5 minutes** for the login, then aborts; scraping resumes "
+                "on the next scheduled run once you are logged in.\n\n"
+                f"Dashboard: {os.environ.get('DASHBOARD_URL', 'http://localhost:5050')}"
+            )
+            try:
+                await page.wait_for_url('**/feed/**', timeout=300000)
+            except Exception:
+                print("Login was not completed within 5 minutes. Skipping scrape for this run.")
+                await browser.close()
+                return {}
             print("Successfully logged in!")
 
         keywords_list, locations_list = get_search_criteria()

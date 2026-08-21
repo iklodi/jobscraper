@@ -41,7 +41,8 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
             
             links_text = []
             if job_id:
-                links_text.append(f"[View Details](http://100.88.206.96:5050/?job_id={job_id})")
+                dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
+                links_text.append(f"[View Details]({dashboard_url}/?job_id={job_id})")
                 job_links = db.get_job_links(job_id)
                 if job_links.get('linkedin'):
                     links_text.append(f"[LinkedIn]({job_links['linkedin']})")

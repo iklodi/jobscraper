@@ -27,7 +27,9 @@ import db
 import notifier
 import progress_tracker
 
-load_dotenv(override=True)
+# Not override=True: an explicitly exported variable must beat the .env file,
+# otherwise per-run settings passed on the command line are silently ignored.
+load_dotenv()
 
 # This host also runs other services, so a long batch must not accumulate tabs.
 MAX_OPEN_REVIEW_TABS = int(os.environ.get('APPLY_MAX_OPEN_TABS', '3'))

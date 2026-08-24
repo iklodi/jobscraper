@@ -144,6 +144,14 @@ For every field, decide what to do. Output valid JSON only:
   "notes": "anything the human should know"
 }}
 
+WHAT COUNTS AS AN application_form:
+- Many employers split the application over several steps ("My Information",
+  "My Experience", "Application Questions", "Voluntary Disclosures", "Self Identify",
+  "Review"). EACH of those steps is an "application_form" - classify them as such even
+  though they are only part of the application.
+- A newsletter, job-alert or "join our talent network" signup is NOT an application form;
+  classify it as "other" and skip every field.
+
 ABSOLUTE RULES:
 - NEVER invent, guess, or approximate an answer. If the profile does not contain the
   information, put the field in "unanswered" and use action "skip". A wrong answer on a
@@ -546,6 +554,136 @@ async def create_or_signin_account(page, client, profile, job_id):
     return True, f'{verb} {domain} (credentials in ats_accounts.yaml).'
 
 
+# Controls that move a multi-step application forward, and the ones that send it.
+NEXT_LABELS = re.compile(
+    r'^(save and continue|save & continue|continue|next|next step|save and next|'
+    r'weiter|suivant|continuer)\b', re.I)
+SUBMIT_LABELS = re.compile(
+    r'^(submit|submit application|send application|send|finish|complete application|'
+    r'envoyer|absenden)\b', re.I)
+
+
+async def find_control(page, pattern, prefer_last=True):
+    """Return a visible button/link matching the label, or None."""
+    for role in ('button', 'link'):
+        matches = page.get_by_role(role, name=pattern)
+        for control in ([matches.last, matches.first] if prefer_last else [matches.first]):
+            try:
+                await control.wait_for(state='visible', timeout=2500)
+                return control
+            except Exception:
+                continue
+    return None
+
+
+async def advance_step(page):
+    """Click the wizard's 'next' control. Never clicks a submit control."""
+    control = await find_control(page, NEXT_LABELS)
+    if not control:
+        return False
+    try:
+        await control.scroll_into_view_if_needed(timeout=3000)
+        await control.click(timeout=6000)
+        await page.wait_for_timeout(4500)
+        return True
+    except Exception:
+        return False
+
+
+async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, folder, max_steps=10):
+    """Fill an application, walking multi-step wizards, and stop before submitting.
+
+    Returns (summary_lines, reached_submit).
+    """
+    job_id, title, company, _link, description = job
+    lines, unanswered, uploaded_all = [], [], []
+    seen = set()
+    reached_submit = False
+
+    for step in range(1, max_steps + 1):
+        await dismiss_cookie_banner(page)
+        body = await page.evaluate(COLLECT_FIELDS_JS)
+        fields, page_text = body['fields'], body['text']
+
+        if CAPTCHA_PATTERNS.search(page_text):
+            lines.append(f'Step {step}: stopped at a CAPTCHA - finish this one by hand.')
+            break
+
+        # A page we have already filled means the wizard did not actually advance.
+        signature = (page.url, tuple(f.get('label', '')[:40] for f in fields))
+        if signature in seen:
+            lines.append(f'Step {step}: the form did not advance (it may be rejecting a value).')
+            break
+        seen.add(signature)
+
+        step_name = 'form'
+        heading = re.search(r'current step \d+ of \d+\s*\|?\s*([^\n|]{3,40})', page_text, re.I)
+        if heading:
+            step_name = heading.group(1).strip()
+
+        filled = 0
+        if fields:
+            plan = ask_gemini(client, MAPPING_PROMPT.format(
+                profile=yaml.safe_dump(profile, allow_unicode=True, sort_keys=False),
+                title=title, company=company,
+                description=(description or '')[:3000],
+                fields=json.dumps(fields, ensure_ascii=False)[:20000],
+                page_text=page_text[:3000],
+            ))
+            kind = plan.get('page_kind') if plan else None
+            if kind == 'confirmation':
+                lines.append(f'Step {step}: reached a confirmation page - the application appears to be in.')
+                break
+            if kind and kind != 'application_form':
+                lines.append(
+                    f'Step {step}: stopped - this page is a "{kind}", not part of the '
+                    f'application, so nothing was filled in.'
+                )
+                break
+            if plan:
+                filled, errors = await apply_actions(page, plan.get('actions', []), fields)
+                unanswered.extend(plan.get('unanswered') or [])
+                if errors:
+                    lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
+
+        uploaded = await upload_documents(page, fields, cv_path, cl_path, ref_path)
+        uploaded_all.extend(uploaded)
+
+        try:
+            shot = os.path.join(folder, f'{job_id}_step{step}_{re.sub(r"[^A-Za-z0-9]+", "_", step_name)[:24]}.png')
+            await page.screenshot(path=shot, full_page=True)
+        except Exception:
+            pass
+
+        summary = f'Step {step} ({step_name}): filled {filled} field(s)'
+        if uploaded:
+            summary += f', uploaded {", ".join(uploaded)}'
+        lines.append(summary + '.')
+
+        # Stop at the final step rather than sending the application.
+        if await find_control(page, SUBMIT_LABELS):
+            reached_submit = True
+            lines.append(
+                f'Reached the final step - a Submit control is on screen. '
+                f'Nothing was sent; review it and press Submit yourself.'
+            )
+            break
+
+        if not await advance_step(page):
+            lines.append('No "Save and Continue" control found, so this looks like the last page.')
+            break
+    else:
+        lines.append(f'Stopped after {max_steps} steps without reaching a submit page.')
+
+    if unanswered:
+        lines.append('\nQUESTIONS THE PROFILE DOES NOT ANSWER (left blank):')
+        for item in unanswered:
+            lines.append(f'  - {item.get("question")}  ({item.get("reason")})')
+        lines.append('Add these to profile.yaml so future applications answer them automatically.')
+
+    return lines, reached_submit
+
+
 async def dismiss_cookie_banner(page):
     """Accept cookie/consent banners, which otherwise intercept clicks."""
     accept = re.compile(r'^(accept|accept all|allow all|i agree|agree|got it|'
@@ -769,38 +907,26 @@ async def process_job(page, client, profile, job):
             f'Apply manually; documents are in: {folder}'
         )
 
-    filled, errors = await apply_actions(target, plan.get('actions', []), fields)
-
     reference_letter = (profile.get('employment') or {}).get('reference_letter')
     reference_path = os.path.join(CVS_DIR, reference_letter) if reference_letter else None
     if reference_path and not os.path.exists(reference_path):
         reference_path = None
-    uploaded = await upload_documents(target, fields, cv_path, cl_path, reference_path)
 
-    shot_path = os.path.join(folder, f'{job_id}_filled_form.png')
-    try:
-        await target.screenshot(path=shot_path, full_page=True)
-    except Exception:
-        shot_path = None
+    step_lines, reached_submit = await fill_wizard(
+        target, client, profile, job, cv_path, cl_path, reference_path, folder
+    )
 
-    unanswered = plan.get('unanswered') or []
-    lines = [
-        f'Form filled but NOT submitted. Review and submit here: {apply_url}',
-        f'Filled {filled} field(s); uploaded: {", ".join(uploaded) if uploaded else "nothing"}.',
-    ]
+    header = 'Application filled but NOT submitted. Review and submit here: ' + apply_url
+    lines = [header]
     if account_note:
         lines.append(account_note)
-    if shot_path:
-        lines.append(f'Screenshot of the filled form: {os.path.basename(shot_path)}')
-    if errors:
-        lines.append(f'Fields that would not accept input: {"; ".join(errors)}')
-    if unanswered:
-        lines.append('\nQUESTIONS THE PROFILE DOES NOT ANSWER (left blank):')
-        for item in unanswered:
-            lines.append(f'  - {item.get("question")}  ({item.get("reason")})')
-        lines.append('Add these to profile.yaml so future applications answer them automatically.')
-    if plan.get('notes'):
-        lines.append(f'\nAgent notes: {plan["notes"]}')
+    lines.extend(step_lines)
+    lines.append(f'\nScreenshots of each step are in: {folder}')
+    if not reached_submit:
+        lines.append(
+            'NOTE: the run did not reach a page with a Submit control, so the application '
+            'may be incomplete - check it before submitting.'
+        )
 
     return 'ready_to_submit', '\n'.join(lines)
 

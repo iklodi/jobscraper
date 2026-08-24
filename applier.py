@@ -233,8 +233,8 @@ async def find_apply_url(page, linkedin_url):
     return None, None
 
 
-async def upload_documents(page, fields, cv_path, cl_path):
-    """Attach the generated PDFs to any file inputs on the page."""
+async def upload_documents(page, fields, cv_path, cl_path, extra_path=None):
+    """Attach the generated PDFs (and any extra document) to file inputs on the page."""
     uploaded = []
     for field in fields:
         if field.get('type') != 'file':
@@ -245,6 +245,9 @@ async def upload_documents(page, fields, cv_path, cl_path):
         target = None
         if re.search(r'cover|motivation|lettre|anschreiben', haystack):
             target = cl_path
+        elif re.search(r'reference|recommendation|referenz|zeugnis|attestation|certificate|'
+                       r'additional|other document|supporting', haystack):
+            target = extra_path
         elif re.search(r'cv|resume|lebenslauf', haystack) or not uploaded:
             target = cv_path
         if not target or not os.path.exists(target):
@@ -361,7 +364,12 @@ async def process_job(page, client, profile, job):
         )
 
     filled, errors = await apply_actions(target, plan.get('actions', []), fields)
-    uploaded = await upload_documents(target, fields, cv_path, cl_path)
+
+    reference_letter = (profile.get('employment') or {}).get('reference_letter')
+    reference_path = os.path.join(CVS_DIR, reference_letter) if reference_letter else None
+    if reference_path and not os.path.exists(reference_path):
+        reference_path = None
+    uploaded = await upload_documents(target, fields, cv_path, cl_path, reference_path)
 
     shot_path = os.path.join(folder, f'{job_id}_filled_form.png')
     try:

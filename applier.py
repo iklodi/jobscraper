@@ -195,19 +195,18 @@ async def find_apply_url(page, linkedin_url):
     await page.goto(linkedin_url, timeout=60000)
     await page.wait_for_timeout(5000)
 
-    # LinkedIn ships obfuscated class names, so match on the accessible label
-    # first and keep the legacy class selectors as a fallback.
-    selectors = [
-        'button.jobs-apply-button',
-        'a.jobs-apply-button',
-        'button:text-is("Apply")',
-        'a:text-is("Apply")',
-        'button:text-is("Easy Apply")',
-        'a:has-text("Apply on company website")',
-        'button:has-text("Apply")',
+    # LinkedIn ships obfuscated class names and renders the apply control as a
+    # button, a link, or a div with role=button depending on the posting, so go
+    # through the accessibility tree rather than CSS.
+    apply_re = re.compile(r'^\s*(easy apply|apply)\b', re.I)
+    candidates = [
+        page.get_by_role('button', name=apply_re),
+        page.get_by_role('link', name=apply_re),
+        page.locator('button.jobs-apply-button, a.jobs-apply-button'),
+        page.locator('[class*="jobs-apply"] button, [class*="jobs-apply"] a'),
     ]
-    for selector in selectors:
-        button = page.locator(selector).first
+    for candidate in candidates:
+        button = candidate.first
         try:
             await button.wait_for(state='visible', timeout=6000)
             await button.scroll_into_view_if_needed(timeout=3000)
@@ -225,6 +224,12 @@ async def find_apply_url(page, linkedin_url):
             # No new tab: either an in-page Easy Apply modal or a same-tab navigation.
             await page.wait_for_timeout(3000)
             return page, 'same_tab'
+
+    # Nothing matched - leave a screenshot behind so the failure is diagnosable.
+    try:
+        await page.screenshot(path=os.path.join(OUTPUT_DIR, 'last_apply_lookup_failure.png'))
+    except Exception:
+        pass
     return None, None
 
 

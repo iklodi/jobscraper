@@ -258,8 +258,35 @@ async def upload_documents(page, fields, cv_path, cl_path):
     return uploaded
 
 
-async def apply_actions(page, actions):
+async def tick_box(page, locator, field):
+    """Tick a checkbox/radio, coping with inputs hidden behind styled labels."""
+    try:
+        await locator.check(timeout=4000)
+        return
+    except Exception:
+        pass
+    # Most design systems hide the real input and style a <label> on top of it.
+    field_id = field.get('id') if field else None
+    if field_id:
+        label = page.locator(f'label[for="{field_id}"]').first
+        try:
+            await label.click(timeout=3000)
+            if await locator.is_checked():
+                return
+        except Exception:
+            pass
+    try:
+        await locator.click(force=True, timeout=3000)
+        if await locator.is_checked():
+            return
+    except Exception:
+        pass
+    await locator.check(force=True, timeout=3000)
+
+
+async def apply_actions(page, actions, fields=None):
     """Execute the model's fill plan; returns (filled_count, errors)."""
+    by_idx = {f['idx']: f for f in (fields or [])}
     filled, errors = 0, []
     for action in actions:
         kind = action.get('action')
@@ -275,7 +302,7 @@ async def apply_actions(page, actions):
                 await locator.select_option(label=str(value), timeout=5000)
             elif kind == 'check':
                 if str(value).lower() in ('true', 'yes', '1'):
-                    await locator.check(timeout=5000)
+                    await tick_box(page, locator, by_idx.get(action.get('idx')))
             else:
                 continue
             filled += 1
@@ -333,7 +360,7 @@ async def process_job(page, client, profile, job):
             f'Documents ready in: {folder}'
         )
 
-    filled, errors = await apply_actions(target, plan.get('actions', []))
+    filled, errors = await apply_actions(target, plan.get('actions', []), fields)
     uploaded = await upload_documents(target, fields, cv_path, cl_path)
 
     shot_path = os.path.join(folder, f'{job_id}_filled_form.png')

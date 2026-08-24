@@ -321,9 +321,15 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
             await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
             return new_page, 'external'
         except Exception:
-            # No new tab: either an in-page Easy Apply modal or a same-tab navigation.
-            await page.wait_for_timeout(3000)
-            return page, 'same_tab'
+            # No new tab: either a same-tab navigation or an in-page Easy Apply
+            # modal, which renders as a dialog a moment after the click.
+            try:
+                await page.locator('[role=dialog]').first.wait_for(state='visible', timeout=10000)
+                await page.wait_for_timeout(2000)
+                return page, 'easy_apply'
+            except Exception:
+                await page.wait_for_timeout(3000)
+                return page, 'same_tab'
 
     # Nothing matched - leave a screenshot behind so the failure is diagnosable.
     try:

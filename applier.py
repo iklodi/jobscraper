@@ -751,29 +751,34 @@ async def try_advance_to_form(page):
 
     Returns the page holding the form (possibly a new tab), or None.
     """
-    apply_re = re.compile(r'\b(apply now|apply for this job|apply online|apply|'
-                          r'postuler|bewerben|jetzt bewerben)\b', re.I)
-    for role in ('link', 'button'):
-        control = page.get_by_role(role, name=apply_re).first
-        try:
-            await control.wait_for(state='visible', timeout=4000)
-            await control.scroll_into_view_if_needed(timeout=3000)
-        except Exception:
-            continue
-        before = page.url
-        try:
-            async with page.context.expect_page(timeout=8000) as new_page_info:
-                await control.click(timeout=5000)
-            new_page = await new_page_info.value
-            await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
-            await new_page.wait_for_timeout(2500)
-            return new_page
-        except Exception:
-            await page.wait_for_timeout(3000)
-            if page.url != before:
+    # Workday-style chooser first ("Apply Manually" beats "Autofill with Resume",
+    # whose parser mangles job titles, and "Apply With LinkedIn", which re-auths).
+    patterns = [
+        re.compile(r'^\s*apply manually\s*$', re.I),
+        re.compile(r'^\s*(start (your )?application|apply now|apply for this job|apply online)\s*$', re.I),
+        re.compile(r'\b(apply|postuler|bewerben|jetzt bewerben)\b', re.I),
+    ]
+    for apply_re in patterns:
+        for role in ('link', 'button'):
+            control = page.get_by_role(role, name=apply_re).first
+            try:
+                await control.wait_for(state='visible', timeout=3000)
+                await control.scroll_into_view_if_needed(timeout=3000)
+            except Exception:
+                continue
+
+            before = page.url
+            try:
+                async with page.context.expect_page(timeout=8000) as new_page_info:
+                    await control.click(timeout=5000)
+                new_page = await new_page_info.value
+                await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
+                await new_page.wait_for_timeout(2500)
+                return new_page
+            except Exception:
+                # No new tab: either a same-tab navigation or an in-page reveal.
+                await page.wait_for_timeout(3500)
                 return page
-            # Same URL but the click may have revealed an in-page form.
-            return page
     return None
 
 

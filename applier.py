@@ -283,7 +283,7 @@ def ask_gemini(client, prompt):
     return None
 
 
-async def find_apply_url(page, linkedin_url):
+async def find_apply_url(page, linkedin_url, job_id='unknown'):
     """Open the LinkedIn posting and follow its apply button to the employer's form."""
     await page.goto(linkedin_url, timeout=60000)
     await page.wait_for_timeout(5000)
@@ -291,12 +291,17 @@ async def find_apply_url(page, linkedin_url):
     # LinkedIn ships obfuscated class names and renders the apply control as a
     # button, a link, or a div with role=button depending on the posting, so go
     # through the accessibility tree rather than CSS.
-    apply_re = re.compile(r'^\s*(easy apply|apply)\b', re.I)
+    # Anchored first, then loose: the button's accessible name varies ("Apply",
+    # "Easy Apply", "Apply on LinkedIn", sometimes prefixed by icon text).
+    strict_re = re.compile(r'^\s*(easy apply|apply)\b', re.I)
+    loose_re = re.compile(r'\b(easy apply|apply)\b', re.I)
     candidates = [
-        page.get_by_role('button', name=apply_re),
-        page.get_by_role('link', name=apply_re),
+        page.get_by_role('button', name=strict_re),
+        page.get_by_role('link', name=strict_re),
         page.locator('button.jobs-apply-button, a.jobs-apply-button'),
         page.locator('[class*="jobs-apply"] button, [class*="jobs-apply"] a'),
+        page.get_by_role('button', name=loose_re),
+        page.get_by_role('link', name=loose_re),
     ]
     for candidate in candidates:
         button = candidate.first
@@ -320,7 +325,8 @@ async def find_apply_url(page, linkedin_url):
 
     # Nothing matched - leave a screenshot behind so the failure is diagnosable.
     try:
-        await page.screenshot(path=os.path.join(OUTPUT_DIR, 'last_apply_lookup_failure.png'))
+        await page.screenshot(
+            path=os.path.join(OUTPUT_DIR, f'{job_id}_apply_lookup_failure.png'))
     except Exception:
         pass
     return None, None
@@ -1043,7 +1049,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
     if not cv_path:
         return 'failed', 'No generated CV/cover letter found for this job - regenerate the assets first.'
 
-    target, mode = await find_apply_url(page, link)
+    target, mode = await find_apply_url(page, link, job_id)
     if not target:
         try:
             listing_text = await page.evaluate('() => document.body.innerText.slice(0, 4000)')
@@ -1053,7 +1059,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
             return 'failed', 'The listing is closed - LinkedIn shows "No longer accepting applications".'
         return 'failed', (
             'Could not find an Apply button on the LinkedIn posting. See '
-            'last_apply_lookup_failure.png in the applications folder for what the page looked like.'
+            f'{job_id}_apply_lookup_failure.png in the applications folder.'
         )
 
     # An employer's apply link often lands on the job description first, so walk

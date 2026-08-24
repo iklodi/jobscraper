@@ -29,6 +29,10 @@ import progress_tracker
 
 load_dotenv(override=True)
 
+# This host also runs other services, so a long batch must not accumulate tabs.
+MAX_OPEN_REVIEW_TABS = int(os.environ.get('APPLY_MAX_OPEN_TABS', '3'))
+MIN_FREE_MB = int(os.environ.get('APPLY_MIN_FREE_MB', '400'))
+
 CHROME_PROFILE_DIR = './chrome_profile'
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 PROFILE_PATH = os.path.join(CVS_DIR, 'profile.yaml')
@@ -1178,6 +1182,18 @@ def release_run_lock():
         pass
 
 
+def available_memory_mb():
+    """MemAvailable in MB, or None if it cannot be read."""
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if line.startswith('MemAvailable:'):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return None
+
+
 def release_profile_lock():
     """Close a browser left open by an earlier run.
 
@@ -1255,6 +1271,7 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
         return []
 
     results = []
+    review_tabs = []
     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
     release_profile_lock()
     async with async_playwright() as p:
@@ -1267,7 +1284,12 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
 
         for index, job in enumerate(jobs, start=1):
             if progress_tracker.is_stop_requested():
-                print('Stop requested; halting applications.')
+                print('Stop requested; halting applications.', flush=True)
+                break
+            free_mb = available_memory_mb()
+            if free_mb is not None and free_mb < MIN_FREE_MB:
+                print(f'Only {free_mb}MB RAM available; stopping the batch so other '
+                      f'services on this host keep running.', flush=True)
                 break
             job_id, title, company = job[0], job[1], job[2]
             progress_tracker.set_status(f'Applying: {company}', index, len(jobs))
@@ -1282,9 +1304,20 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
             db.update_job_status(job_id, status)
             db.add_job_note(job_id, note)
             results.append({'job_id': job_id, 'company': company, 'status': status})
-            print(f'  -> {status}')
-            # Filled forms stay open in their own tab so they can be reviewed and
-            # submitted over VNC. Be polite between employers.
+            print(f'  -> {status}', flush=True)
+
+            # Only forms still awaiting a human stay open, and only a few: each
+            # extra tab costs ~150MB of Chromium, and this box shares its memory
+            # with other services. Everything else is closed straight away.
+            if status == 'ready_to_submit' and len(review_tabs) < MAX_OPEN_REVIEW_TABS:
+                review_tabs.extend(t for t in browser.pages[1:] if t not in review_tabs)
+            for extra in browser.pages[1:]:
+                if extra in review_tabs:
+                    continue
+                try:
+                    await extra.close()
+                except Exception:
+                    pass
             await page.wait_for_timeout(3000)
 
         # Hold the filled forms open so a human can check and submit them.

@@ -446,14 +446,24 @@ async def run_applications(limit=5, job_ids=None):
             db.add_job_note(job_id, note)
             results.append({'job_id': job_id, 'company': company, 'status': status})
             print(f'  -> {status}')
-
-            # Close any extra tabs the apply flow opened, and be polite between employers.
-            for extra in browser.pages[1:]:
-                try:
-                    await extra.close()
-                except Exception:
-                    pass
+            # Filled forms stay open in their own tab so they can be reviewed and
+            # submitted over VNC. Be polite between employers.
             await page.wait_for_timeout(3000)
+
+        # Hold the filled forms open so a human can check and submit them.
+        if any(r['status'] == 'ready_to_submit' for r in results):
+            minutes = int(os.environ.get('APPLY_REVIEW_WINDOW_MINUTES', '30'))
+            print(f'\n{len(browser.pages) - 1} filled form(s) left open for review.')
+            print(f'Connect over VNC to check and submit them. Closing in {minutes} min, '
+                  f'or immediately if you press Stop on the dashboard.')
+            progress_tracker.set_status(
+                'Forms filled - review and submit over VNC, then press Stop', len(results), len(results)
+            )
+            for _ in range(minutes * 60 // 5):
+                if progress_tracker.is_stop_requested():
+                    print('Stop requested; closing the browser.')
+                    break
+                await asyncio.sleep(5)
 
         await browser.close()
 
@@ -468,6 +478,11 @@ def _notify(results):
     ready = [r for r in results if r['status'] == 'ready_to_submit']
     other = [r for r in results if r['status'] != 'ready_to_submit']
     lines = ['## Applications prepared\n']
+    if ready:
+        lines.append(
+            'The filled forms are open in the browser on the server. Connect over VNC '
+            '(port 5900) to check and submit them, then press Stop on the dashboard.\n'
+        )
     for r in ready:
         lines.append(f'- **{r["company"]}** - form filled, waiting for your review and submit')
     if other:

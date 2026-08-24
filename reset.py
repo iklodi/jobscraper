@@ -15,7 +15,7 @@ def reset_jobs(search_term=None, score=None, reset_all=False, status='new'):
     
     if reset_all:
         # Prevent resetting jobs we've already applied to or explicitly rejected
-        cursor.execute("SELECT job_id, company, title FROM jobs WHERE status NOT IN ('new', 'applied', 'interviewing', 'offer', 'rejected', 'account_required')")
+        cursor.execute("SELECT job_id, company, title FROM jobs WHERE status NOT IN ('new', 'applied', 'interviewing', 'offer', 'rejected', 'account_required', 'ready_to_submit')")
         matches = cursor.fetchall()
         if not matches:
             print("❌ No active evaluated jobs found to reset.")

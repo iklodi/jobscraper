@@ -83,6 +83,7 @@ function renderBoard() {
         'failed': document.querySelector('#col-failed .kanban-cards'),
         'account_required': document.querySelector('#col-account-required .kanban-cards'),
         'approved': document.querySelector('#col-approved .kanban-cards'),
+        'ready_to_submit': document.querySelector('#col-ready-to-submit .kanban-cards'),
         'applied': document.querySelector('#col-applied .kanban-cards'),
         'interviewing': document.querySelector('#col-interviewing .kanban-cards'),
         'rejected': document.querySelector('#col-rejected .kanban-cards')
@@ -95,7 +96,7 @@ function renderBoard() {
 
     // Group jobs by status
     const groupedJobs = {
-        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'applied': [], 'interviewing': [], 'rejected': []
+        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'ready_to_submit': [], 'applied': [], 'interviewing': [], 'rejected': []
     };
 
     allJobs.forEach(job => {
@@ -231,9 +232,16 @@ function openJobDetails(jobId) {
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📝 Fill Application Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Mark as Account Required</button>
+            `;
+        } else if (job.status === 'ready_to_submit') {
+            contextButtonsHtml = `
+                <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Submitted - Mark as Applied</button>
+                <button class="btn" onclick="triggerApply('${job.job_id}')">Re-fill Form</button>
+                <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
@@ -528,6 +536,8 @@ window.triggerScrape = async function(mode = 'full') {
     
     if(btnFull) btnFull.disabled = true;
     if(btnEval) btnEval.disabled = true;
+    const btnApplyStart = document.getElementById('run-apply-btn');
+    if(btnApplyStart) btnApplyStart.disabled = true;
     if(btnStop) btnStop.style.display = 'inline-block';
     if(btnStop) btnStop.innerText = 'Stop';
     if(btnStop) btnStop.disabled = false;
@@ -546,6 +556,39 @@ window.triggerScrape = async function(mode = 'full') {
         if(btnEval) btnEval.disabled = false;
         if(btnStop) btnStop.style.display = 'none';
         if(hoverBox) hoverBox.classList.remove('active');
+    }
+}
+
+window.triggerApply = async function(jobId = null) {
+    const scope = jobId
+        ? "Fill in the application form for this job?"
+        : "Fill in application forms for the top approved jobs?";
+    if (!confirm(scope + "\n\nA browser will open the employer's form and fill it from your profile. "
+        + "Nothing is submitted - each job lands in 'Ready to Submit' for you to review.")) return;
+
+    const btnApply = document.getElementById('run-apply-btn');
+    const hoverBox = document.getElementById('pipeline-status-hover');
+    if (btnApply) btnApply.disabled = true;
+    if (hoverBox) hoverBox.classList.add('active');
+
+    try {
+        const body = jobId ? { job_ids: [jobId] } : { limit: 5 };
+        const res = await fetch('/api/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (data.status === 'already_running') {
+            alert("An application run is already in progress.");
+            return;
+        }
+        if (jobId) closeModal();
+        pollScraperStatus();
+    } catch (e) {
+        alert("Failed to start applications: " + e);
+        if (btnApply) btnApply.disabled = false;
+        if (hoverBox) hoverBox.classList.remove('active');
     }
 }
 
@@ -571,7 +614,8 @@ window.pollScraperStatus = async function() {
     const hoverBox = document.getElementById('pipeline-status-hover');
     const stageEl = document.getElementById('pipeline-status-stage');
     const progEl = document.getElementById('pipeline-status-progress');
-    
+    const btnApply = document.getElementById('run-apply-btn');
+
     if (!btnFull) return;
     try {
         const res = await fetch('/api/scrape/status');
@@ -580,6 +624,7 @@ window.pollScraperStatus = async function() {
         if (data.is_running) {
             btnFull.disabled = true;
             btnEval.disabled = true;
+            if (btnApply) btnApply.disabled = true;
             btnStop.style.display = 'inline-block';
             hoverBox.classList.add('active');
             
@@ -603,6 +648,7 @@ window.pollScraperStatus = async function() {
                 // If it was running and now it's not, refresh the board
                 btnFull.disabled = false;
                 btnEval.disabled = false;
+                if (btnApply) btnApply.disabled = false;
                 btnStop.style.display = 'none';
                 btnStop.disabled = false;
                 btnStop.innerText = 'Stop';
@@ -611,6 +657,7 @@ window.pollScraperStatus = async function() {
             } else {
                 btnFull.disabled = false;
                 btnEval.disabled = false;
+                if (btnApply) btnApply.disabled = false;
                 btnStop.style.display = 'none';
                 hoverBox.classList.remove('active');
             }

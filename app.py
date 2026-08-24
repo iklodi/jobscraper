@@ -31,7 +31,7 @@ def get_files_for_job(job_id):
             if d.endswith(f"_{job_id}"):
                 app_folder = os.path.join(apps_dir, d)
                 for f in os.listdir(app_folder):
-                    if f.endswith('.pdf') or f.endswith('.docx'):
+                    if f.endswith('.pdf') or f.endswith('.docx') or f.endswith('.png'):
                         files.append({
                             'name': f,
                             'url': f"/download/{d}/{f}"
@@ -188,11 +188,40 @@ def stop_scrape():
 
 @app.route('/api/scrape/status', methods=['GET'])
 def scrape_status():
-    global scraper_thread
-    is_running = scraper_thread is not None and scraper_thread.is_alive()
+    global scraper_thread, apply_thread
+    is_running = (scraper_thread is not None and scraper_thread.is_alive()) or \
+                 (apply_thread is not None and apply_thread.is_alive())
     status_data = progress_tracker.get_status()
     status_data['is_running'] = is_running
     return jsonify(status_data)
+
+apply_thread = None
+
+def run_applier_bg(limit, job_ids):
+    global apply_thread
+    import asyncio
+    from applier import run_applications
+    try:
+        asyncio.run(run_applications(limit=limit, job_ids=job_ids))
+    except Exception as e:
+        print(f"Applier error: {e}")
+        progress_tracker.clear_status()
+    finally:
+        apply_thread = None
+
+@app.route('/api/apply', methods=['POST'])
+def trigger_apply():
+    global apply_thread
+    if apply_thread and apply_thread.is_alive():
+        return jsonify({'status': 'already_running'})
+
+    data = request.json or {}
+    limit = int(data.get('limit', 5))
+    job_ids = data.get('job_ids')
+
+    apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids))
+    apply_thread.start()
+    return jsonify({'status': 'started'})
 
 @app.route('/download/<path:subpath>')
 def download_file(subpath):

@@ -40,6 +40,7 @@
                     </style>
                     <button id="run-scraper-btn" class="btn btn-primary" onclick="triggerScrape('full')">Run Pipeline</button>
                     <button id="run-eval-btn" class="btn" onclick="triggerScrape('eval_only')">Run Evaluations Only</button>
+                    <button id="run-apply-btn" class="btn" onclick="triggerApply()">📝 Fill Applications</button>
                     <button id="stop-pipeline-btn" class="btn" style="display: none; background-color: #ef4444; border-color: #ef4444;" onclick="stopScrape()">Stop</button>
                     <div id="pipeline-status-hover" class="pipeline-status-box">
                         <div style="font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;" id="pipeline-status-stage">Initializing...</div>
@@ -75,6 +76,11 @@
             </div>
             <div class="kanban-column" id="col-approved" data-status="approved">
                 <h2>Approved</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+            <div class="kanban-column" id="col-ready-to-submit" data-status="ready_to_submit">
+                <h2>Ready to Submit</h2>
                 <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                 <div class="kanban-cards"></div>
             </div>

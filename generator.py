@@ -267,7 +267,11 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
         for p in doc.paragraphs[:start_idx]:
             if jd_language and "french" in jd_language.lower():
-                replace_text_in_paragraph(p, "Bex, Switzerland", "Bex, Suisse")
+                # Localise the sender's own city line for French-language letters.
+                home_city = os.environ.get('HOME_CITY', '')
+                home_city_fr = os.environ.get('HOME_CITY_FR', '')
+                if home_city and home_city_fr:
+                    replace_text_in_paragraph(p, home_city, home_city_fr)
                 
             if display_company and display_company.lower() != "hiring team":
                 replace_text_in_paragraph(p, "[COMPANY]", display_company)

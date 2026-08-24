@@ -144,6 +144,7 @@ h1 {
 #col-new h2 { border-top: 3px solid #eab308; }
 #col-backlog h2 { border-top: 3px solid #3b82f6; }
 #col-approved h2 { border-top: 3px solid #a855f7; }
+#col-ready-to-submit h2 { border-top: 3px solid #14b8a6; }
 #col-applied h2 { border-top: 3px solid #ec4899; }
 #col-interviewing h2 { border-top: 3px solid #f97316; }
 #col-offer h2 { border-top: 3px solid #22c55e; }

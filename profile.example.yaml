@@ -1,0 +1,129 @@
+# Application answer bank - copy to $CVS_DIR/profile.yaml and fill in.
+#
+# This is the ONLY source of answers the applier will use. It never invents or
+# approximates an answer: any question this file does not cover is left blank,
+# reported in the job's notes, and emailed to you. Add the question here and it
+# will never block an application again.
+#
+# Keep the real file in your CVS_DIR (alongside your CV), never in this repo -
+# it contains personal data.
+
+identity:
+  full_name: "Jane Doe"
+  full_name_ascii: "Jane Doe"          # used where a form rejects accented characters
+  first_name: "Jane"
+  last_name: "Doe"
+  email: "jane@example.com"
+  phone: "+00 00 000 00 00"
+  phone_country: "Country"             # phone widgets often default to the US
+  address: "1 Example Street"
+  postal_code: "0000"
+  city: "City"
+  region: "Region"
+  country: "Country"
+  country_of_residence: "Country"
+  current_location: "City, Region, Country"
+  preferred_location: "Remote / Region"
+  linkedin: "https://www.linkedin.com/in/your-profile"
+  date_of_birth: "1990-01-01"
+  marital_status: "Prefer not to say"
+
+work_authorization:
+  nationality: "Your nationality"
+  summary: "One sentence a recruiter could read verbatim about your right to work."
+  by_country:
+    your_country:   {authorized: true,  sponsorship_needed: false, detail: "Permit type"}
+    united_states:  {authorized: false, sponsorship_needed: true,  detail: ""}
+    united_kingdom: {authorized: false, sponsorship_needed: true,  detail: ""}
+  owns_company: null
+  criminal_record: "None"
+
+languages:
+  # Only claim "Native" for a genuine native language.
+  english: {level: "Professional / Fluent", cefr: "C2", scale_1_to_10: 9}
+
+education:
+  highest_qualification: "Master's degree"
+  degrees:
+    - {degree: "MSc", field: "Your field", institution: "Your university",
+       start: 2010, end: 2015, graduated: true}
+  certifications: []
+
+employment:
+  current_title: "Your title"
+  current_employer: "Your employer"
+  current_since: "2024-01"
+  current_salary: null                 # leave null rather than estimating
+  employment_status: "Short description of your current situation."
+  history:
+    - {title: "Your title", company: "Employer", start: "2024-01", end: "present"}
+  largest_team_managed: "0"
+  worked_for_government: false
+  references: []
+
+# Canonical years-of-experience answers, so every form gets the same number.
+experience_years:
+  information_technology: 0
+  total_work_experience: 0
+  artificial_intelligence: 0
+  people_management: 0
+
+compensation:
+  currency: "EUR"
+  target_min: 0
+  target_max: 0
+  preferred_answer: "Negotiable - open to discussing compensation benchmarked to market rates"
+  numeric_fallback: 0                  # used only when the field rejects text
+  by_currency: {}
+  current_salary_bracket: "Other"
+
+availability:
+  notice_period: "Immediate"
+  notice_period_weeks: 0
+  earliest_start: "Immediately"
+  willing_to_relocate: false
+  remote_preference: "Remote"
+  travel_willingness: "Yes"
+
+demographics:
+  # Voluntary EEO sections. "Prefer not to say" is a perfectly good default.
+  gender: "Prefer not to say"
+  ethnicity: "Prefer not to say"
+  disability_status: "Prefer not to say"
+  veteran_status: "Prefer not to say"
+  default_for_unlisted: "Prefer not to say"
+
+referral:
+  how_did_you_hear: "LinkedIn Jobs/Advertising"
+  source: "LinkedIn"
+
+screening_answers:
+  # Free-form question/answer pairs. Matched on meaning, not exact wording.
+  # Add every odd question you hit here.
+  - q: "Have you worked for this company before?"
+    a: "No"
+  - q: "Do you have relatives employed by this company?"
+    a: "No"
+
+essay_material:
+  positioning: "Two sentences on how you want to be described."
+  flagship_projects:
+    - name: "Project name"
+      detail: "What you actually did and the outcome."
+  technical_stack: []
+  no_experience_in: []                 # things to answer "no" to honestly
+
+known_gaps:
+  # Anything listed here will stop an application rather than be guessed at.
+  - field: "Professional references"
+    impact: "Blocks forms with mandatory reference fields"
+
+policies:
+  never_create_accounts: true
+  never_enter_passwords: true
+  never_solve_captchas: true
+  never_submit_without_review: true
+  never_inflate_experience: true
+  decline_premium_upsells: true
+  decline_optional_marketing_consent: true
+  accept_required_data_consent: true

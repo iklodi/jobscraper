@@ -713,6 +713,27 @@ async def do_submit(page):
     if re.search(r'thank you|application (has been )?(submitted|received|sent)|'
                  r'successfully (submitted|applied)|we have received|merci', text, re.I):
         return True, 'confirmed by the site'
+
+    # A challenge on submit is a deliberate human gate; we do not defeat it.
+    try:
+        challenge = await page.evaluate(
+            """() => {
+                const hit = /drag the shape|select all images|i am not a robot|
+                             verify you are human|puzzle/ix;
+                if (hit.test(document.body.innerText)) return true;
+                return !!document.querySelector(
+                    'iframe[src*="captcha"], iframe[title*="captcha" i], '
+                    + '[class*="captcha" i], [id*="captcha" i]');
+            }"""
+        )
+    except Exception:
+        challenge = False
+    if challenge or CAPTCHA_PATTERNS.search(text):
+        return False, (
+            'a CAPTCHA appeared on submit. The form is complete - connect over VNC, '
+            'solve the challenge and press submit yourself'
+        )
+
     if await find_control(page, SUBMIT_LABELS):
         detail = await form_errors(page)
         return False, f'still on the form after clicking submit{": " + detail if detail else ""}'
@@ -1197,7 +1218,7 @@ def release_profile_lock():
     time.sleep(1)
 
 
-async def run_applications(limit=5, job_ids=None, auto_submit=False):
+async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blocked=False):
     """Fill applications for approved jobs. Returns a per-job result list."""
     if not acquire_run_lock():
         print('Another application run is already in progress; not starting a second one.')
@@ -1219,9 +1240,10 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False):
             job_ids,
         )
     else:
+        statuses = '"approved", "account_required"' if include_blocked else '"approved"'
         cursor.execute(
             'SELECT job_id, title, company, link, description FROM jobs '
-            'WHERE status = "approved" ORDER BY score DESC LIMIT ?',
+            f'WHERE status IN ({statuses}) ORDER BY score DESC LIMIT ?',
             (limit,),
         )
     jobs = cursor.fetchall()
@@ -1316,8 +1338,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Fill in applications for approved jobs.')
     parser.add_argument('--limit', type=int, default=5, help='How many approved jobs to process')
     parser.add_argument('--job-id', action='append', help='Apply for specific job id(s) only')
+    parser.add_argument('--include-blocked', action='store_true',
+                        help='Also retry jobs parked in Account Required')
     parser.add_argument('--submit', action='store_true',
                         help='Submit applications that pass every pre-submit check')
     args = parser.parse_args()
 
-    asyncio.run(run_applications(limit=args.limit, job_ids=args.job_id, auto_submit=args.submit))
+    asyncio.run(run_applications(limit=args.limit, job_ids=args.job_id,
+                                 auto_submit=args.submit, include_blocked=args.include_blocked))

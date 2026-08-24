@@ -1018,14 +1018,15 @@ async def apply_actions(page, actions, fields=None):
         value = action.get('value', '')
         selector = f'[data-jsapply="{action.get("idx")}"]'
         locator = page.locator(selector)
+        field = by_idx.get(action.get('idx')) or {}
+        name = (field.get('label') or field.get('name') or f'#{action.get("idx")}')[:40]
         try:
-            field = by_idx.get(action.get('idx')) or {}
             if kind == 'fill':
                 await locator.fill(str(value), timeout=5000)
             elif kind == 'select':
                 if field.get('type') == 'select-custom':
                     if not await select_custom(page, locator, value):
-                        errors.append(f'field {action.get("idx")}: could not pick "{value}"')
+                        errors.append(f'"{name}": could not pick "{value}"')
                         continue
                 else:
                     await locator.select_option(label=str(value), timeout=5000)
@@ -1037,7 +1038,8 @@ async def apply_actions(page, actions, fields=None):
             filled += 1
             await page.wait_for_timeout(150)
         except Exception as e:
-            errors.append(f"field {action.get('idx')}: {type(e).__name__}")
+            reason = str(e).strip().split('\n')[0][:90] or type(e).__name__
+            errors.append(f'"{name}" ({kind}): {reason}')
     return filled, errors
 
 

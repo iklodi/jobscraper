@@ -10,6 +10,7 @@ import os
 import re
 
 import yaml
+from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from playwright.async_api import async_playwright
@@ -17,6 +18,8 @@ from playwright.async_api import async_playwright
 import db
 import notifier
 import progress_tracker
+
+load_dotenv(override=True)
 
 CHROME_PROFILE_DIR = './chrome_profile'
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
@@ -441,9 +444,7 @@ def _notify(results):
 
 if __name__ == '__main__':
     import argparse
-    from dotenv import load_dotenv
 
-    load_dotenv()
     parser = argparse.ArgumentParser(description='Fill in applications for approved jobs.')
     parser.add_argument('--limit', type=int, default=5, help='How many approved jobs to process')
     parser.add_argument('--job-id', action='append', help='Apply for specific job id(s) only')

@@ -81,6 +81,9 @@ COLLECT_FIELDS_JS = """
     const isTrap = (el, label) => {
         if (HONEYPOT_TEXT.test(label)) return true;
         if (HONEYPOT_NAME.test(el.name || '')) return true;
+        // File inputs are legitimately hidden behind styled upload buttons, so the
+        // visibility heuristics below would wrongly discard them.
+        if (el.type === 'file') return false;
         const st = window.getComputedStyle(el);
         if (st.opacity === '0' || st.visibility === 'hidden' || st.display === 'none') return true;
         const r = el.getBoundingClientRect();

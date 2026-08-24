@@ -341,6 +341,37 @@ RULES:
 """
 
 
+async def click_sign_in_tab(page):
+    """Switch to the sign-in form when we already hold credentials for this site."""
+    sign_in_re = re.compile(r'^(sign in|log ?in)$|already have an account', re.I)
+    for role in ('link', 'button'):
+        try:
+            control = page.get_by_role(role, name=sign_in_re).last
+            await control.wait_for(state='visible', timeout=3000)
+            await control.click(timeout=3000)
+            await page.wait_for_timeout(2500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def form_errors(page):
+    """Inline validation messages, so a rejection is not reported as a mystery."""
+    try:
+        msgs = await page.evaluate(
+            """() => Array.from(document.querySelectorAll(
+                   '[role=alert],[data-automation-id*=error],[class*=error]'))
+                   .map(e => (e.innerText || '').trim())
+                   .filter(t => t && t.length < 200)
+                   .filter(t => !/^(current )?step \\d+ of \\d+$/i.test(t))
+                   .slice(0, 5)"""
+        )
+        return '; '.join(dict.fromkeys(msgs))
+    except Exception:
+        return ''
+
+
 async def click_create_account_tab(page):
     """Registration is often behind a 'Create Account' toggle on a sign-in page."""
     create_re = re.compile(r'create (an )?account|sign up|register|new user|créer un compte', re.I)
@@ -387,7 +418,9 @@ async def create_or_signin_account(page, client, profile, job_id):
     existing = account_for(page.url)
     password = existing['password'] if existing else generate_password()
 
-    if not existing:
+    if existing:
+        await click_sign_in_tab(page)
+    else:
         await click_create_account_tab(page)
 
     body = await page.evaluate(COLLECT_FIELDS_JS)
@@ -461,9 +494,11 @@ async def create_or_signin_account(page, client, profile, job_id):
             f'this job and the application will continue automatically.'
         )
     if any(f.get('type') == 'password' for f in after['fields']):
+        detail = await form_errors(page)
         return False, (
-            f'Still on the account form at {domain} after submitting - it likely rejected '
-            f'something. Credentials are saved in ats_accounts.yaml; finish manually.'
+            f'Still on the account form at {domain} after submitting'
+            + (f': "{detail}"' if detail else ' and it gave no error message')
+            + '. Credentials are saved in ats_accounts.yaml; finish manually.'
         )
 
     # Signed in: the email shows in the chrome, or the account step has dropped

@@ -357,18 +357,24 @@ async def click_create_account_tab(page):
 
 
 async def submit_form(page, labels):
-    """Click the form's own submit control; returns True if one was clicked."""
+    """Click the form's own submit control; returns True if one was clicked.
+
+    The same label often appears twice (a tab or heading, then the real submit),
+    so prefer the last match - submit buttons sit at the end of the form.
+    """
     pattern = re.compile(labels, re.I)
     for role in ('button', 'link'):
-        try:
-            control = page.get_by_role(role, name=pattern).first
-            await control.wait_for(state='visible', timeout=4000)
-            await control.scroll_into_view_if_needed(timeout=2000)
-            await control.click(timeout=5000)
-            await page.wait_for_timeout(4000)
-            return True
-        except Exception:
-            continue
+        for pick in ('last', 'first'):
+            try:
+                matches = page.get_by_role(role, name=pattern)
+                control = matches.last if pick == 'last' else matches.first
+                await control.wait_for(state='visible', timeout=4000)
+                await control.scroll_into_view_if_needed(timeout=2000)
+                await control.click(timeout=5000)
+                await page.wait_for_timeout(5000)
+                return True
+            except Exception:
+                continue
     return False
 
 
@@ -430,6 +436,17 @@ async def create_or_signin_account(page, client, profile, job_id):
 
     await page.wait_for_timeout(4000)
     after = await page.evaluate(COLLECT_FIELDS_JS)
+
+    # Workday in particular likes to land on a transient "Something went wrong,
+    # please refresh" screen straight after a successful sign-up.
+    if re.search(r'something went wrong|please refresh the page', after['text'], re.I):
+        try:
+            await page.reload(timeout=45000)
+            await page.wait_for_timeout(5000)
+            after = await page.evaluate(COLLECT_FIELDS_JS)
+        except Exception:
+            pass
+
     after_text = after['text']
 
     if re.search(r'already (exists|registered|in use)|account with this email', after_text, re.I):
@@ -448,6 +465,23 @@ async def create_or_signin_account(page, client, profile, job_id):
             f'Still on the account form at {domain} after submitting - it likely rejected '
             f'something. Credentials are saved in ats_accounts.yaml; finish manually.'
         )
+
+    # Signed in: the email shows in the chrome, or the account step has dropped
+    # out of the progress list.
+    signed_in = bool(email and email.lower() in after_text.lower()) or \
+        not re.search(r'create account\s*/\s*sign in', after_text, re.I)
+    if not signed_in:
+        return False, (
+            f'Submitted the {domain} account form but could not confirm being signed in. '
+            f'Credentials are saved in ats_accounts.yaml; check manually.'
+        )
+
+    entry = account_for(page.url)
+    if entry:
+        # Records that the credentials work - not that the address is verified,
+        # which only clicking the emailed link can establish.
+        entry['last_signin_ok'] = datetime.datetime.now().isoformat(timespec='seconds')
+        save_account(entry)
 
     verb = 'Signed in to' if signing_in else 'Created an account at'
     return True, f'{verb} {domain} (credentials in ats_accounts.yaml).'

@@ -193,19 +193,24 @@ def ask_gemini(client, prompt):
 async def find_apply_url(page, linkedin_url):
     """Open the LinkedIn posting and follow its apply button to the employer's form."""
     await page.goto(linkedin_url, timeout=60000)
-    await page.wait_for_timeout(2500)
+    await page.wait_for_timeout(5000)
 
+    # LinkedIn ships obfuscated class names, so match on the accessible label
+    # first and keep the legacy class selectors as a fallback.
     selectors = [
         'button.jobs-apply-button',
         'a.jobs-apply-button',
-        'button:has-text("Apply")',
+        'button:text-is("Apply")',
+        'a:text-is("Apply")',
+        'button:text-is("Easy Apply")',
         'a:has-text("Apply on company website")',
+        'button:has-text("Apply")',
     ]
     for selector in selectors:
         button = page.locator(selector).first
         try:
-            if not await button.is_visible(timeout=2000):
-                continue
+            await button.wait_for(state='visible', timeout=6000)
+            await button.scroll_into_view_if_needed(timeout=3000)
         except Exception:
             continue
 

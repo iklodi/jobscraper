@@ -106,7 +106,46 @@ COLLECT_FIELDS_JS = """
         if (el.tagName.toLowerCase() === 'select') {
             entry.options = Array.from(el.options).map((o) => o.text.trim()).filter(Boolean);
         }
+        if (el.type === 'radio' || el.type === 'checkbox') {
+            // The option's own label is "Yes"/"No"; the question lives on the group.
+            const grp = el.closest('fieldset,[role=radiogroup],[role=group]');
+            if (grp) {
+                const lg = grp.querySelector('legend');
+                const t = (lg ? lg.innerText : grp.getAttribute('aria-label') || '').trim();
+                if (t) entry.group = t.split('\\n')[0].slice(0, 200);
+            }
+        }
         out.push(entry);
+        idx += 1;
+    });
+    // Custom dropdowns (Workday, react-select, Ashby...) are not <select> elements.
+    document.querySelectorAll(
+        '[role=combobox], button[aria-haspopup=listbox], [aria-haspopup=listbox],' +
+        '[data-automation-id*="selectinput"], [data-uxi-widget-type="selectinput"]'
+    ).forEach((el) => {
+        if (el.hasAttribute('data-jsapply')) return;
+        const rect = el.getBoundingClientRect();
+        if (!(rect.width > 0 && rect.height > 0)) return;
+        let label = el.getAttribute('aria-label') || '';
+        const lb = el.getAttribute('aria-labelledby');
+        if (!label && lb) {
+            const l = document.getElementById(lb);
+            if (l) label = l.innerText.trim();
+        }
+        if (!label) {
+            const w = el.closest('div,section,li');
+            if (w) label = (w.innerText || '').trim().split('\\n')[0].slice(0, 120);
+        }
+        if (HONEYPOT_TEXT.test(label)) return;
+        el.setAttribute('data-jsapply', String(idx));
+        out.push({
+            idx: idx, tag: 'widget', type: 'select-custom',
+            name: el.getAttribute('name') || '', id: el.id || '',
+            label: label, placeholder: '',
+            required: el.getAttribute('aria-required') === 'true',
+            value: (el.innerText || '').trim().slice(0, 60),
+            options: null,
+        });
         idx += 1;
     });
     return {
@@ -156,7 +195,14 @@ ABSOLUTE RULES:
 - NEVER invent, guess, or approximate an answer. If the profile does not contain the
   information, put the field in "unanswered" and use action "skip". A wrong answer on a
   job application is worse than an unfilled field.
-- For "select" actions the value MUST be one of the field's options, copied verbatim.
+- For "select" actions on a field that lists "options", the value MUST be one of those
+  options, copied verbatim.
+- A field of type "select-custom" is a dropdown whose choices are not visible yet, and
+  its "options" is null. Still use action "select", and give the exact visible text you
+  expect the option to have (e.g. "Mobile", "LinkedIn", "No"). Answer these whenever the
+  profile supports it - they are usually required.
+- A radio or checkbox field may carry a "group" holding the actual question; answer based
+  on the group question, and use action "check" on the option that matches the profile.
 - For "check" (checkbox/radio) use value "true" or "false". Only tick consent or
   affirmation boxes when the profile clearly supports it; never tick anything that
   asserts a fact you cannot verify from the profile.
@@ -785,6 +831,43 @@ async def tick_box(page, locator, field):
     await locator.check(force=True, timeout=3000)
 
 
+async def select_custom(page, locator, value):
+    """Choose a value from a custom dropdown widget (no native <select>)."""
+    await locator.scroll_into_view_if_needed(timeout=3000)
+    await locator.click(timeout=5000)
+    await page.wait_for_timeout(900)
+
+    exact = re.compile(rf'^\s*{re.escape(str(value))}\s*$', re.I)
+    loose = re.compile(re.escape(str(value)), re.I)
+    for pattern in (exact, loose):
+        for getter in (
+            lambda p: page.get_by_role('option', name=p),
+            lambda p: page.locator('[role=option]').filter(has_text=p),
+            lambda p: page.locator('li,div[role=listitem]').filter(has_text=p),
+        ):
+            try:
+                option = getter(pattern).first
+                await option.wait_for(state='visible', timeout=2500)
+                await option.click(timeout=3000)
+                await page.wait_for_timeout(600)
+                return True
+            except Exception:
+                continue
+
+    # Some widgets are type-ahead: type the value and take the first suggestion.
+    try:
+        await page.keyboard.type(str(value), delay=40)
+        await page.wait_for_timeout(1200)
+        option = page.locator('[role=option]').first
+        await option.wait_for(state='visible', timeout=2500)
+        await option.click(timeout=3000)
+        return True
+    except Exception:
+        pass
+    await page.keyboard.press('Escape')
+    return False
+
+
 async def apply_actions(page, actions, fields=None):
     """Execute the model's fill plan; returns (filled_count, errors)."""
     by_idx = {f['idx']: f for f in (fields or [])}
@@ -797,13 +880,19 @@ async def apply_actions(page, actions, fields=None):
         selector = f'[data-jsapply="{action.get("idx")}"]'
         locator = page.locator(selector)
         try:
+            field = by_idx.get(action.get('idx')) or {}
             if kind == 'fill':
                 await locator.fill(str(value), timeout=5000)
             elif kind == 'select':
-                await locator.select_option(label=str(value), timeout=5000)
+                if field.get('type') == 'select-custom':
+                    if not await select_custom(page, locator, value):
+                        errors.append(f'field {action.get("idx")}: could not pick "{value}"')
+                        continue
+                else:
+                    await locator.select_option(label=str(value), timeout=5000)
             elif kind == 'check':
                 if str(value).lower() in ('true', 'yes', '1'):
-                    await tick_box(page, locator, by_idx.get(action.get('idx')))
+                    await tick_box(page, locator, field)
             else:
                 continue
             filled += 1

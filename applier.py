@@ -432,6 +432,30 @@ async def create_or_signin_account(page, client, profile, job_id):
         return False, (f'Account creation at {domain} is behind a CAPTCHA, so it was not '
                        f'attempted. Create the account manually.')
 
+    # Signing in is a two-field form; do it deterministically rather than paying
+    # for an LLM round-trip that can misread it.
+    if existing:
+        pw_fields = [f for f in fields if f.get('type') == 'password']
+        text_fields = [f for f in fields if f.get('type') in ('text', 'email')]
+        if pw_fields and text_fields:
+            await page.locator(f'[data-jsapply="{text_fields[0]["idx"]}"]').fill(email)
+            await page.locator(f'[data-jsapply="{pw_fields[0]["idx"]}"]').fill(password)
+            if not await submit_form(page, r'^(sign in|log ?in)$'):
+                return False, f'Could not find the sign-in button at {domain}.'
+            await page.wait_for_timeout(6000)
+            after = await page.evaluate(COLLECT_FIELDS_JS)
+            if any(f.get('type') == 'password' for f in after['fields']):
+                detail = await form_errors(page)
+                return False, (
+                    f'Sign-in at {domain} did not go through'
+                    + (f': "{detail}"' if detail else ' (no error shown)')
+                    + '. Credentials are in ats_accounts.yaml; check them manually.'
+                )
+            entry = dict(existing)
+            entry['last_signin_ok'] = datetime.datetime.now().isoformat(timespec='seconds')
+            save_account(entry)
+            return True, f'Signed in to {domain} with the stored credentials.'
+
     plan = ask_gemini(client, REGISTRATION_PROMPT.format(
         full_name=identity.get('full_name', ''),
         first_name=identity.get('first_name', ''),

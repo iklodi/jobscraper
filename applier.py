@@ -1025,6 +1025,46 @@ async def process_job(page, client, profile, job):
     return 'ready_to_submit', '\n'.join(lines)
 
 
+def release_profile_lock():
+    """Close a browser left open by an earlier run.
+
+    Runs hold the browser open so filled forms can be reviewed over VNC, which
+    keeps the Chrome profile locked. A new run supersedes that review session,
+    so reclaim the profile rather than failing to launch.
+    """
+    import subprocess
+    profile = os.path.abspath(CHROME_PROFILE_DIR)
+    try:
+        out = subprocess.run(['pgrep', '-f', f'--user-data-dir={profile}'],
+                             capture_output=True, text=True).stdout.split()
+    except Exception:
+        return
+    if not out:
+        return
+    print(f'Closing {len(out)} browser process(es) left over from an earlier run...')
+    for pid in out:
+        try:
+            os.kill(int(pid), 15)
+        except Exception:
+            pass
+    import time
+    time.sleep(4)
+    for pid in out:
+        try:
+            os.kill(int(pid), 9)
+        except (ProcessLookupError, ValueError):
+            pass
+        except Exception:
+            pass
+    # Chromium leaves these behind when killed, and refuses to start with them.
+    for lock in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
+        try:
+            os.unlink(os.path.join(profile, lock))
+        except OSError:
+            pass
+    time.sleep(1)
+
+
 async def run_applications(limit=5, job_ids=None):
     """Fill applications for approved jobs. Returns a per-job result list."""
     db.init_db()
@@ -1056,6 +1096,7 @@ async def run_applications(limit=5, job_ids=None):
 
     results = []
     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
+    release_profile_lock()
     async with async_playwright() as p:
         browser = await p.chromium.launch_persistent_context(
             user_data_dir=CHROME_PROFILE_DIR,

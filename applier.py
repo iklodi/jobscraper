@@ -39,6 +39,11 @@ ACCOUNT_WALL_PATTERNS = re.compile(
     re.I,
 )
 CAPTCHA_PATTERNS = re.compile(r'recaptcha|hcaptcha|captcha|are you a robot|cloudflare', re.I)
+CLOSED_LISTING_PATTERNS = re.compile(
+    r'no longer accepting applications|this job is no longer available|'
+    r'position (has been|is) (filled|closed)|posting (has )?(expired|closed)',
+    re.I,
+)
 
 # Field inventory: tag every visible control so we can address it later by index.
 COLLECT_FIELDS_JS = """
@@ -233,6 +238,53 @@ async def find_apply_url(page, linkedin_url):
     return None, None
 
 
+async def dismiss_cookie_banner(page):
+    """Accept cookie/consent banners, which otherwise intercept clicks."""
+    accept = re.compile(r'^(accept|accept all|allow all|i agree|agree|got it|'
+                        r'tout accepter|alle akzeptieren|akzeptieren)\b', re.I)
+    for role in ('button', 'link'):
+        try:
+            banner = page.get_by_role(role, name=accept).first
+            await banner.wait_for(state='visible', timeout=2500)
+            await banner.click(timeout=2500)
+            await page.wait_for_timeout(1000)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def try_advance_to_form(page):
+    """Click an 'Apply' control on an employer page to reach the real form.
+
+    Returns the page holding the form (possibly a new tab), or None.
+    """
+    apply_re = re.compile(r'\b(apply now|apply for this job|apply online|apply|'
+                          r'postuler|bewerben|jetzt bewerben)\b', re.I)
+    for role in ('link', 'button'):
+        control = page.get_by_role(role, name=apply_re).first
+        try:
+            await control.wait_for(state='visible', timeout=4000)
+            await control.scroll_into_view_if_needed(timeout=3000)
+        except Exception:
+            continue
+        before = page.url
+        try:
+            async with page.context.expect_page(timeout=8000) as new_page_info:
+                await control.click(timeout=5000)
+            new_page = await new_page_info.value
+            await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
+            await new_page.wait_for_timeout(2500)
+            return new_page
+        except Exception:
+            await page.wait_for_timeout(3000)
+            if page.url != before:
+                return page
+            # Same URL but the click may have revealed an in-page form.
+            return page
+    return None
+
+
 async def upload_documents(page, fields, cv_path, cl_path, extra_path=None):
     """Attach the generated PDFs (and any extra document) to file inputs on the page."""
     uploaded = []
@@ -325,42 +377,72 @@ async def process_job(page, client, profile, job):
 
     target, mode = await find_apply_url(page, link)
     if not target:
-        return 'failed', 'Could not find an Apply button on the LinkedIn posting (listing may be closed).'
-
-    apply_url = target.url
-    body = await target.evaluate(COLLECT_FIELDS_JS)
-    fields, page_text = body['fields'], body['text']
-
-    if CAPTCHA_PATTERNS.search(page_text):
-        return 'failed', f'Blocked by a CAPTCHA / bot check at {apply_url}. Needs a human, ideally over VNC.'
-
-    if ACCOUNT_WALL_PATTERNS.search(page_text) or any(f.get('type') == 'password' for f in fields):
-        return 'account_required', (
-            f'The employer requires creating an account or signing in before the form can be '
-            f'filled, so nothing was entered. Apply manually at: {apply_url}\n'
-            f'Documents ready in: {folder}'
+        try:
+            listing_text = await page.evaluate('() => document.body.innerText.slice(0, 4000)')
+        except Exception:
+            listing_text = ''
+        if CLOSED_LISTING_PATTERNS.search(listing_text):
+            return 'failed', 'The listing is closed - LinkedIn shows "No longer accepting applications".'
+        return 'failed', (
+            'Could not find an Apply button on the LinkedIn posting. See '
+            'last_apply_lookup_failure.png in the applications folder for what the page looked like.'
         )
 
-    if not fields:
-        iframe_note = ''
-        if body.get('iframes'):
-            iframe_note = f" The form is likely inside an iframe ({body['iframes'][0]})."
-        return 'failed', f'No form fields detected at {apply_url}.{iframe_note}'
+    # An employer's apply link often lands on the job description first, so walk
+    # forward until we are actually looking at an application form. Never fill a
+    # page that is not one - job pages carry newsletter and job-alert signups.
+    plan = fields = None
+    apply_url = target.url
+    for _ in range(3):
+        await dismiss_cookie_banner(target)
+        apply_url = target.url
+        body = await target.evaluate(COLLECT_FIELDS_JS)
+        fields, page_text = body['fields'], body['text']
 
-    plan = ask_gemini(client, MAPPING_PROMPT.format(
-        profile=yaml.safe_dump(profile, allow_unicode=True, sort_keys=False),
-        title=title, company=company,
-        description=(description or '')[:4000],
-        fields=json.dumps(fields, ensure_ascii=False)[:20000],
-        page_text=page_text[:3000],
-    ))
-    if not plan:
-        return 'failed', f'Could not map the form fields (all Gemini models failed) at {apply_url}.'
+        if CAPTCHA_PATTERNS.search(page_text):
+            return 'failed', f'Blocked by a CAPTCHA / bot check at {apply_url}. Needs a human, ideally over VNC.'
 
-    if plan.get('page_kind') == 'login_or_register':
-        return 'account_required', (
-            f'The apply link leads to a sign-in / registration page. Apply manually at: {apply_url}\n'
-            f'Documents ready in: {folder}'
+        if ACCOUNT_WALL_PATTERNS.search(page_text) or any(f.get('type') == 'password' for f in fields):
+            return 'account_required', (
+                f'The employer requires creating an account or signing in before the form can be '
+                f'filled, so nothing was entered. Apply manually at: {apply_url}\n'
+                f'Documents ready in: {folder}'
+            )
+
+        if fields:
+            plan = ask_gemini(client, MAPPING_PROMPT.format(
+                profile=yaml.safe_dump(profile, allow_unicode=True, sort_keys=False),
+                title=title, company=company,
+                description=(description or '')[:4000],
+                fields=json.dumps(fields, ensure_ascii=False)[:20000],
+                page_text=page_text[:3000],
+            ))
+            if not plan:
+                return 'failed', f'Could not map the form fields (all Gemini models failed) at {apply_url}.'
+
+            if plan.get('page_kind') == 'login_or_register':
+                return 'account_required', (
+                    f'The apply link leads to a sign-in / registration page. Apply manually at: {apply_url}\n'
+                    f'Documents ready in: {folder}'
+                )
+            if plan.get('page_kind') == 'application_form':
+                break
+
+        # Not an application form yet - follow this page's own Apply control.
+        advanced = await try_advance_to_form(target)
+        if not advanced:
+            iframe_note = ''
+            if body.get('iframes'):
+                iframe_note = f" The form may be inside an iframe ({body['iframes'][0]})."
+            return 'failed', (
+                f'Reached {apply_url} but could not get to an application form - '
+                f'nothing was filled in.{iframe_note}\nApply manually; documents are in: {folder}'
+            )
+        target = advanced
+    else:
+        return 'failed', (
+            f'Could not reach an application form from {apply_url} - nothing was filled in.\n'
+            f'Apply manually; documents are in: {folder}'
         )
 
     filled, errors = await apply_actions(target, plan.get('actions', []), fields)

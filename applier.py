@@ -1,8 +1,12 @@
 """Semi-automated application filler.
 
 Picks up approved jobs, opens the employer's apply link, fills the form from the
-profile answer bank, attaches the generated CV/cover letter, and parks the job for
-human review. It never submits, never creates accounts, and never invents an answer.
+profile answer bank, attaches the generated CV/cover letter, and either parks the
+job for human review or - with --submit - sends it.
+
+It never invents an answer, and it will not submit an application that fails the
+pre-submit checks: every required field filled, no question left unanswered, and
+no field that refused input. Anything short of that is parked for a human.
 """
 import asyncio
 import datetime
@@ -636,7 +640,84 @@ async def advance_step(page):
         return False
 
 
-async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, folder, max_steps=10):
+EMPTY_REQUIRED_JS = """
+() => {
+    const out = [];
+    document.querySelectorAll('[required], [aria-required="true"]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (!(r.width > 0 && r.height > 0)) return;
+        const tag = el.tagName.toLowerCase();
+        let empty = false;
+        if (tag === 'input' && (el.type === 'checkbox' || el.type === 'radio')) {
+            const name = el.name;
+            if (name) {
+                empty = !document.querySelector(`input[name="${CSS.escape(name)}"]:checked`);
+            } else {
+                empty = !el.checked;
+            }
+        } else if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+            empty = !String(el.value || '').trim();
+        } else {
+            const t = (el.innerText || '').trim();
+            empty = !t || /^select one$/i.test(t);
+        }
+        if (!empty) return;
+        let label = el.getAttribute('aria-label') || '';
+        if (!label && el.labels && el.labels.length) label = el.labels[0].innerText.trim();
+        if (!label) {
+            const w = el.closest('div,fieldset,section,li');
+            if (w) label = (w.innerText || '').trim().split('\\n')[0].slice(0, 80);
+        }
+        if (label && !out.includes(label)) out.push(label);
+    });
+    return out.slice(0, 12);
+}
+"""
+
+
+async def preflight_problems(page, unanswered, fill_errors):
+    """Reasons this application must NOT be auto-submitted."""
+    problems = []
+    if unanswered:
+        problems.append(f'{len(unanswered)} question(s) the profile could not answer')
+    if fill_errors:
+        problems.append(f'{len(fill_errors)} field(s) that refused input')
+    try:
+        empty = await page.evaluate(EMPTY_REQUIRED_JS)
+    except Exception:
+        empty = []
+        problems.append('could not verify required fields')
+    if empty:
+        problems.append('required field(s) still empty: ' + '; '.join(empty[:6]))
+    return problems
+
+
+async def do_submit(page):
+    """Click the real submit control and confirm the application went through."""
+    control = await find_control(page, SUBMIT_LABELS)
+    if not control:
+        return False, 'submit control disappeared'
+    try:
+        await control.scroll_into_view_if_needed(timeout=3000)
+        await control.click(timeout=8000)
+    except Exception as e:
+        return False, f'submit click failed ({type(e).__name__})'
+    await page.wait_for_timeout(7000)
+    try:
+        text = await page.evaluate('() => document.body.innerText.slice(0, 3000)')
+    except Exception:
+        text = ''
+    if re.search(r'thank you|application (has been )?(submitted|received|sent)|'
+                 r'successfully (submitted|applied)|we have received|merci', text, re.I):
+        return True, 'confirmed by the site'
+    if await find_control(page, SUBMIT_LABELS):
+        detail = await form_errors(page)
+        return False, f'still on the form after clicking submit{": " + detail if detail else ""}'
+    return True, 'submitted (no explicit confirmation message found)'
+
+
+async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, folder,
+                      max_steps=10, auto_submit=False):
     """Fill an application, walking multi-step wizards, and stop before submitting.
 
     Returns (summary_lines, reached_submit).
@@ -645,6 +726,8 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
     lines, unanswered, uploaded_all = [], [], []
     seen = set()
     reached_submit = False
+    submitted = False
+    all_errors = []
 
     for step in range(1, max_steps + 1):
         await dismiss_cookie_banner(page)
@@ -690,6 +773,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
                 filled, errors = await apply_actions(page, plan.get('actions', []), fields)
                 unanswered.extend(plan.get('unanswered') or [])
                 if errors:
+                    all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
         uploaded = await upload_documents(page, fields, cv_path, cl_path, ref_path)
@@ -709,10 +793,26 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
         # Stop at the final step rather than sending the application.
         if await find_control(page, SUBMIT_LABELS):
             reached_submit = True
-            lines.append(
-                f'Reached the final step - a Submit control is on screen. '
-                f'Nothing was sent; review it and press Submit yourself.'
-            )
+            problems = await preflight_problems(page, unanswered, all_errors)
+            if not auto_submit:
+                lines.append('Reached the final step. Nothing was sent; review it and submit yourself.')
+            elif problems:
+                lines.append(
+                    'Reached the final step but did NOT submit, because: '
+                    + '; '.join(problems) + '. Fix these and submit yourself.'
+                )
+            else:
+                ok, detail = await do_submit(page)
+                submitted = ok
+                lines.append(
+                    f'SUBMITTED - {detail}.' if ok
+                    else f'Tried to submit but it did not go through: {detail}. Nothing was sent.'
+                )
+                try:
+                    await page.screenshot(
+                        path=os.path.join(folder, f'{job_id}_submitted.png'), full_page=True)
+                except Exception:
+                    pass
             break
 
         if not await advance_step(page):
@@ -727,7 +827,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
             lines.append(f'  - {item.get("question")}  ({item.get("reason")})')
         lines.append('Add these to profile.yaml so future applications answer them automatically.')
 
-    return lines, reached_submit
+    return lines, reached_submit, submitted
 
 
 async def dismiss_cookie_banner(page):
@@ -907,7 +1007,7 @@ async def apply_actions(page, actions, fields=None):
     return filled, errors
 
 
-async def process_job(page, client, profile, job):
+async def process_job(page, client, profile, job, auto_submit=False):
     """Fill one application. Returns (new_status, note)."""
     job_id, title, company, link, description = job
 
@@ -1006,11 +1106,13 @@ async def process_job(page, client, profile, job):
     if reference_path and not os.path.exists(reference_path):
         reference_path = None
 
-    step_lines, reached_submit = await fill_wizard(
-        target, client, profile, job, cv_path, cl_path, reference_path, folder
+    step_lines, reached_submit, submitted = await fill_wizard(
+        target, client, profile, job, cv_path, cl_path, reference_path, folder,
+        auto_submit=auto_submit,
     )
 
-    header = 'Application filled but NOT submitted. Review and submit here: ' + apply_url
+    header = ('APPLICATION SUBMITTED via ' + apply_url) if submitted else \
+             ('Application filled but NOT submitted. Review and submit here: ' + apply_url)
     lines = [header]
     if account_note:
         lines.append(account_note)
@@ -1022,7 +1124,7 @@ async def process_job(page, client, profile, job):
             'may be incomplete - check it before submitting.'
         )
 
-    return 'ready_to_submit', '\n'.join(lines)
+    return ('applied' if submitted else 'ready_to_submit'), '\n'.join(lines)
 
 
 RUN_LOCK = '/tmp/jobscraper_applier.lock'
@@ -1092,7 +1194,7 @@ def release_profile_lock():
     time.sleep(1)
 
 
-async def run_applications(limit=5, job_ids=None):
+async def run_applications(limit=5, job_ids=None, auto_submit=False):
     """Fill applications for approved jobs. Returns a per-job result list."""
     if not acquire_run_lock():
         print('Another application run is already in progress; not starting a second one.')
@@ -1148,7 +1250,7 @@ async def run_applications(limit=5, job_ids=None):
 
             db.update_job_status(job_id, 'applying')
             try:
-                status, note = await process_job(page, client, profile, job)
+                status, note = await process_job(page, client, profile, job, auto_submit)
             except Exception as e:
                 status, note = 'failed', f'Unexpected error while applying: {type(e).__name__}: {e}'
 
@@ -1211,6 +1313,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Fill in applications for approved jobs.')
     parser.add_argument('--limit', type=int, default=5, help='How many approved jobs to process')
     parser.add_argument('--job-id', action='append', help='Apply for specific job id(s) only')
+    parser.add_argument('--submit', action='store_true',
+                        help='Submit applications that pass every pre-submit check')
     args = parser.parse_args()
 
-    asyncio.run(run_applications(limit=args.limit, job_ids=args.job_id))
+    asyncio.run(run_applications(limit=args.limit, job_ids=args.job_id, auto_submit=args.submit))

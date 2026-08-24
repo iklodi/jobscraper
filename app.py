@@ -205,12 +205,12 @@ def scrape_status():
 
 apply_thread = None
 
-def run_applier_bg(limit, job_ids):
+def run_applier_bg(limit, job_ids, auto_submit=False):
     global apply_thread
     import asyncio
     from applier import run_applications
     try:
-        asyncio.run(run_applications(limit=limit, job_ids=job_ids))
+        asyncio.run(run_applications(limit=limit, job_ids=job_ids, auto_submit=auto_submit))
     except Exception as e:
         print(f"Applier error: {e}")
         progress_tracker.clear_status()
@@ -227,7 +227,8 @@ def trigger_apply():
     limit = int(data.get('limit', 5))
     job_ids = data.get('job_ids')
 
-    apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids))
+    auto_submit = bool(data.get('submit', False))
+    apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids, auto_submit))
     apply_thread.start()
     return jsonify({'status': 'started'})
 

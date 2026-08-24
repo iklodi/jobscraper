@@ -70,11 +70,27 @@ COLLECT_FIELDS_JS = """
         }
         return '';
     };
+    // Bot traps: forms plant fields a human would never fill, then reject the
+    // submission if they contain anything. Never surface them for filling.
+    const HONEYPOT_TEXT = /robots? only|do not (enter|fill|use)|leave (this )?(field )?(blank|empty)|honey ?pot|anti-?spam|if you.?re human/i;
+    const HONEYPOT_NAME = /^(website|url|homepage|honeypot|hp|bot[-_]?field|winnie|comments?)$/i;
+    const isTrap = (el, label) => {
+        if (HONEYPOT_TEXT.test(label)) return true;
+        if (HONEYPOT_NAME.test(el.name || '')) return true;
+        const st = window.getComputedStyle(el);
+        if (st.opacity === '0' || st.visibility === 'hidden' || st.display === 'none') return true;
+        const r = el.getBoundingClientRect();
+        if (r.left < -500 || r.top < -500) return true;           // parked off-screen
+        if (el.tabIndex === -1 && el.getAttribute('autocomplete') === 'off'
+            && HONEYPOT_NAME.test(el.id || '')) return true;
+        return false;
+    };
     document.querySelectorAll('input, select, textarea').forEach((el) => {
         if (el.type === 'hidden') return;
         const rect = el.getBoundingClientRect();
         const visible = rect.width > 0 && rect.height > 0;
         if (!visible && el.type !== 'file') return;
+        if (isTrap(el, labelFor(el))) return;
         el.setAttribute('data-jsapply', String(idx));
         const entry = {
             idx: idx,
@@ -137,6 +153,8 @@ ABSOLUTE RULES:
   affirmation boxes when the profile clearly supports it; never tick anything that
   asserts a fact you cannot verify from the profile.
 - Skip file inputs entirely (action "skip") - uploads are handled separately.
+- Skip any field whose label tells you not to fill it, or that is clearly a bot trap;
+  filling one gets the whole application rejected as spam.
 - Skip password fields and anything that is part of account creation; set page_kind to
   "login_or_register" if the page is primarily a sign-up or sign-in form.
 - Free-text questions (motivation, "why this company") may be composed from profile
@@ -317,6 +335,7 @@ RULES:
 - Fill email, name and other identity fields from the candidate details.
 - Tick required terms-of-service and privacy checkboxes; leave marketing opt-ins unticked.
 - Do NOT answer any question that is not part of creating the account.
+- If any field asks you not to fill it, or looks like a bot trap, skip it.
 - Set page_kind to "sign_in" if this is a login form for an existing account rather than
   a registration form.
 """

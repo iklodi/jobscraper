@@ -14,10 +14,18 @@ app = Flask(__name__)
 DB_FILE = 'jobs.db'
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+def _configure_conn(conn):
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')
+    except Exception:
+        pass
     return conn
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn.row_factory = sqlite3.Row
+    return _configure_conn(conn)
 
 @app.route('/')
 def index():

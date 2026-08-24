@@ -1025,6 +1025,33 @@ async def process_job(page, client, profile, job):
     return 'ready_to_submit', '\n'.join(lines)
 
 
+RUN_LOCK = '/tmp/jobscraper_applier.lock'
+
+
+def acquire_run_lock():
+    """Refuse to start a second applier: two runs fight over the browser and DB."""
+    if os.path.exists(RUN_LOCK):
+        try:
+            pid = int(open(RUN_LOCK).read().strip())
+            os.kill(pid, 0)          # raises if that process is gone
+            return False
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass                      # stale lock from a crashed run
+    with open(RUN_LOCK, 'w') as f:
+        f.write(str(os.getpid()))
+    import atexit
+    atexit.register(release_run_lock)   # also releases if the run crashes
+    return True
+
+
+def release_run_lock():
+    try:
+        if os.path.exists(RUN_LOCK) and open(RUN_LOCK).read().strip() == str(os.getpid()):
+            os.unlink(RUN_LOCK)
+    except OSError:
+        pass
+
+
 def release_profile_lock():
     """Close a browser left open by an earlier run.
 
@@ -1067,10 +1094,15 @@ def release_profile_lock():
 
 async def run_applications(limit=5, job_ids=None):
     """Fill applications for approved jobs. Returns a per-job result list."""
+    if not acquire_run_lock():
+        print('Another application run is already in progress; not starting a second one.')
+        return []
+
     db.init_db()
     profile = load_profile()
     client = get_gemini_client()
     if not client:
+        release_run_lock()
         raise RuntimeError('GEMINI_API_KEY is not configured.')
 
     conn = db.get_connection()
@@ -1092,6 +1124,7 @@ async def run_applications(limit=5, job_ids=None):
 
     if not jobs:
         print('No approved jobs to apply for.')
+        release_run_lock()
         return []
 
     results = []
@@ -1145,6 +1178,7 @@ async def run_applications(limit=5, job_ids=None):
         await browser.close()
 
     progress_tracker.clear_status()
+    release_run_lock()
     _notify(results)
     return results
 

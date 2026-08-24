@@ -7,7 +7,15 @@ MIN_PASS_SCORE = int(os.environ.get('MIN_PASS_SCORE', 9))
 DB_FILE = 'jobs.db'
 
 def get_connection():
-    return sqlite3.connect(DB_FILE)
+    # The dashboard, the pipeline and the applier all touch the DB at once, so
+    # wait for the lock instead of failing, and use WAL so readers never block.
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')
+    except sqlite3.Error:
+        pass
+    return conn
 
 def init_db():
     conn = get_connection()

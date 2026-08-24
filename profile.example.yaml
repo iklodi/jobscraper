@@ -119,8 +119,11 @@ known_gaps:
     impact: "Blocks forms with mandatory reference fields"
 
 policies:
-  never_create_accounts: true
-  never_enter_passwords: true
+  # Set to true to let the applier register candidate accounts in your name when an
+  # employer requires one before applying. Generated passwords are saved to
+  # $CVS_DIR/ats_accounts.yaml (chmod 600) before the registration is submitted.
+  # Email verification links are always left for you to click.
+  allow_account_creation: false
   never_solve_captchas: true
   never_submit_without_review: true
   never_inflate_experience: true

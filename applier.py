@@ -5,9 +5,13 @@ profile answer bank, attaches the generated CV/cover letter, and parks the job f
 human review. It never submits, never creates accounts, and never invents an answer.
 """
 import asyncio
+import datetime
 import json
 import os
 import re
+import secrets
+import string
+import urllib.parse
 
 import yaml
 from dotenv import load_dotenv
@@ -24,6 +28,7 @@ load_dotenv(override=True)
 CHROME_PROFILE_DIR = './chrome_profile'
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 PROFILE_PATH = os.path.join(CVS_DIR, 'profile.yaml')
+ACCOUNTS_PATH = os.path.join(CVS_DIR, 'ats_accounts.yaml')
 OUTPUT_DIR = os.path.join(CVS_DIR, 'applications')
 
 GEMINI_MODELS = [
@@ -238,6 +243,197 @@ async def find_apply_url(page, linkedin_url):
     return None, None
 
 
+def generate_password(length=18):
+    """Password that satisfies the complexity rules ATS registration forms impose."""
+    # Symbols kept to a set that form validators reliably accept.
+    alphabet = string.ascii_letters + string.digits + '!@#$%*-_'
+    while True:
+        pw = ''.join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.islower() for c in pw) and any(c.isupper() for c in pw)
+                and any(c.isdigit() for c in pw) and any(c in '!@#$%*-_' for c in pw)):
+            return pw
+
+
+def load_accounts():
+    if not os.path.exists(ACCOUNTS_PATH):
+        return {'accounts': []}
+    with open(ACCOUNTS_PATH, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f) or {'accounts': []}
+
+
+def save_account(entry):
+    """Persist credentials immediately, before anything can fail and lose them."""
+    data = load_accounts()
+    data.setdefault('accounts', [])
+    data['accounts'] = [a for a in data['accounts'] if a.get('domain') != entry['domain']]
+    data['accounts'].append(entry)
+    tmp = ACCOUNTS_PATH + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+    os.replace(tmp, ACCOUNTS_PATH)
+    os.chmod(ACCOUNTS_PATH, 0o600)
+
+
+def account_for(url):
+    domain = urllib.parse.urlparse(url).netloc.lower()
+    for entry in load_accounts().get('accounts', []):
+        if entry.get('domain') == domain:
+            return entry
+    return None
+
+
+REGISTRATION_PROMPT = """You are creating a candidate account on a job application site
+so that the candidate can apply. This is the candidate's OWN account, created with their
+consent, using their own details.
+
+CANDIDATE DETAILS:
+  Full name: {full_name}
+  First name: {first_name}
+  Last name: {last_name}
+  Email: {email}
+  Phone: {phone}
+  Country: {country}
+
+PASSWORD TO USE (use this exact string for every password and confirm-password field):
+  {password}
+
+FORM FIELDS DETECTED (JSON):
+{fields}
+
+VISIBLE PAGE TEXT:
+{page_text}
+
+Output valid JSON only:
+{{
+  "actions": [{{"idx": 0, "action": "fill|select|check|skip", "value": "..."}}],
+  "page_kind": "registration|sign_in|application_form|other",
+  "submit_idx": null,
+  "notes": "..."
+}}
+
+RULES:
+- Fill every password and "confirm password" / "re-enter password" field with the exact
+  password given above.
+- Fill email, name and other identity fields from the candidate details.
+- Tick required terms-of-service and privacy checkboxes; leave marketing opt-ins unticked.
+- Do NOT answer any question that is not part of creating the account.
+- Set page_kind to "sign_in" if this is a login form for an existing account rather than
+  a registration form.
+"""
+
+
+async def click_create_account_tab(page):
+    """Registration is often behind a 'Create Account' toggle on a sign-in page."""
+    create_re = re.compile(r'create (an )?account|sign up|register|new user|créer un compte', re.I)
+    for role in ('link', 'button'):
+        try:
+            control = page.get_by_role(role, name=create_re).first
+            await control.wait_for(state='visible', timeout=3000)
+            await control.click(timeout=3000)
+            await page.wait_for_timeout(2500)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def submit_form(page, labels):
+    """Click the form's own submit control; returns True if one was clicked."""
+    pattern = re.compile(labels, re.I)
+    for role in ('button', 'link'):
+        try:
+            control = page.get_by_role(role, name=pattern).first
+            await control.wait_for(state='visible', timeout=4000)
+            await control.scroll_into_view_if_needed(timeout=2000)
+            await control.click(timeout=5000)
+            await page.wait_for_timeout(4000)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+async def create_or_signin_account(page, client, profile, job_id):
+    """Create (or sign in to) a candidate account. Returns (ok, note)."""
+    identity = profile.get('identity', {})
+    email = identity.get('email')
+    domain = urllib.parse.urlparse(page.url).netloc.lower()
+
+    existing = account_for(page.url)
+    password = existing['password'] if existing else generate_password()
+
+    if not existing:
+        await click_create_account_tab(page)
+
+    body = await page.evaluate(COLLECT_FIELDS_JS)
+    fields, page_text = body['fields'], body['text']
+    if not any(f.get('type') == 'password' for f in fields):
+        return False, f'No password field found on the sign-in page at {page.url}.'
+
+    if CAPTCHA_PATTERNS.search(page_text):
+        return False, (f'Account creation at {domain} is behind a CAPTCHA, so it was not '
+                       f'attempted. Create the account manually.')
+
+    plan = ask_gemini(client, REGISTRATION_PROMPT.format(
+        full_name=identity.get('full_name', ''),
+        first_name=identity.get('first_name', ''),
+        last_name=identity.get('last_name', ''),
+        email=email, phone=identity.get('phone', ''),
+        country=identity.get('country', ''),
+        password=password,
+        fields=json.dumps(fields, ensure_ascii=False)[:15000],
+        page_text=page_text[:2500],
+    ))
+    if not plan:
+        return False, f'Could not map the registration form at {domain}.'
+
+    # Store the credentials BEFORE submitting - a failed or redirecting submit
+    # must never leave an account whose password we no longer know.
+    if not existing:
+        save_account({
+            'domain': domain,
+            'email': email,
+            'password': password,
+            'created_at': datetime.datetime.now().isoformat(timespec='seconds'),
+            'created_for_job': job_id,
+            'email_verified': False,
+        })
+
+    await apply_actions(page, plan.get('actions', []), fields)
+    signing_in = plan.get('page_kind') == 'sign_in' or bool(existing)
+    clicked = await submit_form(
+        page,
+        r'^(sign in|log in|login)\b' if signing_in
+        else r'^(create account|sign up|register|submit|continue|create)\b',
+    )
+    if not clicked:
+        return False, f'Could not find the submit button on the {domain} account form.'
+
+    await page.wait_for_timeout(4000)
+    after = await page.evaluate(COLLECT_FIELDS_JS)
+    after_text = after['text']
+
+    if re.search(r'already (exists|registered|in use)|account with this email', after_text, re.I):
+        return False, (
+            f'{domain} says an account already exists for {email}, and the stored password '
+            f'did not work. Reset the password manually, then add it to ats_accounts.yaml.'
+        )
+    if re.search(r'verify your email|confirmation (email|link)|check your (email|inbox)', after_text, re.I):
+        return False, (
+            f'Account created at {domain} with the credentials saved in ats_accounts.yaml. '
+            f'{domain} sent a verification email to {email} - click the link, then re-run '
+            f'this job and the application will continue automatically.'
+        )
+    if any(f.get('type') == 'password' for f in after['fields']):
+        return False, (
+            f'Still on the account form at {domain} after submitting - it likely rejected '
+            f'something. Credentials are saved in ats_accounts.yaml; finish manually.'
+        )
+
+    verb = 'Signed in to' if signing_in else 'Created an account at'
+    return True, f'{verb} {domain} (credentials in ats_accounts.yaml).'
+
+
 async def dismiss_cookie_banner(page):
     """Accept cookie/consent banners, which otherwise intercept clicks."""
     accept = re.compile(r'^(accept|accept all|allow all|i agree|agree|got it|'
@@ -393,7 +589,8 @@ async def process_job(page, client, profile, job):
     # page that is not one - job pages carry newsletter and job-alert signups.
     plan = fields = None
     apply_url = target.url
-    for _ in range(3):
+    account_attempted, account_note = False, ''
+    for _ in range(4):
         await dismiss_cookie_banner(target)
         apply_url = target.url
         body = await target.evaluate(COLLECT_FIELDS_JS)
@@ -403,11 +600,26 @@ async def process_job(page, client, profile, job):
             return 'failed', f'Blocked by a CAPTCHA / bot check at {apply_url}. Needs a human, ideally over VNC.'
 
         if ACCOUNT_WALL_PATTERNS.search(page_text) or any(f.get('type') == 'password' for f in fields):
-            return 'account_required', (
-                f'The employer requires creating an account or signing in before the form can be '
-                f'filled, so nothing was entered. Apply manually at: {apply_url}\n'
-                f'Documents ready in: {folder}'
-            )
+            allowed = (profile.get('policies') or {}).get('allow_account_creation', False)
+            if not allowed:
+                return 'account_required', (
+                    f'The employer requires creating an account or signing in before the form can be '
+                    f'filled, so nothing was entered. Apply manually at: {apply_url}\n'
+                    f'Documents ready in: {folder}'
+                )
+            if account_attempted:
+                return 'account_required', (
+                    f'Still behind an account wall at {apply_url} after an account attempt.\n'
+                    f'{account_note}\nDocuments ready in: {folder}'
+                )
+            account_attempted = True
+            ok, account_note = await create_or_signin_account(target, client, profile, job_id)
+            print(f'  -> account: {account_note}')
+            if not ok:
+                return 'account_required', f'{account_note}\nApply at: {apply_url}\nDocuments ready in: {folder}'
+            await dismiss_cookie_banner(target)
+            await target.wait_for_timeout(2000)
+            continue
 
         if fields:
             plan = ask_gemini(client, MAPPING_PROMPT.format(
@@ -464,6 +676,8 @@ async def process_job(page, client, profile, job):
         f'Form filled but NOT submitted. Review and submit here: {apply_url}',
         f'Filled {filled} field(s); uploaded: {", ".join(uploaded) if uploaded else "nothing"}.',
     ]
+    if account_note:
+        lines.append(account_note)
     if shot_path:
         lines.append(f'Screenshot of the filled form: {os.path.basename(shot_path)}')
     if errors:

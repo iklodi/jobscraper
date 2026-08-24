@@ -10,3 +10,5 @@ cron.log
 progress.json
 *.docx
 jobscraper.code-workspace
+ats_accounts.yaml
+profile.yaml

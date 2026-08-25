@@ -1166,6 +1166,18 @@ async def process_job(page, client, profile, job, auto_submit=False):
                 return 'failed', f'Could not map the form fields (all Gemini models failed) at {apply_url}.'
 
             if plan.get('page_kind') == 'login_or_register':
+                allowed = (profile.get('policies') or {}).get('allow_account_creation', False)
+                if allowed and not account_attempted:
+                    account_attempted = True
+                    ok, account_note = await create_or_signin_account(
+                        target, client, profile, job_id)
+                    print(f'  -> account: {account_note}', flush=True)
+                    if ok:
+                        await dismiss_cookie_banner(target)
+                        await target.wait_for_timeout(2000)
+                        continue
+                    return 'account_required', (
+                        f'{account_note}\nApply at: {apply_url}\nDocuments ready in: {folder}')
                 return 'account_required', (
                     f'The apply link leads to a sign-in / registration page. Apply manually at: {apply_url}\n'
                     f'Documents ready in: {folder}'

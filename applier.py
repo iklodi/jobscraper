@@ -994,6 +994,13 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
             break
 
         if not await advance_step(page):
+            # A step with no fields is often a chooser ("Apply Manually",
+            # "Start Your Application") rather than the end of the wizard.
+            advanced = await try_advance_to_form(page) if not fields else None
+            if advanced is not None:
+                page = advanced
+                lines.append(f'Step {step}: no fields here - followed the page through to the form.')
+                continue
             lines.append('No "Save and Continue" control found, so this looks like the last page.')
             break
     else:

@@ -292,6 +292,23 @@ def ask_gemini(client, prompt):
     return None
 
 
+async def form_dialog_open(page):
+    """True when a modal holding actual form fields is up.
+
+    LinkedIn's messaging widget is also role=dialog, so presence alone is not
+    enough - the dialog must contain inputs.
+    """
+    try:
+        return await page.evaluate(
+            """() => Array.from(document.querySelectorAll('[role=dialog]'))
+                   .filter(d => { const r = d.getBoundingClientRect();
+                                  return r.width > 300 && r.height > 200; })
+                   .some(d => d.querySelectorAll('input,select,textarea').length > 0)"""
+        )
+    except Exception:
+        return False
+
+
 async def find_apply_url(page, linkedin_url, job_id='unknown'):
     """Open the LinkedIn posting and follow its apply button to the employer's form."""
     await page.goto(linkedin_url, timeout=60000)
@@ -340,23 +357,32 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
             except Exception:
                 pass
 
-        context = page.context
+        # Click, then verify something actually happened. Some apply controls are
+        # inert anchors, so a click that changes nothing means try the next one.
+        before_url = page.url
+        before_pages = len(page.context.pages)
         try:
-            async with context.expect_page(timeout=15000) as new_page_info:
-                await button.click()
-            new_page = await new_page_info.value
-            await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
-            return new_page, 'external'
+            await button.click(timeout=8000)
         except Exception:
-            # No new tab: either a same-tab navigation or an in-page Easy Apply
-            # modal, which renders as a dialog a moment after the click.
-            try:
-                await page.locator('[role=dialog]').first.wait_for(state='visible', timeout=10000)
-                await page.wait_for_timeout(2000)
+            continue
+
+        for _ in range(12):                      # up to ~12s for a reaction
+            await page.wait_for_timeout(1000)
+            if len(page.context.pages) > before_pages:
+                new_page = page.context.pages[-1]
+                try:
+                    await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
+                except Exception:
+                    pass
+                await new_page.wait_for_timeout(2000)
+                return new_page, 'external'
+            if await form_dialog_open(page):
+                await page.wait_for_timeout(1500)
                 return page, 'easy_apply'
-            except Exception:
+            if page.url != before_url:
                 await page.wait_for_timeout(3000)
                 return page, 'same_tab'
+        # Nothing happened - fall through and try the next candidate.
 
     # Nothing matched - leave a screenshot behind so the failure is diagnosable.
     try:

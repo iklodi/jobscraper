@@ -366,6 +366,21 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
         except Exception:
             continue
 
+        # Some controls ignore a synthesised click; dispatching one on the
+        # element itself still triggers the site's own handler.
+        reacted = False
+        for _ in range(4):
+            await page.wait_for_timeout(1000)
+            if (len(page.context.pages) > before_pages or page.url != before_url
+                    or await form_dialog_open(page)):
+                reacted = True
+                break
+        if not reacted:
+            try:
+                await button.evaluate('el => el.click()')
+            except Exception:
+                pass
+
         for _ in range(12):                      # up to ~12s for a reaction
             await page.wait_for_timeout(1000)
             if len(page.context.pages) > before_pages:

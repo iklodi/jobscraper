@@ -1081,6 +1081,13 @@ async def select_native(locator, value, field):
             continue
 
     options = field.get('options') or []
+    if not options:
+        # Some selects are populated by JS after the page snapshot was taken.
+        try:
+            options = await locator.evaluate(
+                'el => Array.from(el.options || []).map(o => o.text.trim()).filter(Boolean)')
+        except Exception:
+            options = []
     wanted = value.strip().lower()
     ranked = [o for o in options if o.strip().lower() == wanted] \
         or [o for o in options if o.strip().lower().startswith(wanted)] \

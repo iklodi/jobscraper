@@ -978,6 +978,38 @@ async def tick_box(page, locator, field):
     await locator.check(force=True, timeout=3000)
 
 
+async def select_native(locator, value, field):
+    """Choose an option in a <select>, tolerating near-miss wording.
+
+    The model answers "No" where the option reads "No - I do not require
+    sponsorship", so fall back to matching against the options we collected.
+    """
+    value = str(value)
+    for attempt in (
+        lambda: locator.select_option(label=value, timeout=4000),
+        lambda: locator.select_option(value=value, timeout=3000),
+    ):
+        try:
+            await attempt()
+            return True
+        except Exception:
+            continue
+
+    options = field.get('options') or []
+    wanted = value.strip().lower()
+    ranked = [o for o in options if o.strip().lower() == wanted] \
+        or [o for o in options if o.strip().lower().startswith(wanted)] \
+        or [o for o in options if wanted and wanted in o.strip().lower()] \
+        or [o for o in options if o.strip().lower() and o.strip().lower() in wanted]
+    for option in ranked[:3]:
+        try:
+            await locator.select_option(label=option, timeout=3000)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 async def select_custom(page, locator, value):
     """Choose a value from a custom dropdown widget (no native <select>)."""
     await locator.scroll_into_view_if_needed(timeout=3000)
@@ -1036,8 +1068,11 @@ async def apply_actions(page, actions, fields=None):
                     if not await select_custom(page, locator, value):
                         errors.append(f'"{name}": could not pick "{value}"')
                         continue
-                else:
-                    await locator.select_option(label=str(value), timeout=5000)
+                elif not await select_native(locator, value, field):
+                    opts = ', '.join((field.get('options') or [])[:6])
+                    errors.append(f'"{name}": no option matching "{value}"'
+                                  + (f' (options: {opts})' if opts else ''))
+                    continue
             elif kind == 'check':
                 if str(value).lower() in ('true', 'yes', '1'):
                     await tick_box(page, locator, field)

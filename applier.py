@@ -67,8 +67,11 @@ COLLECT_FIELDS_JS = """
     let idx = 0;
     // When a modal is open (LinkedIn Easy Apply and friends), only it matters:
     // reading the whole page makes the form look like a job description.
+    // Only a dialog that actually holds inputs is the form; cookie and privacy
+    // overlays are dialogs too, and scoping to one of those hides the real page.
     const dialogs = Array.from(document.querySelectorAll('[role=dialog]'))
-        .filter((d) => { const r = d.getBoundingClientRect(); return r.width > 200 && r.height > 150; });
+        .filter((d) => { const r = d.getBoundingClientRect(); return r.width > 200 && r.height > 150; })
+        .filter((d) => d.querySelectorAll('input,select,textarea').length > 0);
     const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
     const labelFor = (el) => {
         if (el.labels && el.labels.length) return el.labels[0].innerText.trim();
@@ -1006,19 +1009,30 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
 
 
 async def dismiss_cookie_banner(page):
-    """Accept cookie/consent banners, which otherwise intercept clicks."""
-    accept = re.compile(r'^(accept|accept all|allow all|i agree|agree|got it|'
+    """Clear consent overlays, which otherwise intercept clicks.
+
+    Sites often stack two - a cookie dialog and a privacy notice - so keep
+    dismissing until nothing matches.
+    """
+    accept = re.compile(r'^(accept|accept all|accept all cookies|allow all|i agree|agree|'
+                        r'got it|ok|proceed|proceed & close|continue|close|'
                         r'tout accepter|alle akzeptieren|akzeptieren)\b', re.I)
-    for role in ('button', 'link'):
-        try:
-            banner = page.get_by_role(role, name=accept).first
-            await banner.wait_for(state='visible', timeout=2500)
-            await banner.click(timeout=2500)
-            await page.wait_for_timeout(1000)
-            return True
-        except Exception:
-            continue
-    return False
+    dismissed = False
+    for _ in range(3):
+        clicked = False
+        for role in ('button', 'link'):
+            try:
+                banner = page.get_by_role(role, name=accept).first
+                await banner.wait_for(state='visible', timeout=2000)
+                await banner.click(timeout=2500)
+                await page.wait_for_timeout(1200)
+                clicked = dismissed = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            break
+    return dismissed
 
 
 async def try_advance_to_form(page):

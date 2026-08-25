@@ -405,7 +405,24 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
             path=os.path.join(OUTPUT_DIR, f'{job_id}_apply_lookup_failure.png'))
     except Exception:
         pass
-    return None, None
+
+    # Distinguish a LinkedIn Easy Apply posting, which does not drive reliably
+    # under automation, from a genuinely broken or closed one - they need
+    # different things from the candidate.
+    easy_js = (
+        "() => {"
+        " const a = Array.from(document.querySelectorAll('button,a,[role=button]'))"
+        "   .find(e => /^\\s*(easy apply|apply)\\b/i.test((e.innerText || '').trim()));"
+        " if (!a) return false;"
+        " const href = a.getAttribute('href') || '';"
+        " return !href || href.startsWith('#') || href.includes('linkedin.com');"
+        "}"
+    )
+    try:
+        is_easy = await page.evaluate(easy_js)
+    except Exception:
+        is_easy = False
+    return (None, 'easy_apply_manual') if is_easy else (None, None)
 
 
 def generate_password(length=18):
@@ -1173,6 +1190,14 @@ async def process_job(page, client, profile, job, auto_submit=False):
         return 'failed', 'No generated CV/cover letter found for this job - regenerate the assets first.'
 
     target, mode = await find_apply_url(page, link, job_id)
+    if not target and mode == 'easy_apply_manual':
+        return 'ready_to_submit', (
+            'This is a LinkedIn Easy Apply posting. Easy Apply does not drive reliably '
+            'under automation and repeatedly forcing it risks the LinkedIn session the '
+            'scraper depends on, so nothing was attempted.\n'
+            f'It takes about three clicks by hand: {link}\n'
+            f'Your tailored CV and cover letter are in: {folder}'
+        )
     if not target:
         try:
             listing_text = await page.evaluate('() => document.body.innerText.slice(0, 4000)')

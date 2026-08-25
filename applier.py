@@ -620,6 +620,45 @@ async def create_or_signin_account(page, client, profile, job_id):
             save_account(entry)
             return True, f'Signed in to {domain} with the stored credentials.'
 
+    # Registration forms are near-identical everywhere: an email, one or two
+    # password boxes and a consent tick. Filling them directly is far more
+    # reliable than an LLM mapping, which kept missing the confirm-password box.
+    pw_fields = [f for f in fields if f.get('type') == 'password']
+    text_fields = [f for f in fields if f.get('type') in ('text', 'email')]
+    if pw_fields and text_fields:
+        try:
+            await page.locator(f'[data-jsapply="{text_fields[0]["idx"]}"]').fill(email)
+            for pw in pw_fields:
+                await page.locator(f'[data-jsapply="{pw["idx"]}"]').fill(password)
+            for box in [f for f in fields if f.get('type') == 'checkbox']:
+                loc = page.locator(f'[data-jsapply="{box["idx"]}"]')
+                try:
+                    await tick_box(page, loc, box)
+                except Exception:
+                    pass
+            if not await submit_form(page, r'^(create account|sign up|register|continue|submit)\b'):
+                return False, f'Could not find the create-account button at {domain}.'
+            await page.wait_for_timeout(5000)
+            after = await page.evaluate(COLLECT_FIELDS_JS)
+            if re.search(r'something went wrong|please refresh', after['text'], re.I):
+                await page.reload(timeout=45000)
+                await page.wait_for_timeout(5000)
+                after = await page.evaluate(COLLECT_FIELDS_JS)
+            if not any(f.get('type') == 'password' for f in after['fields']):
+                entry = account_for(page.url) or {}
+                if entry:
+                    entry['last_signin_ok'] = datetime.datetime.now().isoformat(timespec='seconds')
+                    save_account(entry)
+                return True, f'Created an account at {domain} (credentials in ats_accounts.yaml).'
+            detail = await form_errors(page)
+            return False, (
+                f'The {domain} account form did not accept the registration'
+                + (f': "{detail}"' if detail else ' and gave no error')
+                + '. Credentials are saved in ats_accounts.yaml; finish manually.'
+            )
+        except Exception as e:
+            return False, f'Account creation at {domain} failed: {type(e).__name__}.'
+
     plan = ask_gemini(client, REGISTRATION_PROMPT.format(
         full_name=identity.get('full_name', ''),
         first_name=identity.get('first_name', ''),

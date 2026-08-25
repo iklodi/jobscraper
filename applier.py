@@ -1086,6 +1086,16 @@ async def apply_actions(page, actions, fields=None):
     return filled, errors
 
 
+async def snap(page, job_id, tag):
+    """Save a diagnostic screenshot so a failure can be understood after the fact."""
+    try:
+        path = os.path.join(OUTPUT_DIR, f'{job_id}_{tag}.png')
+        await page.screenshot(path=path, full_page=True)
+        return os.path.basename(path)
+    except Exception:
+        return None
+
+
 async def process_job(page, client, profile, job, auto_submit=False):
     """Fill one application. Returns (new_status, note)."""
     job_id, title, company, link, description = job
@@ -1169,15 +1179,20 @@ async def process_job(page, client, profile, job, auto_submit=False):
             iframe_note = ''
             if body.get('iframes'):
                 iframe_note = f" The form may be inside an iframe ({body['iframes'][0]})."
+            shot = await snap(target, job_id, 'no_form')
             return 'failed', (
                 f'Reached {apply_url} but could not get to an application form - '
-                f'nothing was filled in.{iframe_note}\nApply manually; documents are in: {folder}'
+                f'nothing was filled in.{iframe_note}'
+                + (f'\nWhat the page looked like: {shot}' if shot else '')
+                + f'\nApply manually; documents are in: {folder}'
             )
         target = advanced
     else:
+        shot = await snap(target, job_id, 'no_form')
         return 'failed', (
-            f'Could not reach an application form from {apply_url} - nothing was filled in.\n'
-            f'Apply manually; documents are in: {folder}'
+            f'Could not reach an application form from {apply_url} - nothing was filled in.'
+            + (f'\nWhat the page looked like: {shot}' if shot else '')
+            + f'\nApply manually; documents are in: {folder}'
         )
 
     reference_letter = (profile.get('employment') or {}).get('reference_letter')

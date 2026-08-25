@@ -326,7 +326,13 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
             href = await button.get_attribute('href')
         except Exception:
             href = None
-        if href and href.startswith('http') and '/jobs/view/' not in href:
+        # Only follow links that leave LinkedIn: an in-site href belongs to Easy
+        # Apply, where navigating away closes the modal we actually want.
+        external = False
+        if href and href.startswith('http'):
+            host = urllib.parse.urlparse(href).netloc.lower()
+            external = 'linkedin.com' not in host
+        if external:
             try:
                 await page.goto(href, timeout=60000)
                 await page.wait_for_timeout(4000)

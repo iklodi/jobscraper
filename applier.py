@@ -579,8 +579,13 @@ async def create_or_signin_account(page, client, profile, job_id):
     email = identity.get('email')
     domain = urllib.parse.urlparse(page.url).netloc.lower()
 
-    existing = account_for(page.url)
-    password = existing['password'] if existing else generate_password()
+    stored = account_for(page.url)
+    password = stored['password'] if stored else generate_password()
+
+    # Credentials are written before the registration is submitted so a password
+    # can never be lost - but that means a stored entry does not prove the
+    # account exists. Only a confirmed one is worth signing in with.
+    existing = bool(stored and stored.get('registration_confirmed'))
 
     if existing:
         await click_sign_in_tab(page)
@@ -615,9 +620,11 @@ async def create_or_signin_account(page, client, profile, job_id):
                     + (f': "{detail}"' if detail else ' (no error shown)')
                     + '. Credentials are in ats_accounts.yaml; check them manually.'
                 )
-            entry = dict(existing)
+            entry = dict(stored or {})
+            entry['registration_confirmed'] = True
             entry['last_signin_ok'] = datetime.datetime.now().isoformat(timespec='seconds')
-            save_account(entry)
+            if entry.get('domain'):
+                save_account(entry)
             return True, f'Signed in to {domain} with the stored credentials.'
 
     # Registration forms are near-identical everywhere: an email, one or two
@@ -647,6 +654,7 @@ async def create_or_signin_account(page, client, profile, job_id):
             if not any(f.get('type') == 'password' for f in after['fields']):
                 entry = account_for(page.url) or {}
                 if entry:
+                    entry['registration_confirmed'] = True
                     entry['last_signin_ok'] = datetime.datetime.now().isoformat(timespec='seconds')
                     save_account(entry)
                 return True, f'Created an account at {domain} (credentials in ats_accounts.yaml).'
@@ -682,6 +690,7 @@ async def create_or_signin_account(page, client, profile, job_id):
             'created_at': datetime.datetime.now().isoformat(timespec='seconds'),
             'created_for_job': job_id,
             'email_verified': False,
+            'registration_confirmed': False,
         })
 
     await apply_actions(page, plan.get('actions', []), fields)

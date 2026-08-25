@@ -313,6 +313,20 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
         except Exception:
             continue
 
+        # On many postings the apply control is an <a> whose click does nothing
+        # under automation. Navigating to its href directly is far more reliable.
+        try:
+            href = await button.get_attribute('href')
+        except Exception:
+            href = None
+        if href and href.startswith('http') and '/jobs/view/' not in href:
+            try:
+                await page.goto(href, timeout=60000)
+                await page.wait_for_timeout(4000)
+                return page, 'external_link'
+            except Exception:
+                pass
+
         context = page.context
         try:
             async with context.expect_page(timeout=15000) as new_page_info:

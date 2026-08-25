@@ -65,6 +65,11 @@ COLLECT_FIELDS_JS = """
 () => {
     const out = [];
     let idx = 0;
+    // When a modal is open (LinkedIn Easy Apply and friends), only it matters:
+    // reading the whole page makes the form look like a job description.
+    const dialogs = Array.from(document.querySelectorAll('[role=dialog]'))
+        .filter((d) => { const r = d.getBoundingClientRect(); return r.width > 200 && r.height > 150; });
+    const root = dialogs.length ? dialogs[dialogs.length - 1] : document;
     const labelFor = (el) => {
         if (el.labels && el.labels.length) return el.labels[0].innerText.trim();
         if (el.getAttribute('aria-label')) return el.getAttribute('aria-label').trim();
@@ -98,7 +103,7 @@ COLLECT_FIELDS_JS = """
             && HONEYPOT_NAME.test(el.id || '')) return true;
         return false;
     };
-    document.querySelectorAll('input, select, textarea').forEach((el) => {
+    root.querySelectorAll('input, select, textarea').forEach((el) => {
         if (el.type === 'hidden') return;
         const rect = el.getBoundingClientRect();
         const visible = rect.width > 0 && rect.height > 0;
@@ -132,7 +137,7 @@ COLLECT_FIELDS_JS = """
         idx += 1;
     });
     // Custom dropdowns (Workday, react-select, Ashby...) are not <select> elements.
-    document.querySelectorAll(
+    root.querySelectorAll(
         '[role=combobox], button[aria-haspopup=listbox], [aria-haspopup=listbox],' +
         '[data-automation-id*="selectinput"], [data-uxi-widget-type="selectinput"]'
     ).forEach((el) => {
@@ -164,7 +169,9 @@ COLLECT_FIELDS_JS = """
     return {
         fields: out,
         iframes: Array.from(document.querySelectorAll('iframe')).map((f) => f.src).filter(Boolean),
-        text: document.body ? document.body.innerText.slice(0, 6000) : '',
+        in_dialog: dialogs.length > 0,
+        text: (root === document ? (document.body ? document.body.innerText : '')
+                                  : root.innerText).slice(0, 6000),
     };
 }
 """

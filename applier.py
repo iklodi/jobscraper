@@ -1195,11 +1195,14 @@ async def apply_actions(page, actions, fields=None):
             if kind == 'fill':
                 await locator.fill(str(value), timeout=5000)
             elif kind == 'select':
-                if field.get('type') == 'select-custom':
-                    if not await select_custom(page, locator, value):
-                        errors.append(f'"{name}": could not pick "{value}"')
-                        continue
-                elif not await select_native(locator, value, field):
+                # Only a real <select> takes select_option; anything else is a
+                # widget that has to be opened and clicked.
+                native = field.get('type') in ('select-one', 'select-multiple')
+                picked = (await select_native(locator, value, field) if native
+                          else await select_custom(page, locator, value))
+                if not picked and native:
+                    picked = await select_custom(page, locator, value)   # last resort
+                if not picked:
                     opts = ', '.join((field.get('options') or [])[:6])
                     errors.append(f'"{name}": no option matching "{value}"'
                                   + (f' (options: {opts})' if opts else ''))

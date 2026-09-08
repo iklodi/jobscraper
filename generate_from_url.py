@@ -201,27 +201,28 @@ def record_job(job_id, meta, description, url):
     return added
 
 
-async def main():
-    parser = argparse.ArgumentParser(
-        description='Generate a tailored CV and cover letter from a job URL.')
-    parser.add_argument('url', help='LinkedIn job URL, or any employer job page')
-    parser.add_argument('-i', '--instructions',
-                        help='Extra instructions for the AI, e.g. "the company is Hone"')
-    parser.add_argument('--headed', action='store_true',
-                        help='Show the browser (use once to log in to LinkedIn)')
-    args = parser.parse_args()
+async def run_for_url(url, instructions=None, headed=False, on_progress=None):
+    """Read a job advert and generate its documents.
 
-    print(f'Reading {args.url} ...')
-    page = await fetch_job_page(args.url, headed=args.headed)
+    Shared by the CLI and the dashboard. Returns a dict describing what happened
+    so the caller can report it however it likes.
+    """
+    def step(message):
+        print(message, flush=True)
+        if on_progress:
+            on_progress(message)
+
+    step(f'Reading {url} ...')
+    page = await fetch_job_page(url, headed=headed)
     description = (page.get('description') or '').strip()
 
     if len(description) < 200 or LOGIN_WALL.search(page.get('page_text', '')):
-        print('\nCould not read the advert - the page is short or behind a login wall.')
-        if 'linkedin.com' in args.url:
-            print('Run once with --headed and sign in to LinkedIn, then try again.')
-        return 1
+        hint = ('Sign in to LinkedIn in the browser on this machine, then try again.'
+                if 'linkedin.com' in url else
+                'The page may need JavaScript, a login, or be region-blocked.')
+        return {'ok': False, 'error': f'Could not read the advert at {url}. {hint}'}
 
-    print(f'Read {len(description)} characters of advert. Identifying the role ...')
+    step(f'Read {len(description)} characters. Identifying the role ...')
     meta = extract_metadata(description, page.get('title', ''))
 
     # Structured data beats the model's reading of the prose, and rescues
@@ -246,26 +247,57 @@ async def main():
             meta['company'] = m.group('company').strip()
             if not meta.get('title'):
                 meta['title'] = m.group('title').strip()
-    if not meta.get('company'):
-        print('  ! Could not identify the employer - documents will say "Unknown".')
-        print('    Re-run with  -i "the company is X"  to set it.')
-    print(f"  {meta.get('title')} at {meta.get('company')} "
-          f"({meta.get('location') or 'location not stated'}, {meta.get('jd_language') or 'language unknown'})")
 
-    job_id = job_id_for(page.get('final_url') or args.url)
-    record_job(job_id, meta, description, page.get('final_url') or args.url)
+    final_url = page.get('final_url') or url
+    job_id = job_id_for(final_url)
+    record_job(job_id, meta, description, final_url)
 
-    print('Generating the CV and cover letter ...')
-    ok = await generate_for_job(job_id, args.instructions)
+    step(f"Generating documents for {meta.get('company') or 'Unknown'}: "
+         f"{meta.get('title') or 'the role'} ...")
+    ok = await generate_for_job(job_id, instructions)
     if not ok:
-        print('Generation failed - see the messages above.')
-        return 1
+        return {'ok': False, 'job_id': job_id,
+                'error': 'Reading the advert worked, but generating the documents failed.'}
 
     folder = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'applications')
     made = [d for d in os.listdir(folder) if d.endswith(f'_{job_id}')] if os.path.isdir(folder) else []
-    if made:
-        print(f'\nDone. Documents are in: {os.path.join(folder, made[0])}')
-        for f in sorted(os.listdir(os.path.join(folder, made[0]))):
+    return {
+        'ok': True,
+        'job_id': job_id,
+        'company': meta.get('company'),
+        'title': meta.get('title'),
+        'location': meta.get('location'),
+        'language': meta.get('jd_language'),
+        'hiring_manager': meta.get('hiring_manager_name'),
+        'folder': os.path.join(folder, made[0]) if made else None,
+        'company_identified': bool(meta.get('company')),
+    }
+
+
+async def main():
+    parser = argparse.ArgumentParser(
+        description='Generate a tailored CV and cover letter from a job URL.')
+    parser.add_argument('url', help='LinkedIn job URL, or any employer job page')
+    parser.add_argument('-i', '--instructions',
+                        help='Extra instructions for the AI, e.g. "the company is Hone"')
+    parser.add_argument('--headed', action='store_true',
+                        help='Show the browser (use once to log in to LinkedIn)')
+    args = parser.parse_args()
+
+    result = await run_for_url(args.url, args.instructions, headed=args.headed)
+    if not result['ok']:
+        print('\n' + result['error'])
+        return 1
+
+    if not result['company_identified']:
+        print('  ! Could not identify the employer - documents say "Unknown".')
+        print('    Re-run with  -i "the company is X"  to set it.')
+    print(f"  {result['title']} at {result['company']} "
+          f"({result.get('location') or 'location not stated'}, "
+          f"{result.get('language') or 'language unknown'})")
+    if result.get('folder'):
+        print(f"\nDone. Documents are in: {result['folder']}")
+        for f in sorted(os.listdir(result['folder'])):
             print(f'  {f}')
     return 0
 

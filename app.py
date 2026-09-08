@@ -232,6 +232,51 @@ def trigger_apply():
     apply_thread.start()
     return jsonify({'status': 'started'})
 
+add_url_thread = None
+add_url_result = None
+
+def run_add_url_bg(url, instructions):
+    """Fetch a job advert and generate its documents, for the dashboard's + button."""
+    global add_url_thread, add_url_result
+    import asyncio
+    from generate_from_url import run_for_url
+    try:
+        add_url_result = asyncio.run(run_for_url(
+            url, instructions,
+            on_progress=lambda msg: progress_tracker.set_status(msg, 0, 0),
+        ))
+    except Exception as e:
+        add_url_result = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
+    finally:
+        add_url_thread = None
+        progress_tracker.clear_status()
+
+@app.route('/api/jobs/from-url', methods=['POST'])
+def add_job_from_url():
+    global add_url_thread, add_url_result
+    if add_url_thread and add_url_thread.is_alive():
+        return jsonify({'status': 'already_running'})
+
+    data = request.json or {}
+    url = (data.get('url') or '').strip()
+    if not url.startswith(('http://', 'https://')):
+        return jsonify({'status': 'error', 'error': 'Enter a full job URL starting with http.'}), 400
+
+    add_url_result = None
+    add_url_thread = threading.Thread(
+        target=run_add_url_bg, args=(url, (data.get('instructions') or '').strip() or None))
+    add_url_thread.start()
+    return jsonify({'status': 'started'})
+
+@app.route('/api/jobs/from-url/status', methods=['GET'])
+def add_job_from_url_status():
+    running = add_url_thread is not None and add_url_thread.is_alive()
+    return jsonify({
+        'running': running,
+        'stage': progress_tracker.get_status().get('current_stage') if running else '',
+        'result': None if running else add_url_result,
+    })
+
 @app.route('/download/<path:subpath>')
 def download_file(subpath):
     apps_dir = os.path.join(CVS_DIR, 'applications')

@@ -16,6 +16,8 @@
         <header>
             <h1>💼 Job Application Pipeline</h1>
             <div style="display: flex; align-items: center; gap: 1.5rem;">
+                <button id="add-job-btn" class="btn-add" title="Add a job by URL"
+                        onclick="openAddJob()" aria-label="Add a job by URL">+</button>
                 <button class="btn" onclick="pullUpdates(this)">☁️ Pull Updates</button>
                 <button class="btn" onclick="manualRefresh(this)">🔄 Refresh</button>
                 <div class="pipeline-controls" style="display: flex; gap: 0.5rem; position: relative;">
@@ -101,6 +103,38 @@
                 <div class="kanban-cards"></div>
             </div>
         </main>
+    </div>
+
+    <!-- Add Job By URL Modal -->
+    <div id="add-job-modal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 560px;">
+            <span class="close-btn" onclick="closeAddJob()">&times;</span>
+            <h2 style="margin-bottom: 0.4rem;">Add a job by link</h2>
+            <h3 style="margin-bottom: 1.4rem;">Paste a LinkedIn posting or any employer job page.
+                The advert is read and a tailored CV and cover letter are written for it.</h3>
+
+            <div class="detail-section" style="border-bottom: none; padding-bottom: 0;">
+                <h4>Job URL</h4>
+                <input type="url" id="add-job-url" class="column-filter" style="margin-bottom: 1rem;"
+                       placeholder="https://www.linkedin.com/jobs/view/..." autocomplete="off">
+
+                <h4>Extra instructions <span style="text-transform: none; opacity: 0.6;">(optional)</span></h4>
+                <textarea id="add-job-instructions" placeholder="e.g. the company is Hone, or emphasise the SAP work"
+                          style="width: 100%; height: 70px; padding: 10px; border-radius: 8px;
+                                 border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2);
+                                 color: white; font-family: inherit; resize: vertical;"></textarea>
+
+                <div id="add-job-status" style="display: none; margin-top: 1rem; font-size: 0.9rem;
+                     color: var(--text-secondary);"></div>
+
+                <div style="display: flex; gap: 10px; margin-top: 1.4rem;">
+                    <button class="btn btn-primary" id="add-job-submit" onclick="submitAddJob()">
+                        Fetch &amp; generate
+                    </button>
+                    <button class="btn" onclick="closeAddJob()">Cancel</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Job Details Modal -->

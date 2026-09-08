@@ -3,11 +3,13 @@ document.addEventListener('DOMContentLoaded', () => {
     pollScraperStatus();
 
     const modal = document.getElementById('job-modal');
-    const closeBtn = document.querySelector('.close-btn');
+    // Scoped to this modal: there is more than one .close-btn on the page now.
+    const closeBtn = document.querySelector('#job-modal .close-btn');
 
-    closeBtn.addEventListener('click', closeModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
     window.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
+        if (e.target === document.getElementById('add-job-modal')) closeAddJob();
     });
 });
 
@@ -734,3 +736,109 @@ function getDragAfterElement(container, y) {
         }
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
+
+// --- Add a job by URL -------------------------------------------------------
+
+window.openAddJob = function() {
+    const modal = document.getElementById('add-job-modal');
+    const status = document.getElementById('add-job-status');
+    if (status) { status.style.display = 'none'; status.innerHTML = ''; }
+    const submit = document.getElementById('add-job-submit');
+    if (submit) { submit.disabled = false; submit.innerText = 'Fetch & generate'; }
+    modal.classList.add('active');
+    const input = document.getElementById('add-job-url');
+    input.value = '';
+    input.focus();
+}
+
+window.closeAddJob = function() {
+    document.getElementById('add-job-modal').classList.remove('active');
+}
+
+function addJobStatus(html, colour) {
+    const el = document.getElementById('add-job-status');
+    el.style.display = 'block';
+    el.style.color = colour || 'var(--text-secondary)';
+    el.innerHTML = html;
+}
+
+window.submitAddJob = async function() {
+    const url = document.getElementById('add-job-url').value.trim();
+    const instructions = document.getElementById('add-job-instructions').value.trim();
+    if (!url) { addJobStatus('Paste a job URL first.', '#f87171'); return; }
+
+    const submit = document.getElementById('add-job-submit');
+    submit.disabled = true;
+    submit.innerText = 'Working...';
+    addJobStatus('Opening the page...');
+
+    try {
+        const res = await fetch('/api/jobs/from-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url, instructions: instructions })
+        });
+        const data = await res.json();
+        if (data.status === 'already_running') {
+            addJobStatus('Another job is being added right now - try again in a moment.', '#fbbf24');
+            submit.disabled = false; submit.innerText = 'Fetch & generate';
+            return;
+        }
+        if (data.status === 'error') {
+            addJobStatus(data.error, '#f87171');
+            submit.disabled = false; submit.innerText = 'Fetch & generate';
+            return;
+        }
+        pollAddJob();
+    } catch (e) {
+        addJobStatus('Could not start: ' + e, '#f87171');
+        submit.disabled = false; submit.innerText = 'Fetch & generate';
+    }
+}
+
+async function pollAddJob() {
+    const submit = document.getElementById('add-job-submit');
+    try {
+        const res = await fetch('/api/jobs/from-url/status');
+        const data = await res.json();
+
+        if (data.running) {
+            if (data.stage) addJobStatus(data.stage);
+            setTimeout(pollAddJob, 1500);
+            return;
+        }
+
+        const result = data.result;
+        submit.disabled = false;
+        submit.innerText = 'Fetch & generate';
+
+        if (!result) {
+            addJobStatus('Finished, but no result was reported.', '#fbbf24');
+        } else if (!result.ok) {
+            addJobStatus(result.error, '#f87171');
+        } else {
+            const where = result.company_identified ? '' :
+                '<br><span style="color:#fbbf24;">The employer could not be identified, so the ' +
+                'documents say "Unknown". Add an instruction like "the company is X" and try again.</span>';
+            addJobStatus(
+                '<strong style="color:#4ade80;">Done.</strong> ' +
+                `${result.title || 'Role'} at ${result.company || 'Unknown'}. ` +
+                'The CV and cover letter are on the card.' + where +
+                `<br><br><button class="btn btn-primary" onclick="closeAddJob(); openJobDetails('${result.job_id}')">` +
+                'Open the job</button>', '#4ade80');
+            fetchJobs();
+        }
+    } catch (e) {
+        submit.disabled = false;
+        submit.innerText = 'Fetch & generate';
+        addJobStatus('Lost track of the job: ' + e, '#f87171');
+    }
+}
+
+// Enter submits from the URL box; Escape closes the dialog.
+document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('add-job-modal');
+    if (!modal || !modal.classList.contains('active')) return;
+    if (e.key === 'Escape') closeAddJob();
+    if (e.key === 'Enter' && e.target.id === 'add-job-url') submitAddJob();
+});

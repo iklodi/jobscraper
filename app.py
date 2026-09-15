@@ -46,15 +46,21 @@ def get_files_for_job(job_id):
                         })
     return files
 
+# Rejected jobs older than this drop off the board. The rows stay in the
+# database so the scraper still knows it has seen them and will not re-add them.
+REJECTED_BOARD_DAYS = int(os.environ.get('REJECTED_BOARD_DAYS', 7))
+
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
     conn = get_db_connection()
     jobs = conn.execute('''
         SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
                estimated_salary, is_recruiter, description, application_notes
-        FROM jobs 
+        FROM jobs
+        WHERE status NOT IN ('rejected', 'scored')
+           OR created_at >= datetime('now', ?)
         ORDER BY score DESC, created_at DESC
-    ''').fetchall()
+    ''', (f'-{REJECTED_BOARD_DAYS} days',)).fetchall()
     
     job_list = []
     for job in jobs:

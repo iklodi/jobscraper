@@ -9,20 +9,34 @@ import notifier
 
 # Configuration
 CHROME_PROFILE_DIR = './chrome_profile'
+# LinkedIn's job-type filter codes (the f_JT search parameter).
+JOB_TYPE_CODES = {
+    'full-time': 'F', 'fulltime': 'F', 'permanent': 'F',
+    'part-time': 'P', 'parttime': 'P',
+    'contract': 'C', 'contracting': 'C', 'freelance': 'C',
+    'temporary': 'T', 'interim': 'T',
+    'internship': 'I', 'volunteer': 'V', 'other': 'O',
+}
+
+
 def get_search_criteria():
+    """Read keywords, locations and job types from search_criteria.md (or env)."""
     env_keywords = os.environ.get('SEARCH_KEYWORDS')
     env_locations = os.environ.get('SEARCH_LOCATIONS')
-    
+    env_job_types = os.environ.get('SEARCH_JOB_TYPES')
+
     if env_keywords and env_locations:
         keywords = [k.strip() for k in env_keywords.split(',')]
         locations = [l.strip() for l in env_locations.split(',')]
-        return keywords, locations
+        job_types = [j.strip() for j in env_job_types.split(',')] if env_job_types else []
+        return keywords, locations, job_types
 
     criteria_path = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'search_criteria.md')
     keywords = []
     locations = []
+    job_types = []
     if not os.path.exists(criteria_path):
-        return ["Software Engineer"], ["Remote"]
+        return ["Software Engineer"], ["Remote"], []
         
     with open(criteria_path, 'r') as f:
         lines = f.readlines()
@@ -36,17 +50,23 @@ def get_search_criteria():
             current_section = 'keywords'
         elif line.startswith('# Search Locations'):
             current_section = 'locations'
+        elif line.startswith('# Job Types'):
+            current_section = 'job_types'
+        elif line.startswith('#'):
+            continue                      # a comment inside a section
         elif line.startswith('- ') and current_section == 'keywords':
             keywords.append(line[2:].strip())
         elif line.startswith('- ') and current_section == 'locations':
             locations.append(line[2:].strip())
+        elif line.startswith('- ') and current_section == 'job_types':
+            job_types.append(line[2:].strip())
             
     if not keywords:
         keywords = ["Software Engineer"]
     if not locations:
         locations = ["Remote"]
-        
-    return keywords, locations
+
+    return keywords, locations, job_types
 
 async def run_scraper():
     db.init_db()
@@ -92,7 +112,13 @@ async def run_scraper():
                 return {}
             print("Successfully logged in!")
 
-        keywords_list, locations_list = get_search_criteria()
+        keywords_list, locations_list, job_types = get_search_criteria()
+        # Translate the configured job types into LinkedIn's f_JT filter.
+        type_codes = ''.join(dict.fromkeys(
+            JOB_TYPE_CODES[t.lower()] for t in job_types if t.lower() in JOB_TYPE_CODES))
+        if job_types:
+            print(f"Job types: {', '.join(job_types)}"
+                  + (f" (f_JT={type_codes})" if type_codes else " - none recognised, ignoring"))
         keyword_stats = {k: 0 for k in keywords_list}
         session_total_added = 0
         total_pages = len(keywords_list) * len(locations_list) * 3
@@ -109,7 +135,10 @@ async def run_scraper():
                     pages_processed += 1
                     progress_tracker.set_status(f"Scraping '{keyword}'", pages_processed, total_pages)
                     start = page_num * 25
-                    query = urllib.parse.urlencode({'keywords': keyword, 'location': location, 'start': start})
+                    params = {'keywords': keyword, 'location': location, 'start': start}
+                    if type_codes:
+                        params['f_JT'] = type_codes
+                    query = urllib.parse.urlencode(params)
                     search_url = f"https://www.linkedin.com/jobs/search/?{query}"
                     
                     print(f"Searching for jobs: {keyword} in {location} (Page {page_num + 1})")

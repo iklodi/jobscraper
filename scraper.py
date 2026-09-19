@@ -26,7 +26,7 @@ def get_search_criteria():
     env_job_types = os.environ.get('SEARCH_JOB_TYPES')
 
     if env_keywords and env_locations:
-        keywords = [k.strip() for k in env_keywords.split(',')]
+        keywords = [(k.strip(), None) for k in env_keywords.split(',')]
         locations = [l.strip() for l in env_locations.split(',')]
         job_types = [j.strip() for j in env_job_types.split(',')] if env_job_types else []
         return keywords, locations, job_types
@@ -36,7 +36,7 @@ def get_search_criteria():
     locations = []
     job_types = []
     if not os.path.exists(criteria_path):
-        return ["Software Engineer"], ["Remote"], []
+        return [("Software Engineer", None)], ["Remote"], []
         
     with open(criteria_path, 'r') as f:
         lines = f.readlines()
@@ -55,14 +55,20 @@ def get_search_criteria():
         elif line.startswith('#'):
             continue                      # a comment inside a section
         elif line.startswith('- ') and current_section == 'keywords':
-            keywords.append(line[2:].strip())
+            entry = line[2:].strip()
+            if ' @ ' in entry:
+                kw, where = entry.split(' @ ', 1)
+                keywords.append((kw.strip(),
+                                 [w.strip() for w in where.split('/') if w.strip()]))
+            else:
+                keywords.append((entry, None))
         elif line.startswith('- ') and current_section == 'locations':
             locations.append(line[2:].strip())
         elif line.startswith('- ') and current_section == 'job_types':
             job_types.append(line[2:].strip())
             
     if not keywords:
-        keywords = ["Software Engineer"]
+        keywords = [("Software Engineer", None)]
     if not locations:
         locations = ["Remote"]
 
@@ -112,20 +118,20 @@ async def run_scraper():
                 return {}
             print("Successfully logged in!")
 
-        keywords_list, locations_list, job_types = get_search_criteria()
+        keyword_specs, locations_list, job_types = get_search_criteria()
         # Translate the configured job types into LinkedIn's f_JT filter.
         type_codes = ''.join(dict.fromkeys(
             JOB_TYPE_CODES[t.lower()] for t in job_types if t.lower() in JOB_TYPE_CODES))
         if job_types:
             print(f"Job types: {', '.join(job_types)}"
                   + (f" (f_JT={type_codes})" if type_codes else " - none recognised, ignoring"))
-        keyword_stats = {k: 0 for k in keywords_list}
+        keyword_stats = {k: 0 for k, _ in keyword_specs}
         session_total_added = 0
-        total_pages = len(keywords_list) * len(locations_list) * 3
+        total_pages = sum(len(locs or locations_list) for _, locs in keyword_specs) * 3
         pages_processed = 0
 
-        for keyword in keywords_list:
-            for location in locations_list:
+        for keyword, keyword_locations in keyword_specs:
+            for location in (keyword_locations or locations_list):
                 for page_num in range(3): # Scrape up to 3 pages (75 jobs) per keyword/location combo
                     if progress_tracker.is_stop_requested():
                         print("Stop requested during scraping!")

@@ -7,19 +7,19 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/path/to/jobscraper/venv/bin/python</string>
+        <string>/path/to/home/Work/jobscraper/venv/bin/python</string>
         <string>main.py</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/path/to/jobscraper</string>
+    <string>/path/to/home/Work/jobscraper</string>
 
     <key>StandardOutPath</key>
-    <string>/path/to/jobscraper/cron.log</string>
-
+    <string>/path/to/home/Work/jobscraper/cron.log</string>
     <key>StandardErrorPath</key>
-    <string>/path/to/jobscraper/cron.log</string>
+    <string>/path/to/home/Work/jobscraper/cron.log</string>
 
+    <!-- Nightly at 03:00. If the Mac is asleep, launchd runs it once it wakes. -->
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
@@ -28,8 +28,11 @@
         <integer>0</integer>
     </dict>
 
-    <!-- This ensures it wakes the machine up if it's sleeping, or runs immediately upon waking -->
     <key>RunAtLoad</key>
     <false/>
+
+    <!-- The scraper drives a visible Chromium, so it needs the GUI session. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
 </dict>
 </plist>

@@ -5,6 +5,21 @@ import markdown
 import db
 import urllib.parse
 
+def _job_links(job_id):
+    """The ' - [View Details] | [LinkedIn]' suffix for a job line."""
+    if not job_id:
+        return ""
+    dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
+    links = [f"[View Details]({dashboard_url}/?job_id={job_id})"]
+    try:
+        job_links = db.get_job_links(job_id)
+        if job_links.get('linkedin'):
+            links.append(f"[LinkedIn]({job_links['linkedin']})")
+    except Exception:
+        pass
+    return " - " + " | ".join(links)
+
+
 def format_summary(duration, keyword_stats, eval_stats, status_counts):
     lines = []
     lines.append("# AI Job Application Pipeline Summary\n")
@@ -39,25 +54,29 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
             company = job['company']
             score = job['score']
             
-            links_text = []
-            if job_id:
-                dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
-                links_text.append(f"[View Details]({dashboard_url}/?job_id={job_id})")
-                job_links = db.get_job_links(job_id)
-                if job_links.get('linkedin'):
-                    links_text.append(f"[LinkedIn]({job_links['linkedin']})")
-            
-            link_str = f" - {' | '.join(links_text)}" if links_text else ""
-            lines.append(f"- **[{score}/10]** {title} @ **{company}**{link_str}")
+            lines.append(f"- **[{score}/10]** {title} @ **{company}**" + _job_links(job_id))
     lines.append("")
             
+    # Near misses: without these, a run with no 9s has nothing to click.
+    near_misses = eval_stats.get('near_misses', [])
+    if near_misses:
+        lines.append(f"## Worth a look (scored {os.environ.get('NEAR_MISS_SCORE', 7)}-"
+                     f"{int(os.environ.get('MIN_PASS_SCORE', 9)) - 1})\n")
+        for job in sorted(near_misses, key=lambda j: -j['score'])[:10]:
+            lines.append(f"- **[{job['score']}/10]** {job['title']} @ **{job['company']}**"
+                         + _job_links(job.get('job_id')))
+        lines.append("")
+
     lines.append("## Pipeline Status (Total Backlog)\n")
     if status_counts:
         for status, count in status_counts.items():
             lines.append(f"- **{status}**: {count}")
     else:
         lines.append("- No status counts available.")
-        
+
+    dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
+    lines.append(f"\n---\n[Open the dashboard]({dashboard_url})")
+
     return "\n".join(lines)
 
 def send_email(subject, md_body):

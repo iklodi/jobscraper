@@ -300,4 +300,7 @@ import db
 
 if __name__ == '__main__':
     db.init_db()
-    app.run(host='0.0.0.0', debug=True, port=5050)
+    # Debug off by default: under launchd the reloader spawns a second process
+    # that fights for the port. Set FLASK_DEBUG=1 for local development.
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+    app.run(host='0.0.0.0', debug=debug, port=int(os.environ.get('DASHBOARD_PORT', 5050)))

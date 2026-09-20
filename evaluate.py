@@ -233,7 +233,7 @@ def run_evaluation():
     previous_applications = get_previous_applications()
     rules_text = get_evaluation_rules()
     
-    eval_stats = {'score_counts': {}, 'recent_backlog': []}
+    eval_stats = {'score_counts': {}, 'recent_backlog': [], 'near_misses': []}
 
     total_jobs = len(unscored_jobs)
     for idx, job in enumerate(unscored_jobs, 1):
@@ -258,13 +258,14 @@ def run_evaluation():
             jd_language = result.get('jd_language', None)
             
             eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
-            if score >= int(os.environ.get('MIN_PASS_SCORE', 9)):
-                eval_stats['recent_backlog'].append({
-                    'job_id': job_id,
-                    'title': title,
-                    'company': company,
-                    'score': score
-                })
+            pass_score = int(os.environ.get('MIN_PASS_SCORE', 9))
+            entry = {'job_id': job_id, 'title': title, 'company': company, 'score': score}
+            if score >= pass_score:
+                eval_stats['recent_backlog'].append(entry)
+            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 7)):
+                # Worth a look even though they did not clear the bar - otherwise a
+                # run with no 9s produces a summary with nothing to click.
+                eval_stats['near_misses'].append(entry)
                 
             print(f"--> Score: {score}/10")
             if score >= 8:

@@ -24,7 +24,7 @@ load_dotenv()
 
 import db
 from generator import generate_for_job, get_gemini_client, get_groq_client
-from evaluate import GEMINI_MODELS   # the cascade, so one retired model does not break this
+from evaluate import GEMINI_MODELS, evaluate_single_job   # the cascade, so one retired model does not break this
 from google.genai import types
 
 CHROME_PROFILE_DIR = './chrome_profile'
@@ -201,8 +201,14 @@ def record_job(job_id, meta, description, url):
     return added
 
 
-async def run_for_url(url, instructions=None, headed=False, on_progress=None):
-    """Read a job advert and generate its documents.
+async def run_for_url(url, instructions=None, headed=False, on_progress=None,
+                      generate=False):
+    """Read a job advert, score it, and put it on the To Do board.
+
+    A URL pasted by hand is a job the candidate already wants to look at, so it
+    lands in To Do whatever it scores - the score is there to inform, not to
+    filter something deliberately chosen. Documents are written when it is
+    approved, not here; pass generate=True to write them straight away.
 
     Shared by the CLI and the dashboard. Returns a dict describing what happened
     so the caller can report it however it likes.
@@ -252,15 +258,32 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None):
     job_id = job_id_for(final_url)
     record_job(job_id, meta, description, final_url)
 
-    step(f"Generating documents for {meta.get('company') or 'Unknown'}: "
+    step(f"Scoring {meta.get('company') or 'Unknown'}: "
          f"{meta.get('title') or 'the role'} ...")
-    ok = await generate_for_job(job_id, instructions)
-    if not ok:
-        return {'ok': False, 'job_id': job_id,
-                'error': 'Reading the advert worked, but generating the documents failed.'}
+    score = reasoning = None
+    try:
+        evaluate_single_job(job_id, instructions)
+        row = db.get_connection().execute(
+            'SELECT score, reasoning FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+        if row:
+            score, reasoning = row[0], row[1]
+    except Exception as e:
+        step(f'Scoring failed ({e}); the job is on the board without a score.')
 
-    folder = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'applications')
-    made = [d for d in os.listdir(folder) if d.endswith(f'_{job_id}')] if os.path.isdir(folder) else []
+    # Whatever it scored, it stays in To Do: evaluate_single_job files a job
+    # below the bar as 'scored', which would drop a hand-picked URL into
+    # Rejected the moment it was added.
+    db.update_job_status(job_id, 'to_apply')
+
+    folder = None
+    if generate:
+        step('Generating documents ...')
+        if await generate_for_job(job_id, instructions, final_status='to_apply'):
+            apps = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'applications')
+            made = ([d for d in os.listdir(apps) if d.endswith(f'_{job_id}')]
+                    if os.path.isdir(apps) else [])
+            folder = os.path.join(apps, made[0]) if made else None
+
     return {
         'ok': True,
         'job_id': job_id,
@@ -269,7 +292,9 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None):
         'location': meta.get('location'),
         'language': meta.get('jd_language'),
         'hiring_manager': meta.get('hiring_manager_name'),
-        'folder': os.path.join(folder, made[0]) if made else None,
+        'score': score,
+        'reasoning': reasoning,
+        'folder': folder,
         'company_identified': bool(meta.get('company')),
     }
 
@@ -282,9 +307,12 @@ async def main():
                         help='Extra instructions for the AI, e.g. "the company is Hone"')
     parser.add_argument('--headed', action='store_true',
                         help='Show the browser (use once to log in to LinkedIn)')
+    parser.add_argument('--generate', action='store_true',
+                        help='Also write the CV and cover letter now')
     args = parser.parse_args()
 
-    result = await run_for_url(args.url, args.instructions, headed=args.headed)
+    result = await run_for_url(args.url, args.instructions, headed=args.headed,
+                               generate=args.generate)
     if not result['ok']:
         print('\n' + result['error'])
         return 1
@@ -295,8 +323,14 @@ async def main():
     print(f"  {result['title']} at {result['company']} "
           f"({result.get('location') or 'location not stated'}, "
           f"{result.get('language') or 'language unknown'})")
+    if result.get('score') is not None:
+        print(f"  Scored {result['score']}/10 - on the To Do board.")
+        if result.get('reasoning'):
+            print(f"  {result['reasoning']}")
+    else:
+        print('  Not scored - on the To Do board anyway.')
     if result.get('folder'):
-        print(f"\nDone. Documents are in: {result['folder']}")
+        print(f"\nDocuments are in: {result['folder']}")
         for f in sorted(os.listdir(result['folder'])):
             print(f'  {f}')
     return 0

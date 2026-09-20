@@ -907,7 +907,7 @@ window.openAddJob = function() {
     const status = document.getElementById('add-job-status');
     if (status) { status.style.display = 'none'; status.innerHTML = ''; }
     const submit = document.getElementById('add-job-submit');
-    if (submit) { submit.disabled = false; submit.innerText = 'Fetch & generate'; }
+    if (submit) { submit.disabled = false; submit.innerText = 'Fetch & score'; }
     modal.classList.add('active');
     const input = document.getElementById('add-job-url');
     input.value = '';
@@ -944,18 +944,18 @@ window.submitAddJob = async function() {
         const data = await res.json();
         if (data.status === 'already_running') {
             addJobStatus('Another job is being added right now - try again in a moment.', '#fbbf24');
-            submit.disabled = false; submit.innerText = 'Fetch & generate';
+            submit.disabled = false; submit.innerText = 'Fetch & score';
             return;
         }
         if (data.status === 'error') {
             addJobStatus(data.error, '#f87171');
-            submit.disabled = false; submit.innerText = 'Fetch & generate';
+            submit.disabled = false; submit.innerText = 'Fetch & score';
             return;
         }
         pollAddJob();
     } catch (e) {
         addJobStatus('Could not start: ' + e, '#f87171');
-        submit.disabled = false; submit.innerText = 'Fetch & generate';
+        submit.disabled = false; submit.innerText = 'Fetch & score';
     }
 }
 
@@ -973,7 +973,7 @@ async function pollAddJob() {
 
         const result = data.result;
         submit.disabled = false;
-        submit.innerText = 'Fetch & generate';
+        submit.innerText = 'Fetch & score';
 
         if (!result) {
             addJobStatus('Finished, but no result was reported.', '#fbbf24');
@@ -981,19 +981,22 @@ async function pollAddJob() {
             addJobStatus(result.error, '#f87171');
         } else {
             const where = result.company_identified ? '' :
-                '<br><span style="color:#fbbf24;">The employer could not be identified, so the ' +
-                'documents say "Unknown". Add an instruction like "the company is X" and try again.</span>';
+                '<br><span style="color:#fbbf24;">The employer could not be identified. Add an ' +
+                'instruction like "the company is X" and try again.</span>';
+            const scored = result.score != null
+                ? `Scored <strong>${result.score}/10</strong> and put on the To Do board.`
+                : 'It could not be scored, but it is on the To Do board.';
             addJobStatus(
                 '<strong style="color:#4ade80;">Done.</strong> ' +
                 `${result.title || 'Role'} at ${result.company || 'Unknown'}. ` +
-                'The CV and cover letter are on the card.' + where +
+                scored + ' Approve it to write the CV and cover letter.' + where +
                 `<br><br><button class="btn btn-primary" onclick="closeAddJob(); openJobDetails('${result.job_id}')">` +
                 'Open the job</button>', '#4ade80');
             fetchJobs();
         }
     } catch (e) {
         submit.disabled = false;
-        submit.innerText = 'Fetch & generate';
+        submit.innerText = 'Fetch & score';
         addJobStatus('Lost track of the job: ' + e, '#f87171');
     }
 }

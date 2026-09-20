@@ -298,10 +298,13 @@ add_url_thread = None
 add_url_result = None
 
 def run_add_url_bg(url, instructions):
-    """Fetch a job advert and generate its documents, for the dashboard's + button."""
+    """Fetch a job advert and score it onto the To Do board, for the + button."""
     global add_url_thread, add_url_result
     import asyncio
-    from generate_from_url import run_for_url
+    import importlib
+    import generate_from_url
+    importlib.reload(generate_from_url)          # same reason as run_applier_bg
+    run_for_url = generate_from_url.run_for_url
     try:
         add_url_result = asyncio.run(run_for_url(
             url, instructions,

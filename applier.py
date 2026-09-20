@@ -1236,15 +1236,21 @@ async def try_advance_to_form(page):
 
 
 # Which stored document answers which upload field, most specific first.
-# "Diplomas & Certificates" has to be tested before the reference rule: it
-# contains the word "certificate", and a reference letter is not a diploma.
+#
+# Two things drive the order. "Diplomas & Certificates" contains the word
+# "certificate", so it has to be tested before any reference rule that also
+# matches it. And the diplomas PDF is a bundle - diplomas plus the SAP work
+# certificate - so it is the better answer to a vague "additional documents"
+# slot than the standalone reference letter, which it already contains.
+# Only a field that names a reference or recommendation gets that letter on
+# its own.
 ATTACHMENT_RULES = [
     ('cover_letter', r'cover|motivation|lettre de motivation|anschreiben'),
     ('cv', r'\bcv\b|resume|resum|lebenslauf|curriculum'),
     ('diplomas', r'diplom|degree|certificat|zeugnis|qualification|transcript|'
                  r'attestation|education document'),
-    ('reference_letter', r'reference|recommendation|referenz|empfehlung|'
-                         r'additional|other document|supporting'),
+    ('reference_letter', r'reference|recommendation|referenz|empfehlung'),
+    ('diplomas', r'additional|other document|supporting|attachment|annexe'),
 ]
 
 

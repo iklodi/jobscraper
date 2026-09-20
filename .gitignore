@@ -12,3 +12,5 @@ progress.json
 jobscraper.code-workspace
 ats_accounts.yaml
 profile.yaml
+.env.bak*
+jobs.db-*

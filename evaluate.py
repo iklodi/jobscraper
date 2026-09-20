@@ -28,13 +28,40 @@ GROQ_MODELS = [
     'openai/gpt-oss-20b'
 ]
 
+# Infomaniak's endpoint only accepts response_format 'json_schema', so the
+# shapes the prompts ask for have to be spelled out. Fields the prompt lets
+# the model skip below a score of 8 are nullable rather than omitted.
+EVAL_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'score': {'type': 'integer'},
+        'reasoning': {'type': 'string'},
+        'missing_skills': {'type': 'array', 'items': {'type': 'string'}},
+        'salary_estimate': {'type': ['string', 'null']},
+        'is_recruiter': {'type': ['boolean', 'null']},
+        'hiring_manager_name': {'type': ['string', 'null']},
+        'jd_language': {'type': ['string', 'null']},
+    },
+    'required': ['score', 'reasoning'],
+}
+
+COMPARE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'preferred_job': {'type': 'string'},
+        'reasoning': {'type': 'string'},
+    },
+    'required': ['preferred_job', 'reasoning'],
+}
+
+
 def compare_jobs(groq_client, gemini_client, comp_prompt):
     max_retries = 3
     delay = 2
     for attempt in range(max_retries):
         # Infomaniak first when configured: Swiss-hosted, and it keeps the
         # scoring off Gemini's quota. Falls through silently when unset.
-        result = infomaniak.chat_json(comp_prompt)
+        result = infomaniak.chat_json(comp_prompt, COMPARE_SCHEMA)
         if result:
             return result
         if gemini_client:
@@ -124,7 +151,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     
     for attempt in range(max_retries):
         # Infomaniak first when configured; unset, this costs one dict lookup.
-        result = infomaniak.chat_json(prompt)
+        result = infomaniak.chat_json(prompt, EVAL_SCHEMA)
         if result:
             return result
 

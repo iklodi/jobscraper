@@ -42,6 +42,29 @@ OUTPUT_DIR = os.path.join(CVS_DIR, 'applications')
 GROQ_MODEL = 'llama-3.3-70b-versatile'
 GEMINI_MODEL = 'gemini-3.5-flash'
 
+# Infomaniak only accepts response_format 'json_schema', so Task 1-5 of the
+# generator prompt are restated here as a shape.
+GEN_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'cv_summary': {'type': 'string'},
+        'cv_replacements': {
+            'type': 'array',
+            'items': {'type': 'object',
+                      'properties': {'old': {'type': 'string'},
+                                     'new': {'type': 'string'}},
+                      'required': ['old', 'new']},
+        },
+        'cv_removals': {'type': 'array', 'items': {'type': 'string'}},
+        'cover_letter_body': {'type': 'string'},
+        'company_hq': {'type': 'string'},
+        'display_company': {'type': 'string'},
+    },
+    'required': ['cv_summary', 'cv_replacements', 'cv_removals',
+                 'cover_letter_body', 'company_hq', 'display_company'],
+}
+
+
 def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
@@ -82,7 +105,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
 
         # Infomaniak first when configured; unset, chat_json returns None
         # immediately and the Gemini/Groq path below is unchanged.
-        result = infomaniak.chat_json(prompt)
+        result = infomaniak.chat_json(prompt, GEN_SCHEMA)
 
         if not result and gemini_client:
             try:

@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 import time
 import progress_tracker
+import infomaniak
 from playwright.async_api import async_playwright
 import PyPDF2
 
@@ -78,8 +79,12 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     for attempt in range(max_retries):
         result = None
         error_msg = ""
-        
-        if gemini_client:
+
+        # Infomaniak first when configured; unset, chat_json returns None
+        # immediately and the Gemini/Groq path below is unchanged.
+        result = infomaniak.chat_json(prompt)
+
+        if not result and gemini_client:
             try:
                 response = gemini_client.models.generate_content(
                     model=GEMINI_MODEL,

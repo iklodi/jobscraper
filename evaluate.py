@@ -7,6 +7,7 @@ from google.genai import types
 from docx import Document
 import time
 import progress_tracker
+import infomaniak
 
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
@@ -31,6 +32,11 @@ def compare_jobs(groq_client, gemini_client, comp_prompt):
     max_retries = 3
     delay = 2
     for attempt in range(max_retries):
+        # Infomaniak first when configured: Swiss-hosted, and it keeps the
+        # scoring off Gemini's quota. Falls through silently when unset.
+        result = infomaniak.chat_json(comp_prompt)
+        if result:
+            return result
         if gemini_client:
             for model_name in GEMINI_MODELS:
                 try:
@@ -117,6 +123,11 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     delay = 10
     
     for attempt in range(max_retries):
+        # Infomaniak first when configured; unset, this costs one dict lookup.
+        result = infomaniak.chat_json(prompt)
+        if result:
+            return result
+
         # Try all Gemini models in descending order of quality
         if gemini_client:
             for model_name in GEMINI_MODELS:

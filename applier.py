@@ -10,6 +10,7 @@ no field that refused input. Anything short of that is parked for a human.
 """
 import asyncio
 import datetime
+from collections import Counter
 import json
 import os
 import random
@@ -2072,18 +2073,45 @@ STATUS_WORDS = {
 def run_summary(results, single=False):
     """One line the dashboard can show, plus the detail behind it."""
     if not results:
-        return {'ok': False, 'headline': 'Nothing to apply for.', 'jobs': []}
+        return {'ok': True, 'headline': 'Nothing to apply for - no approved jobs.',
+                'single': single, 'jobs': []}
+
     jobs = [{'job_id': r['job_id'], 'company': r['company'], 'status': r['status'],
              'word': STATUS_WORDS.get(r['status'], r['status'])} for r in results]
+
     if single:
         j = jobs[0]
-        headline = f'{j["company"]}: application {j["word"]}.'
-    else:
-        done = sum(1 for r in results if r['status'] in ('applied', 'ready_to_submit'))
-        headline = f'{done} of {len(results)} application(s) completed.'
-    return {'ok': all(r['status'] in ('applied', 'ready_to_submit') for r in results),
-            'headline': headline, 'single': single, 'jobs': jobs}
+        headline = {
+            'applied': f'Applied to {j["company"]}.',
+            'ready_to_submit': f'{j["company"]}: form filled, waiting for you to submit.',
+            'account_required': f'{j["company"]} needs an account before the form can be filled.',
+            'failed': f'{j["company"]}: could not fill the form.',
+        }.get(j['status'], f'{j["company"]}: {j["word"]}.')
+        return {'ok': j['status'] in ('applied', 'ready_to_submit'),
+                'headline': headline, 'single': True, 'jobs': jobs}
 
+    # Say what actually happened rather than scoring the run out of ten:
+    # "2 of 3 completed" called a form still waiting for a human "completed",
+    # and told you nothing about what the third one did.
+    counts = Counter(r['status'] for r in results)
+    plural = lambda n, word: f'{n} {word}' + ('' if n == 1 else 's')
+    parts = []
+    if counts['applied']:
+        parts.append(plural(counts['applied'], 'application') + ' submitted')
+    if counts['ready_to_submit']:
+        parts.append(plural(counts['ready_to_submit'], 'form') + ' filled')
+    if counts['account_required']:
+        parts.append(plural(counts['account_required'], 'job') + ' needs an account')
+    if counts['failed']:
+        parts.append(plural(counts['failed'], 'failure'))
+    for status, n in counts.items():
+        if status not in ('applied', 'ready_to_submit', 'account_required', 'failed'):
+            parts.append(f'{n} {status}')
+
+    headline = ', '.join(parts[:-1]) + (' and ' if len(parts) > 1 else '') + parts[-1]
+    return {'ok': not (counts['failed'] or counts['account_required']),
+            'headline': headline[0].upper() + headline[1:] + '.',
+            'single': False, 'jobs': jobs}
 
 def _notify(results, single=False):
     """Email a batch outcome. Single-job runs report through the dashboard

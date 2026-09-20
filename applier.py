@@ -1996,8 +1996,14 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
             print(f'[{index}/{len(jobs)}] {company} - {title}')
 
             db.update_job_status(job_id, 'applying')
+            # Every job gets its own tab. Sharing one meant the next job's
+            # goto() navigated straight over the form the last one had just
+            # filled, and a form's values are not saved anywhere - so the work
+            # was gone while the board still said ready_to_submit.
+            before = set(browser.pages)
+            job_page = await browser.new_page()
             try:
-                status, note = await process_job(page, client, profile, job, auto_submit)
+                status, note = await process_job(job_page, client, profile, job, auto_submit)
             except Exception as e:
                 status, note = 'failed', f'Unexpected error while applying: {type(e).__name__}: {e}'
 
@@ -2006,19 +2012,22 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
             results.append({'job_id': job_id, 'company': company, 'status': status})
             print(f'  -> {status}', flush=True)
 
-            # Only forms still awaiting a human stay open, and only a few: each
-            # extra tab costs ~150MB of Chromium, and this box shares its memory
-            # with other services. Everything else is closed straight away.
-            if status == 'ready_to_submit' and (not MAX_OPEN_REVIEW_TABS
-                                                or len(review_tabs) < MAX_OPEN_REVIEW_TABS):
-                review_tabs.extend(t for t in browser.pages[1:] if t not in review_tabs)
-            for extra in browser.pages[1:]:
-                if extra in review_tabs:
-                    continue
-                try:
-                    await extra.close()
-                except Exception:
-                    pass
+            # Keep this job's tabs only while a human still has to finish the
+            # form. Anything else closes straight away: each tab costs ~150MB
+            # of Chromium, which matters on a host shared with other services.
+            job_tabs = [p for p in browser.pages if p not in before]
+            keeping = status == 'ready_to_submit' and (
+                not MAX_OPEN_REVIEW_TABS or len(review_tabs) < MAX_OPEN_REVIEW_TABS)
+            if keeping:
+                review_tabs.extend(p for p in job_tabs if p not in review_tabs)
+            else:
+                for extra in job_tabs:
+                    if extra in review_tabs:
+                        continue
+                    try:
+                        await extra.close()
+                    except Exception:
+                        pass
             await pause(page, 3000)
 
         # Hold the filled forms open so a human can check and submit them.

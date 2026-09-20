@@ -238,7 +238,7 @@ function openJobDetails(jobId) {
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📝 Fill Application Now</button>
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Mark as Account Required</button>
@@ -592,10 +592,12 @@ window.triggerScrape = async function(mode = 'full') {
 
 window.triggerApply = async function(jobId = null) {
     const scope = jobId
-        ? "Fill in the application form for this job?"
-        : "Fill in application forms for the top approved jobs?";
-    if (!confirm(scope + "\n\nA browser will open the employer's form and fill it from your profile. "
-        + "Nothing is submitted - each job lands in 'Ready to Submit' for you to review.")) return;
+        ? "Apply for this job now?"
+        : "Apply for the top approved jobs now?";
+    if (!confirm(scope + "\n\nA browser will open the employer's form, fill it from your profile "
+        + "and SUBMIT it.\n\nIt will not submit if any required field is empty, any question went "
+        + "unanswered, or a field refused input - those land in 'Ready to Submit' for you instead. "
+        + "Every step is screenshotted.")) return;
 
     const btnApply = document.getElementById('run-apply-btn');
     const hoverBox = document.getElementById('pipeline-status-hover');

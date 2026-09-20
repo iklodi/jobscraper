@@ -249,7 +249,9 @@ def trigger_apply():
     limit = int(data.get('limit', 5))
     job_ids = data.get('job_ids')
 
-    auto_submit = bool(data.get('submit', False))
+    # The dashboard's Fill Application button submits: the pre-submit gate in
+    # applier.py is what holds an incomplete application back, not this flag.
+    auto_submit = bool(data.get('submit', True))
     apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids, auto_submit))
     apply_thread.start()
     return jsonify({'status': 'started'})

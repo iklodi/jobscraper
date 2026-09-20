@@ -12,6 +12,7 @@ import asyncio
 import datetime
 import json
 import os
+import random
 import re
 import secrets
 import string
@@ -26,6 +27,7 @@ from playwright.async_api import async_playwright
 import db
 import notifier
 import progress_tracker
+import infomaniak
 
 # Not override=True: an explicitly exported variable must beat the .env file,
 # otherwise per-run settings passed on the command line are silently ignored.
@@ -34,6 +36,21 @@ load_dotenv()
 # This host also runs other services, so a long batch must not accumulate tabs.
 MAX_OPEN_REVIEW_TABS = int(os.environ.get('APPLY_MAX_OPEN_TABS', '3'))
 MIN_FREE_MB = int(os.environ.get('APPLY_MIN_FREE_MB', '400'))
+
+
+# Every wait in this file goes through here. A form filled on a metronome -
+# identical gaps between every click, to the millisecond - is one of the
+# cheapest automation signals a site can look for, and the applier drives the
+# same logged-in LinkedIn session the scraper depends on. The spread is
+# multiplicative so a long wait varies more than a short one, and the floor
+# keeps a jittered wait from ever being shorter than the page needs.
+PACE = float(os.environ.get('APPLY_PACE', '1.0'))
+
+
+async def pause(page, ms, spread=0.35):
+    """Wait roughly `ms`, never exactly `ms`."""
+    factor = random.uniform(1 - spread, 1 + spread)
+    await page.wait_for_timeout(max(250, int(ms * factor * PACE)))
 
 CHROME_PROFILE_DIR = './chrome_profile'
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
@@ -275,8 +292,68 @@ def application_files(job_id):
     return None, None, None
 
 
-def ask_gemini(client, prompt):
-    """Run the prompt through the Gemini cascade; returns parsed JSON or None."""
+# Infomaniak only accepts response_format json_schema, so the two prompt
+# shapes above are restated here. Kept loose on `value` (a string either way)
+# and on `notes`, which is free text the human reads.
+ACTIONS_SCHEMA = {
+    'type': 'array',
+    'items': {
+        'type': 'object',
+        'properties': {
+            'idx': {'type': 'integer'},
+            'action': {'type': 'string'},
+            'value': {'type': ['string', 'null']},
+        },
+        'required': ['idx', 'action'],
+    },
+}
+
+MAPPING_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'actions': ACTIONS_SCHEMA,
+        'unanswered': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'idx': {'type': 'integer'},
+                    'question': {'type': 'string'},
+                    'reason': {'type': 'string'},
+                },
+                'required': ['question'],
+            },
+        },
+        'page_kind': {'type': 'string'},
+        'notes': {'type': ['string', 'null']},
+    },
+    'required': ['actions', 'page_kind'],
+}
+
+REGISTRATION_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'actions': ACTIONS_SCHEMA,
+        'page_kind': {'type': 'string'},
+        'submit_idx': {'type': ['integer', 'null']},
+        'notes': {'type': ['string', 'null']},
+    },
+    'required': ['actions', 'page_kind'],
+}
+
+
+def ask_model(client, prompt, schema):
+    """Infomaniak first (gemma by default), Gemini only if it is unreachable.
+
+    `client` may be None: with Infomaniak configured there is nothing for
+    Gemini to do, and the applier should not refuse to start over a key it
+    no longer needs.
+    """
+    result = infomaniak.chat_json(prompt, schema)
+    if result:
+        return result
+    if not client:
+        return None
     for model_name in GEMINI_MODELS:
         try:
             response = client.models.generate_content(
@@ -295,6 +372,71 @@ def ask_gemini(client, prompt):
     return None
 
 
+
+class Trace:
+    """An ordered, numbered screenshot trail for one application.
+
+    Every page the applier touches gets a shot, numbered in the order it
+    happened, so a run can be reconstructed afterwards without guessing -
+    which matters most when something submitted that should not have, or
+    did not submit when it should.
+    """
+
+    def __init__(self, job_id, folder=None):
+        self.job_id = job_id
+        self.folder = folder or OUTPUT_DIR
+        self.n = 0
+        self.shots = []
+        self.uploads = []
+
+    def set_folder(self, folder):
+        if folder:
+            self.folder = folder
+
+    async def shot(self, page, label):
+        self.n += 1
+        safe = re.sub(r'[^A-Za-z0-9]+', '_', label)[:32].strip('_')
+        name = f'{self.job_id}_{self.n:02d}_{safe}.png'
+        try:
+            os.makedirs(self.folder, exist_ok=True)
+            await page.screenshot(path=os.path.join(self.folder, name), full_page=True)
+            self.shots.append(name)
+            return name
+        except Exception as e:
+            self.shots.append(f'{name} (FAILED: {type(e).__name__})')
+            return None
+
+    def record_upload(self, field_label, path):
+        self.uploads.append({'field': field_label or '(unlabelled file input)',
+                             'file': os.path.basename(path),
+                             'path': path})
+
+    def upload_lines(self):
+        if not self.uploads:
+            return ['FILES UPLOADED: none - the form had no file inputs the applier could match.']
+        lines = ['FILES UPLOADED:']
+        for u in self.uploads:
+            lines.append(f'  - {u["file"]}  ->  "{u["field"]}"')
+        return lines
+
+    def write_manifest(self, job, status, submitted):
+        """A manifest beside the documents, so the folder is self-describing."""
+        try:
+            os.makedirs(self.folder, exist_ok=True)
+            data = {
+                'job_id': self.job_id,
+                'title': job[1], 'company': job[2], 'linkedin': job[3],
+                'run_at': datetime.datetime.now().isoformat(timespec='seconds'),
+                'status': status,
+                'submitted': bool(submitted),
+                'uploads': self.uploads,
+                'screenshots': self.shots,
+            }
+            with open(os.path.join(self.folder, f'{self.job_id}_run.json'), 'w') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f'  -> Could not write the run manifest: {e}')
+
 async def form_dialog_open(page):
     """True when a modal holding actual form fields is up.
 
@@ -312,10 +454,12 @@ async def form_dialog_open(page):
         return False
 
 
-async def find_apply_url(page, linkedin_url, job_id='unknown'):
+async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry=False):
     """Open the LinkedIn posting and follow its apply button to the employer's form."""
     await page.goto(linkedin_url, timeout=60000)
-    await page.wait_for_timeout(5000)
+    await pause(page, 5000)
+    if trace:
+        await trace.shot(page, 'linkedin_posting')
 
     # LinkedIn ships obfuscated class names and renders the apply control as a
     # button, a link, or a div with role=button depending on the posting, so go
@@ -355,7 +499,7 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
         if external:
             try:
                 await page.goto(href, timeout=60000)
-                await page.wait_for_timeout(4000)
+                await pause(page, 4000)
                 return page, 'external_link'
             except Exception:
                 pass
@@ -373,7 +517,7 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
         # element itself still triggers the site's own handler.
         reacted = False
         for _ in range(4):
-            await page.wait_for_timeout(1000)
+            await pause(page, 1000)
             if (len(page.context.pages) > before_pages or page.url != before_url
                     or await form_dialog_open(page)):
                 reacted = True
@@ -385,29 +529,45 @@ async def find_apply_url(page, linkedin_url, job_id='unknown'):
                 pass
 
         for _ in range(12):                      # up to ~12s for a reaction
-            await page.wait_for_timeout(1000)
+            await pause(page, 1000)
             if len(page.context.pages) > before_pages:
                 new_page = page.context.pages[-1]
                 try:
                     await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
                 except Exception:
                     pass
-                await new_page.wait_for_timeout(2000)
+                await pause(new_page, 2000)
                 return new_page, 'external'
             if await form_dialog_open(page):
-                await page.wait_for_timeout(1500)
+                await pause(page, 1500)
+                if trace:
+                    await trace.shot(page, 'easy_apply_modal')
                 return page, 'easy_apply'
             if page.url != before_url:
-                await page.wait_for_timeout(3000)
+                await pause(page, 3000)
                 return page, 'same_tab'
         # Nothing happened - fall through and try the next candidate.
 
-    # Nothing matched - leave a screenshot behind so the failure is diagnosable.
-    try:
-        await page.screenshot(
-            path=os.path.join(OUTPUT_DIR, f'{job_id}_apply_lookup_failure.png'))
-    except Exception:
-        pass
+    # Nothing matched. Easy Apply is often just late wiring up its handler, so
+    # reload once and give it a slower, jittered second pass before deciding a
+    # human has to do it.
+    if not retry:
+        await pause(page, 3000)
+        try:
+            await page.reload(timeout=60000)
+            await pause(page, 7000)
+            return await find_apply_url(page, linkedin_url, job_id, trace, retry=True)
+        except Exception:
+            pass
+
+    if trace:
+        await trace.shot(page, 'apply_lookup_failure')
+    else:
+        try:
+            await page.screenshot(
+                path=os.path.join(OUTPUT_DIR, f'{job_id}_apply_lookup_failure.png'))
+        except Exception:
+            pass
 
     # Distinguish a LinkedIn Easy Apply posting, which does not drive reliably
     # under automation, from a genuinely broken or closed one - they need
@@ -516,7 +676,7 @@ async def click_sign_in_tab(page):
             control = page.get_by_role(role, name=sign_in_re).last
             await control.wait_for(state='visible', timeout=3000)
             await control.click(timeout=3000)
-            await page.wait_for_timeout(2500)
+            await pause(page, 2500)
             return True
         except Exception:
             continue
@@ -547,7 +707,7 @@ async def click_create_account_tab(page):
             control = page.get_by_role(role, name=create_re).first
             await control.wait_for(state='visible', timeout=3000)
             await control.click(timeout=3000)
-            await page.wait_for_timeout(2500)
+            await pause(page, 2500)
             return True
         except Exception:
             continue
@@ -569,7 +729,7 @@ async def submit_form(page, labels):
                 await control.wait_for(state='visible', timeout=4000)
                 await control.scroll_into_view_if_needed(timeout=2000)
                 await control.click(timeout=5000)
-                await page.wait_for_timeout(5000)
+                await pause(page, 5000)
                 return True
             except Exception:
                 continue
@@ -614,7 +774,7 @@ async def create_or_signin_account(page, client, profile, job_id):
             await page.locator(f'[data-jsapply="{pw_fields[0]["idx"]}"]').fill(password)
             if not await submit_form(page, r'^(sign in|log ?in)$'):
                 return False, f'Could not find the sign-in button at {domain}.'
-            await page.wait_for_timeout(6000)
+            await pause(page, 6000)
             after = await page.evaluate(COLLECT_FIELDS_JS)
             if any(f.get('type') == 'password' for f in after['fields']):
                 detail = await form_errors(page)
@@ -648,11 +808,11 @@ async def create_or_signin_account(page, client, profile, job_id):
                     pass
             if not await submit_form(page, r'^(create account|sign up|register|continue|submit)\b'):
                 return False, f'Could not find the create-account button at {domain}.'
-            await page.wait_for_timeout(5000)
+            await pause(page, 5000)
             after = await page.evaluate(COLLECT_FIELDS_JS)
             if re.search(r'something went wrong|please refresh', after['text'], re.I):
                 await page.reload(timeout=45000)
-                await page.wait_for_timeout(5000)
+                await pause(page, 5000)
                 after = await page.evaluate(COLLECT_FIELDS_JS)
             if not any(f.get('type') == 'password' for f in after['fields']):
                 entry = account_for(page.url) or {}
@@ -670,7 +830,7 @@ async def create_or_signin_account(page, client, profile, job_id):
         except Exception as e:
             return False, f'Account creation at {domain} failed: {type(e).__name__}.'
 
-    plan = ask_gemini(client, REGISTRATION_PROMPT.format(
+    plan = ask_model(client, REGISTRATION_PROMPT.format(
         full_name=identity.get('full_name', ''),
         first_name=identity.get('first_name', ''),
         last_name=identity.get('last_name', ''),
@@ -679,7 +839,7 @@ async def create_or_signin_account(page, client, profile, job_id):
         password=password,
         fields=json.dumps(fields, ensure_ascii=False)[:15000],
         page_text=page_text[:2500],
-    ))
+    ), REGISTRATION_SCHEMA)
     if not plan:
         return False, f'Could not map the registration form at {domain}.'
 
@@ -706,7 +866,7 @@ async def create_or_signin_account(page, client, profile, job_id):
     if not clicked:
         return False, f'Could not find the submit button on the {domain} account form.'
 
-    await page.wait_for_timeout(4000)
+    await pause(page, 4000)
     after = await page.evaluate(COLLECT_FIELDS_JS)
 
     # Workday in particular likes to land on a transient "Something went wrong,
@@ -714,7 +874,7 @@ async def create_or_signin_account(page, client, profile, job_id):
     if re.search(r'something went wrong|please refresh the page', after['text'], re.I):
         try:
             await page.reload(timeout=45000)
-            await page.wait_for_timeout(5000)
+            await pause(page, 5000)
             after = await page.evaluate(COLLECT_FIELDS_JS)
         except Exception:
             pass
@@ -791,7 +951,7 @@ async def advance_step(page):
     try:
         await control.scroll_into_view_if_needed(timeout=3000)
         await control.click(timeout=6000)
-        await page.wait_for_timeout(4500)
+        await pause(page, 4500)
         return True
     except Exception:
         return False
@@ -859,7 +1019,7 @@ async def do_submit(page):
         await control.click(timeout=8000)
     except Exception as e:
         return False, f'submit click failed ({type(e).__name__})'
-    await page.wait_for_timeout(7000)
+    await pause(page, 7000)
     try:
         text = await page.evaluate('() => document.body.innerText.slice(0, 3000)')
     except Exception:
@@ -895,7 +1055,7 @@ async def do_submit(page):
 
 
 async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, folder,
-                      max_steps=10, auto_submit=False):
+                      max_steps=10, auto_submit=False, trace=None):
     """Fill an application, walking multi-step wizards, and stop before submitting.
 
     Returns (summary_lines, reached_submit).
@@ -930,13 +1090,13 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
 
         filled = 0
         if fields:
-            plan = ask_gemini(client, MAPPING_PROMPT.format(
+            plan = ask_model(client, MAPPING_PROMPT.format(
                 profile=yaml.safe_dump(profile, allow_unicode=True, sort_keys=False),
                 title=title, company=company,
                 description=(description or '')[:3000],
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
-            ))
+            ), MAPPING_SCHEMA)
             kind = plan.get('page_kind') if plan else None
             if kind == 'confirmation':
                 lines.append(f'Step {step}: reached a confirmation page - the application appears to be in.')
@@ -954,23 +1114,23 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
-        uploaded = await upload_documents(page, fields, cv_path, cl_path, ref_path)
+        uploaded = await upload_documents(page, fields, cv_path, cl_path, ref_path, trace)
         uploaded_all.extend(uploaded)
 
-        try:
-            shot = os.path.join(folder, f'{job_id}_step{step}_{re.sub(r"[^A-Za-z0-9]+", "_", step_name)[:24]}.png')
-            await page.screenshot(path=shot, full_page=True)
-        except Exception:
-            pass
+        shot = await trace.shot(page, f'step{step}_{step_name}') if trace else None
 
         summary = f'Step {step} ({step_name}): filled {filled} field(s)'
         if uploaded:
             summary += f', uploaded {", ".join(uploaded)}'
+        if shot:
+            summary += f' [{shot}]'
         lines.append(summary + '.')
 
         # Stop at the final step rather than sending the application.
         if await find_control(page, SUBMIT_LABELS):
             reached_submit = True
+            if trace:
+                await trace.shot(page, f'step{step}_before_submit')
             problems = await preflight_problems(page, unanswered, all_errors)
             if not auto_submit:
                 lines.append('Reached the final step. Nothing was sent; review it and submit yourself.')
@@ -986,11 +1146,8 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
                     f'SUBMITTED - {detail}.' if ok
                     else f'Tried to submit but it did not go through: {detail}. Nothing was sent.'
                 )
-                try:
-                    await page.screenshot(
-                        path=os.path.join(folder, f'{job_id}_submitted.png'), full_page=True)
-                except Exception:
-                    pass
+                if trace:
+                    await trace.shot(page, 'submitted' if ok else 'submit_failed')
             break
 
         if not await advance_step(page):
@@ -1032,7 +1189,7 @@ async def dismiss_cookie_banner(page):
                 banner = page.get_by_role(role, name=accept).first
                 await banner.wait_for(state='visible', timeout=2000)
                 await banner.click(timeout=2500)
-                await page.wait_for_timeout(1200)
+                await pause(page, 1200)
                 clicked = dismissed = True
                 break
             except Exception:
@@ -1069,17 +1226,21 @@ async def try_advance_to_form(page):
                     await control.click(timeout=5000)
                 new_page = await new_page_info.value
                 await new_page.wait_for_load_state('domcontentloaded', timeout=30000)
-                await new_page.wait_for_timeout(2500)
+                await pause(new_page, 2500)
                 return new_page
             except Exception:
                 # No new tab: either a same-tab navigation or an in-page reveal.
-                await page.wait_for_timeout(3500)
+                await pause(page, 3500)
                 return page
     return None
 
 
-async def upload_documents(page, fields, cv_path, cl_path, extra_path=None):
-    """Attach the generated PDFs (and any extra document) to file inputs on the page."""
+async def upload_documents(page, fields, cv_path, cl_path, extra_path=None, trace=None):
+    """Attach the generated PDFs (and any extra document) to file inputs on the page.
+
+    Records what went where on `trace`, so the note and the manifest can say
+    which file answered which field rather than just how many were sent.
+    """
     uploaded = []
     for field in fields:
         if field.get('type') != 'file':
@@ -1100,7 +1261,10 @@ async def upload_documents(page, fields, cv_path, cl_path, extra_path=None):
         try:
             await page.locator(f'[data-jsapply="{field["idx"]}"]').set_input_files(target)
             uploaded.append(os.path.basename(target))
-            await page.wait_for_timeout(1500)
+            if trace:
+                trace.record_upload(field.get('label') or field.get('name') or field.get('id'),
+                                    target)
+            await pause(page, 1500)
         except Exception as e:
             print(f"  -> Upload failed for field {field['idx']}: {e}")
     return uploaded
@@ -1175,7 +1339,7 @@ async def select_custom(page, locator, value):
     """Choose a value from a custom dropdown widget (no native <select>)."""
     await locator.scroll_into_view_if_needed(timeout=3000)
     await locator.click(timeout=5000)
-    await page.wait_for_timeout(900)
+    await pause(page, 900)
 
     exact = re.compile(rf'^\s*{re.escape(str(value))}\s*$', re.I)
     loose = re.compile(re.escape(str(value)), re.I)
@@ -1189,7 +1353,7 @@ async def select_custom(page, locator, value):
                 option = getter(pattern).first
                 await option.wait_for(state='visible', timeout=2500)
                 await option.click(timeout=3000)
-                await page.wait_for_timeout(600)
+                await pause(page, 600)
                 return True
             except Exception:
                 continue
@@ -1197,7 +1361,7 @@ async def select_custom(page, locator, value):
     # Some widgets are type-ahead: type the value and take the first suggestion.
     try:
         await page.keyboard.type(str(value), delay=40)
-        await page.wait_for_timeout(1200)
+        await pause(page, 1200)
         option = page.locator('[role=option]').first
         await option.wait_for(state='visible', timeout=2500)
         await option.click(timeout=3000)
@@ -1243,7 +1407,7 @@ async def apply_actions(page, actions, fields=None):
             else:
                 continue
             filled += 1
-            await page.wait_for_timeout(150)
+            await pause(page, 150)
         except Exception as e:
             reason = str(e).strip().split('\n')[0][:90] or type(e).__name__
             errors.append(f'"{name}" ({kind}): {reason}')
@@ -1268,14 +1432,18 @@ async def process_job(page, client, profile, job, auto_submit=False):
     if not cv_path:
         return 'failed', 'No generated CV/cover letter found for this job - regenerate the assets first.'
 
-    target, mode = await find_apply_url(page, link, job_id)
+    trace = Trace(job_id, folder)
+    target, mode = await find_apply_url(page, link, job_id, trace)
     if not target and mode == 'easy_apply_manual':
+        trace.write_manifest(job, 'ready_to_submit', False)
         return 'ready_to_submit', (
-            'This is a LinkedIn Easy Apply posting. Easy Apply does not drive reliably '
-            'under automation and repeatedly forcing it risks the LinkedIn session the '
-            'scraper depends on, so nothing was attempted.\n'
+            'This is a LinkedIn Easy Apply posting and its apply control never '
+            'responded - clicked through every selector, dispatched the event on the '
+            'element itself, reloaded and tried again. There was nothing to drive, so '
+            'the form was never reached.\n'
             f'It takes about three clicks by hand: {link}\n'
-            f'Your tailored CV and cover letter are in: {folder}'
+            f'Your tailored CV and cover letter are in: {folder}\n'
+            + '\n'.join(trace.shots and ['Screenshots: ' + ', '.join(trace.shots)] or [])
         )
     if not target:
         try:
@@ -1294,6 +1462,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
     # page that is not one - job pages carry newsletter and job-alert signups.
     plan = fields = None
     apply_url = target.url
+    await trace.shot(target, 'apply_page')
     account_attempted, account_note = False, ''
     for _ in range(4):
         await dismiss_cookie_banner(target)
@@ -1323,19 +1492,19 @@ async def process_job(page, client, profile, job, auto_submit=False):
             if not ok:
                 return 'account_required', f'{account_note}\nApply at: {apply_url}\nDocuments ready in: {folder}'
             await dismiss_cookie_banner(target)
-            await target.wait_for_timeout(2000)
+            await pause(target, 2000)
             continue
 
         if fields:
-            plan = ask_gemini(client, MAPPING_PROMPT.format(
+            plan = ask_model(client, MAPPING_PROMPT.format(
                 profile=yaml.safe_dump(profile, allow_unicode=True, sort_keys=False),
                 title=title, company=company,
                 description=(description or '')[:4000],
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
-            ))
+            ), MAPPING_SCHEMA)
             if not plan:
-                return 'failed', f'Could not map the form fields (all Gemini models failed) at {apply_url}.'
+                return 'failed', f'Could not map the form fields (every model failed) at {apply_url}.'
 
             if plan.get('page_kind') == 'login_or_register':
                 allowed = (profile.get('policies') or {}).get('allow_account_creation', False)
@@ -1346,7 +1515,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
                     print(f'  -> account: {account_note}', flush=True)
                     if ok:
                         await dismiss_cookie_banner(target)
-                        await target.wait_for_timeout(2000)
+                        await pause(target, 2000)
                         continue
                     return 'account_required', (
                         f'{account_note}\nApply at: {apply_url}\nDocuments ready in: {folder}')
@@ -1386,7 +1555,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
 
     step_lines, reached_submit, submitted = await fill_wizard(
         target, client, profile, job, cv_path, cl_path, reference_path, folder,
-        auto_submit=auto_submit,
+        auto_submit=auto_submit, trace=trace,
     )
 
     header = ('APPLICATION SUBMITTED via ' + apply_url) if submitted else \
@@ -1395,14 +1564,21 @@ async def process_job(page, client, profile, job, auto_submit=False):
     if account_note:
         lines.append(account_note)
     lines.extend(step_lines)
-    lines.append(f'\nScreenshots of each step are in: {folder}')
+    lines.append('')
+    lines.extend(trace.upload_lines())
+    lines.append(f'\nSTEP-BY-STEP SCREENSHOTS ({len(trace.shots)}) in {folder}:')
+    for name in trace.shots:
+        lines.append(f'  {name}')
+    lines.append(f'Machine-readable record of this run: {job_id}_run.json')
     if not reached_submit:
         lines.append(
             'NOTE: the run did not reach a page with a Submit control, so the application '
             'may be incomplete - check it before submitting.'
         )
 
-    return ('applied' if submitted else 'ready_to_submit'), '\n'.join(lines)
+    status = 'applied' if submitted else 'ready_to_submit'
+    trace.write_manifest(job, status, submitted)
+    return status, '\n'.join(lines)
 
 
 RUN_LOCK = '/tmp/jobscraper_applier.lock'
@@ -1493,9 +1669,9 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
     db.init_db()
     profile = load_profile()
     client = get_gemini_client()
-    if not client:
+    if not client and not infomaniak.get_config():
         release_run_lock()
-        raise RuntimeError('GEMINI_API_KEY is not configured.')
+        raise RuntimeError('No model configured: set INFOMANIAK_API_TOKEN or GEMINI_API_KEY.')
 
     conn = db.get_connection()
     cursor = conn.cursor()
@@ -1568,7 +1744,7 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
                     await extra.close()
                 except Exception:
                     pass
-            await page.wait_for_timeout(3000)
+            await pause(page, 3000)
 
         # Hold the filled forms open so a human can check and submit them.
         if any(r['status'] == 'ready_to_submit' for r in results):

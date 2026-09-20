@@ -5,6 +5,7 @@ import datetime
 from docx import Document
 from docx.shared import Pt
 import subprocess
+import sys
 from groq import Groq
 from google import genai
 from google.genai import types
@@ -356,6 +357,50 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
 
     doc.save(new_cl_path)
 
+# LibreOffice's last-resort fonts. Seeing one of these in an exported PDF
+# means it could not find the font the document asked for and fell back,
+# which silently changes the layout - the failure this guards against.
+FALLBACK_FONT_MARKERS = ('LinuxLibertine', 'FrankRuhlHofshi')
+
+
+def soffice_env():
+    """Environment for a headless LibreOffice run.
+
+    On macOS the headless backend goes through fontconfig, which does not see
+    the system fonts, so every Microsoft font gets substituted: Arial becomes
+    Liberation Sans, and Verdana - which has no metric-compatible clone -
+    becomes Linux Libertine, a serif. Forcing the native osx backend makes
+    LibreOffice read the real fonts and the PDF match Word again.
+    Override with SOFFICE_VCLPLUGIN; on Linux the default backend is correct,
+    so nothing is set.
+    """
+    env = os.environ.copy()
+    plugin = os.environ.get('SOFFICE_VCLPLUGIN',
+                            'osx' if sys.platform == 'darwin' else '')
+    if plugin:
+        env['SAL_USE_VCLPLUGIN'] = plugin
+    return env
+
+
+def pdf_fallback_fonts(pdf_path):
+    """Names of substituted fonts in a PDF, empty when the real ones were used."""
+    found = set()
+    try:
+        with open(pdf_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            for page in reader.pages:
+                fonts = page['/Resources'].get_object().get('/Font')
+                if not fonts:
+                    continue
+                for ref in fonts.get_object().values():
+                    name = str(ref.get_object().get('/BaseFont') or '')
+                    if any(m in name for m in FALLBACK_FONT_MARKERS):
+                        found.add(name.split('+')[-1])
+    except Exception:
+        pass
+    return sorted(found)
+
+
 def convert_to_pdf_libreoffice(docx_path):
     pdf_dir = os.path.dirname(docx_path)
     soffice_path = os.environ.get('SOFFICE_PATH', '/Applications/LibreOffice.app/Contents/MacOS/soffice')
@@ -365,7 +410,16 @@ def convert_to_pdf_libreoffice(docx_path):
         '--convert-to', 'pdf',
         '--outdir', pdf_dir,
         docx_path
-    ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ], check=True, env=soffice_env(),
+       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    pdf_path = os.path.splitext(docx_path)[0] + '.pdf'
+    substituted = pdf_fallback_fonts(pdf_path)
+    if substituted:
+        print(f"  -> WARNING: {os.path.basename(pdf_path)} fell back to "
+              f"{', '.join(substituted)}. The PDF will not match the Word layout. "
+              f"LibreOffice cannot see the template's fonts on this machine.")
+    return pdf_path
 
 async def generate_for_job(job_id, custom_instructions=None, final_status='generated'):
     import db

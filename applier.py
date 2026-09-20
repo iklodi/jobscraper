@@ -1054,7 +1054,7 @@ async def do_submit(page):
     return True, 'submitted (no explicit confirmation message found)'
 
 
-async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, folder,
+async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments, folder,
                       max_steps=10, auto_submit=False, trace=None):
     """Fill an application, walking multi-step wizards, and stop before submitting.
 
@@ -1114,7 +1114,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, ref_path, fo
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
-        uploaded = await upload_documents(page, fields, cv_path, cl_path, ref_path, trace)
+        uploaded = await upload_documents(page, fields, cv_path, cl_path, attachments, trace)
         uploaded_all.extend(uploaded)
 
         shot = await trace.shot(page, f'step{step}_{step_name}') if trace else None
@@ -1235,12 +1235,52 @@ async def try_advance_to_form(page):
     return None
 
 
-async def upload_documents(page, fields, cv_path, cl_path, extra_path=None, trace=None):
-    """Attach the generated PDFs (and any extra document) to file inputs on the page.
+# Which stored document answers which upload field, most specific first.
+# "Diplomas & Certificates" has to be tested before the reference rule: it
+# contains the word "certificate", and a reference letter is not a diploma.
+ATTACHMENT_RULES = [
+    ('cover_letter', r'cover|motivation|lettre de motivation|anschreiben'),
+    ('cv', r'\bcv\b|resume|resum|lebenslauf|curriculum'),
+    ('diplomas', r'diplom|degree|certificat|zeugnis|qualification|transcript|'
+                 r'attestation|education document'),
+    ('reference_letter', r'reference|recommendation|referenz|empfehlung|'
+                         r'additional|other document|supporting'),
+]
+
+
+def attachment_paths(profile):
+    """Resolve the profile's named attachments to absolute paths.
+
+    Reads profile["attachments"], falling back to the older
+    employment.reference_letter so an un-migrated profile still works.
+    """
+    configured = dict(profile.get('attachments') or {})
+    legacy = (profile.get('employment') or {}).get('reference_letter')
+    if legacy and 'reference_letter' not in configured:
+        configured['reference_letter'] = legacy
+
+    resolved = {}
+    for key, rel in configured.items():
+        if not rel:
+            continue
+        path = rel if os.path.isabs(rel) else os.path.join(CVS_DIR, rel)
+        if os.path.exists(path):
+            resolved[key] = path
+        else:
+            print(f'  -> profile attachment "{key}" not found at {path}')
+    return resolved
+
+
+async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None):
+    """Attach the right stored document to each file input on the page.
 
     Records what went where on `trace`, so the note and the manifest can say
     which file answered which field rather than just how many were sent.
     """
+    attachments = dict(attachments or {})
+    attachments.setdefault('cv', cv_path)
+    attachments.setdefault('cover_letter', cl_path)
+
     uploaded = []
     for field in fields:
         if field.get('type') != 'file':
@@ -1249,13 +1289,17 @@ async def upload_documents(page, fields, cv_path, cl_path, extra_path=None, trac
             [field.get('label', ''), field.get('name', ''), field.get('id', '')]
         ).lower()
         target = None
-        if re.search(r'cover|motivation|lettre|anschreiben', haystack):
-            target = cl_path
-        elif re.search(r'reference|recommendation|referenz|zeugnis|attestation|certificate|'
-                       r'additional|other document|supporting', haystack):
-            target = extra_path
-        elif re.search(r'cv|resume|lebenslauf', haystack) or not uploaded:
-            target = cv_path
+        for key, pattern in ATTACHMENT_RULES:
+            if re.search(pattern, haystack):
+                target = attachments.get(key)
+                if not target:
+                    print(f'  -> no "{key}" attachment configured for field '
+                          f'"{(field.get("label") or "")[:50]}"')
+                break
+        else:
+            # An unlabelled first file input is almost always the CV.
+            if not uploaded:
+                target = attachments.get('cv')
         if not target or not os.path.exists(target):
             continue
         try:
@@ -1634,13 +1678,10 @@ async def process_job(page, client, profile, job, auto_submit=False):
             + f'\nApply manually; documents are in: {folder}'
         )
 
-    reference_letter = (profile.get('employment') or {}).get('reference_letter')
-    reference_path = os.path.join(CVS_DIR, reference_letter) if reference_letter else None
-    if reference_path and not os.path.exists(reference_path):
-        reference_path = None
+    attachments = attachment_paths(profile)
 
     step_lines, reached_submit, submitted = await fill_wizard(
-        target, client, profile, job, cv_path, cl_path, reference_path, folder,
+        target, client, profile, job, cv_path, cl_path, attachments, folder,
         auto_submit=auto_submit, trace=trace,
     )
 

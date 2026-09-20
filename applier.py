@@ -1218,6 +1218,21 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
+        # Easy Apply's resume step has no file field to route, so handle it
+        # before the normal pass rather than leaving LinkedIn's last-used CV.
+        resume_step = await linkedin_resume_step(page)
+        if resume_step and cv_path:
+            done, detail = await upload_linkedin_resume(page, cv_path)
+            if done:
+                lines.append(f'Step {step}: replaced the preselected resume'
+                             + (f' ({resume_step["selected"]})' if resume_step.get('selected') else '')
+                             + f' with {detail}.')
+                if trace:
+                    trace.record_upload('Resume (LinkedIn Easy Apply)', cv_path)
+            else:
+                all_errors.append(f'could not attach the tailored CV: {detail}')
+                lines.append(f'Step {step}: kept LinkedIn\'s stored resume - {detail}.')
+
         uploaded, skipped_uploads = await upload_documents(
             page, fields, cv_path, cl_path, attachments, trace, (plan or {}).get('uploads'))
         uploaded_all.extend(uploaded)
@@ -1404,6 +1419,75 @@ def describe_documents(attachments):
         if key not in DOCUMENT_BLURBS and path:
             lines.append(f'  - "{key}": {os.path.basename(path)}')
     return '\n'.join(lines) or '  (none configured)'
+
+
+UPLOAD_RESUME_LABELS = re.compile(r'^\s*(upload|add)\s+(resume|cv|cover letter)', re.I)
+
+
+async def linkedin_resume_step(page):
+    """The Easy Apply step that offers stored resumes, or None.
+
+    LinkedIn does not put a file input on this step: it lists resumes you
+    uploaded before as radio cards, preselects the last one used, and hides the
+    real input behind an "Upload resume" control. So nothing here matches the
+    normal file-field path - the tailored CV has to be pushed in deliberately.
+    """
+    try:
+        found = await page.evaluate(
+            """() => {
+                const d = Array.from(document.querySelectorAll('[role=dialog]'))
+                    .filter(x => x.querySelectorAll('input,select,textarea,button').length).pop();
+                if (!d) return null;
+                const txt = (d.innerText || '');
+                if (!/resume|cv\\b|lebenslauf/i.test(txt)) return null;
+                const btn = Array.from(d.querySelectorAll('button,label'))
+                    .find(b => /^\\s*(upload|add)\\s+(resume|cv|cover letter)/i.test(
+                        (b.innerText || b.getAttribute('aria-label') || '').trim()));
+                return {hasUpload: !!btn,
+                        files: d.querySelectorAll('input[type=file]').length,
+                        selected: (Array.from(d.querySelectorAll('input[type=radio]'))
+                            .filter(r => r.checked)
+                            .map(r => (r.labels && r.labels[0] ? r.labels[0].innerText : ''))
+                            .join(' ') || '').replace(/\\s+/g, ' ').trim().slice(0, 80)};
+            }"""
+        )
+    except Exception:
+        return None
+    return found if found and (found['hasUpload'] or found['files']) else None
+
+
+async def upload_linkedin_resume(page, cv_path):
+    """Attach our tailored CV on an Easy Apply resume step.
+
+    Returns (uploaded, detail). Leaving LinkedIn's preselected resume alone
+    would send whichever CV was last used for some other job.
+    """
+    if not cv_path or not os.path.exists(cv_path):
+        return False, 'no generated CV to upload'
+
+    # A hidden input is the most reliable target when one is present: setting
+    # files on it needs no click and no native chooser.
+    try:
+        hidden = page.locator('[role=dialog] input[type=file]').first
+        if await hidden.count():
+            await hidden.set_input_files(cv_path)
+            await pause(page, 3500)
+            return True, os.path.basename(cv_path)
+    except Exception as e:
+        print(f'  -> direct resume upload failed ({e}); trying the button')
+
+    control = await find_control(page, UPLOAD_RESUME_LABELS, prefer_last=False)
+    if not control:
+        return False, 'no upload control on the resume step'
+    try:
+        async with page.expect_file_chooser(timeout=10000) as chooser_info:
+            await control.click(timeout=6000)
+        chooser = await chooser_info.value
+        await chooser.set_files(cv_path)
+        await pause(page, 3500)
+        return True, os.path.basename(cv_path)
+    except Exception as e:
+        return False, f'upload control did not accept the file: {type(e).__name__}'
 
 
 async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None,

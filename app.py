@@ -223,6 +223,10 @@ def scrape_status():
                  (apply_thread is not None and apply_thread.is_alive())
     status_data = progress_tracker.get_status()
     status_data['is_running'] = is_running
+    # The outcome of the last finished run, handed over once so the dashboard
+    # can say what happened instead of just dropping the Stop button.
+    if not is_running:
+        status_data['last_result'] = progress_tracker.take_result()
     return jsonify(status_data)
 
 apply_thread = None
@@ -235,8 +239,10 @@ def run_applier_bg(limit, job_ids, auto_submit=False):
         asyncio.run(run_applications(limit=limit, job_ids=job_ids, auto_submit=auto_submit))
     except Exception as e:
         print(f"Applier error: {e}")
-        progress_tracker.clear_status()
+        progress_tracker.set_result({'ok': False, 'headline': f'The application run failed: {e}',
+                                     'single': False, 'jobs': []})
     finally:
+        progress_tracker.clear_status()
         apply_thread = None
 
 @app.route('/api/apply', methods=['POST'])

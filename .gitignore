@@ -14,3 +14,4 @@ ats_accounts.yaml
 profile.yaml
 .env.bak*
 jobs.db-*
+last_run.json

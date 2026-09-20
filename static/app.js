@@ -695,6 +695,43 @@ window.stopScrape = async function() {
     }
 }
 
+
+// A single line in the header saying what the pipeline is doing. The hover
+// box it replaces was invisible unless you happened to hover the controls.
+window.setPipelineBanner = function(text, kind) {
+    const el = document.getElementById('pipeline-banner');
+    if (!el) return;
+    if (!text) { el.style.display = 'none'; el.className = 'pipeline-banner'; return; }
+    el.style.display = 'block';
+    el.className = 'pipeline-banner' + (kind ? ' pipeline-banner-' + kind : '');
+    el.innerText = text;
+}
+
+// Shown once when a run finishes: what happened, and for a single job a link
+// straight to it.
+window.showRunResult = function(result) {
+    const el = document.getElementById('run-result');
+    if (!el || !result || !result.headline) return;
+    let html = `<strong>${result.ok ? '✓' : '⚠️'} ${result.headline}</strong>`;
+    const jobs = result.jobs || [];
+    if (result.single && jobs.length === 1) {
+        html += ` <a href="#" onclick="closeRunResult(); openJobDetails('${jobs[0].job_id}'); return false;">Open the application</a>`;
+    } else if (jobs.length) {
+        html += '<ul style="margin:0.5rem 0 0 1rem;">'
+              + jobs.map(j => `<li>${j.company} - ${j.word}</li>`).join('') + '</ul>';
+    }
+    html += `<span class="run-result-close" onclick="closeRunResult()">&times;</span>`;
+    el.innerHTML = html;
+    el.className = 'run-result ' + (result.ok ? 'run-result-ok' : 'run-result-warn');
+    el.style.display = 'block';
+    fetchJobs();
+}
+
+window.closeRunResult = function() {
+    const el = document.getElementById('run-result');
+    if (el) el.style.display = 'none';
+}
+
 window.pollScraperStatus = async function() {
     const btnFull = document.getElementById('run-scraper-btn');
     const btnEval = document.getElementById('run-eval-btn');
@@ -715,7 +752,17 @@ window.pollScraperStatus = async function() {
             if (btnApply) btnApply.disabled = true;
             btnStop.style.display = 'inline-block';
             hoverBox.classList.add('active');
-            
+
+            // A run that has finished its work and is only holding filled forms
+            // open is not "still working" - saying Stop there reads as a hang.
+            if (data.awaiting_review) {
+                btnStop.innerText = '✓ Close forms';
+                btnStop.classList.add('btn-done');
+            } else {
+                btnStop.classList.remove('btn-done');
+                if (!data.stop_requested) btnStop.innerText = 'Stop';
+            }
+
             if (data.stop_requested) {
                 btnStop.disabled = true;
                 btnStop.innerText = 'Stopping...';
@@ -729,9 +776,14 @@ window.pollScraperStatus = async function() {
                     progEl.innerText = `Working...`;
                 }
             }
-            
+            // The hover box only shows on hover, so mirror the stage into the
+            // header where it is visible without going looking for it.
+            setPipelineBanner(data.current_stage, data.awaiting_review ? 'done' : 'busy');
+
             setTimeout(pollScraperStatus, 2000); // Check every 2s
         } else {
+            setPipelineBanner('', null);
+            if (data.last_result) showRunResult(data.last_result);
             if (btnFull.disabled) {
                 // If it was running and now it's not, refresh the board
                 btnFull.disabled = false;

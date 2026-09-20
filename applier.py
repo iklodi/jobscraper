@@ -1372,6 +1372,89 @@ async def select_custom(page, locator, value):
     return False
 
 
+FIELD_INVALID_JS = """
+(el) => {
+    if (!el) return null;
+    // The browser's own verdict first, then the patterns component libraries
+    // use: aria-invalid, an error class, or an error node tied by aria-describedby.
+    if (el.willValidate && !el.checkValidity()) return el.validationMessage || 'invalid';
+    if (el.getAttribute('aria-invalid') === 'true') return 'aria-invalid';
+    const described = el.getAttribute('aria-describedby');
+    if (described) {
+        for (const id of described.split(/\\s+/)) {
+            const n = document.getElementById(id);
+            if (n && n.offsetParent !== null && /invalid|not valid|incorrect|erreur|ung.ltig/i.test(n.innerText || ''))
+                return (n.innerText || '').trim().slice(0, 120);
+        }
+    }
+    // Otherwise look just below the field for a freshly rendered error line.
+    const wrap = el.closest('div, fieldset, label') || el.parentElement;
+    if (wrap) {
+        for (const n of wrap.querySelectorAll('[class*="error"], [class*="invalid"], [role="alert"]')) {
+            const t = (n.innerText || '').trim();
+            if (t && n.offsetParent !== null) return t.slice(0, 120);
+        }
+    }
+    return null;
+}
+"""
+
+
+def phone_variants(value):
+    """The same number in the shapes forms actually accept.
+
+    A validator that rejects "+41 12 345 67 89" usually wants E.164 with no
+    spaces, and a few insist on the national form. Ordered most standard first.
+    """
+    raw = str(value or '').strip()
+    digits = re.sub(r'[^\d+]', '', raw)
+    out = [raw, digits]
+    if digits.startswith('+'):
+        body = digits[1:]
+        out.append('00' + body)
+        # Swiss numbers: +41 79... -> 079...
+        if body.startswith('41') and len(body) > 2:
+            out.append('0' + body[2:])
+    elif digits.startswith('00'):
+        out.append('+' + digits[2:])
+    elif digits.startswith('0'):
+        out.append('+41' + digits[1:])
+    seen, uniq = set(), []
+    for v in out:
+        if v and v not in seen:
+            seen.add(v)
+            uniq.append(v)
+    return uniq
+
+
+def looks_like_phone(field):
+    haystack = ' '.join([str(field.get('label') or ''), str(field.get('name') or ''),
+                         str(field.get('id') or ''), str(field.get('type') or '')]).lower()
+    return bool(re.search(r'\btel\b|phone|mobile|telefon|t.l.phone|handy|natel', haystack))
+
+
+async def fill_checked(page, locator, value, field):
+    """Fill a field and make sure the page accepted it.
+
+    Phone numbers are the recurring offender: the profile stores one readable
+    form and each validator wants a different one, so try the alternatives
+    rather than leaving a required field flagged red and the application stuck.
+    Returns (value_used, error_message_or_None).
+    """
+    candidates = phone_variants(value) if looks_like_phone(field) else [str(value)]
+    problem = None
+    for candidate in candidates:
+        await locator.fill(candidate, timeout=5000)
+        await pause(page, 400)
+        try:
+            problem = await locator.evaluate(FIELD_INVALID_JS)
+        except Exception:
+            problem = None
+        if not problem:
+            return candidate, None
+    return candidates[-1], problem
+
+
 async def apply_actions(page, actions, fields=None):
     """Execute the model's fill plan; returns (filled_count, errors)."""
     by_idx = {f['idx']: f for f in (fields or [])}
@@ -1387,7 +1470,10 @@ async def apply_actions(page, actions, fields=None):
         name = (field.get('label') or field.get('name') or f'#{action.get("idx")}')[:40]
         try:
             if kind == 'fill':
-                await locator.fill(str(value), timeout=5000)
+                used, problem = await fill_checked(page, locator, value, field)
+                if problem:
+                    errors.append(f'"{name}": the form rejected "{used}" - {problem}')
+                    continue
             elif kind == 'select':
                 # Only a real <select> takes select_option; anything else is a
                 # widget that has to be opened and clicked.
@@ -1753,7 +1839,9 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
             print(f'Connect over VNC to check and submit them. Closing in {minutes} min, '
                   f'or immediately if you press Stop on the dashboard.')
             progress_tracker.set_status(
-                'Forms filled - review and submit over VNC, then press Stop', len(results), len(results)
+                f'Done - {len(results)} form(s) filled and left open. Check them, then press '
+                f'"Close forms" (closing automatically in {minutes} min).',
+                len(results), len(results), awaiting_review=True
             )
             for _ in range(minutes * 60 // 5):
                 if progress_tracker.is_stop_requested():
@@ -1765,30 +1853,62 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
 
     progress_tracker.clear_status()
     release_run_lock()
-    _notify(results)
+    progress_tracker.set_result(run_summary(results, single=bool(job_ids) and len(jobs) == 1))
+    _notify(results, single=bool(job_ids) and len(jobs) == 1)
     return results
 
 
-def _notify(results):
+STATUS_WORDS = {
+    'applied': 'submitted',
+    'ready_to_submit': 'filled, waiting for you to submit',
+    'account_required': 'blocked - the employer wants an account',
+    'failed': 'failed',
+}
+
+
+def run_summary(results, single=False):
+    """One line the dashboard can show, plus the detail behind it."""
+    if not results:
+        return {'ok': False, 'headline': 'Nothing to apply for.', 'jobs': []}
+    jobs = [{'job_id': r['job_id'], 'company': r['company'], 'status': r['status'],
+             'word': STATUS_WORDS.get(r['status'], r['status'])} for r in results]
+    if single:
+        j = jobs[0]
+        headline = f'{j["company"]}: application {j["word"]}.'
+    else:
+        done = sum(1 for r in results if r['status'] in ('applied', 'ready_to_submit'))
+        headline = f'{done} of {len(results)} application(s) completed.'
+    return {'ok': all(r['status'] in ('applied', 'ready_to_submit') for r in results),
+            'headline': headline, 'single': single, 'jobs': jobs}
+
+
+def _notify(results, single=False):
+    """Email the outcome. One job gets a direct link; a batch gets a list."""
     if not results:
         return
-    ready = [r for r in results if r['status'] == 'ready_to_submit']
-    other = [r for r in results if r['status'] != 'ready_to_submit']
-    lines = ['## Applications prepared\n']
-    if ready:
-        lines.append(
-            'The filled forms are open in the browser on the server. Connect over VNC '
-            '(port 5900) to check and submit them, then press Stop on the dashboard.\n'
-        )
-    for r in ready:
-        lines.append(f'- **{r["company"]}** - form filled, waiting for your review and submit')
-    if other:
-        lines.append('\n## Needing attention\n')
-        for r in other:
-            lines.append(f'- **{r["company"]}** - {r["status"]}')
     dashboard = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
-    lines.append(f'\nReview them on the dashboard: {dashboard}')
-    notifier.send_email('AI Job Scraper - Applications ready to review', '\n'.join(lines))
+    summary = run_summary(results, single=single)
+
+    lines = [f'# {summary["headline"]}\n']
+    for j in summary['jobs']:
+        line = f'- **{j["company"]}** - {j["word"]}'
+        # A single-job run is something the candidate asked for by hand and is
+        # waiting on, so link straight to it. A batch would be a wall of links.
+        if single:
+            line += f'\n\n  [Open this application]({dashboard}/?job_id={j["job_id"]})'
+        lines.append(line)
+
+    if any(j['status'] == 'ready_to_submit' for j in summary['jobs']):
+        lines.append(
+            '\nThe filled forms are open in the browser on the machine that ran this. '
+            'Check them, submit the ones you want, then press "Close forms" on the dashboard.'
+        )
+    if not single:
+        lines.append(f'\nReview them on the dashboard: {dashboard}')
+
+    subject = ('AI Job Scraper - ' +
+               (summary['headline'] if single else 'Applications processed'))
+    notifier.send_email(subject, '\n'.join(lines))
 
 
 if __name__ == '__main__':

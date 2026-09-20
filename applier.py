@@ -469,6 +469,34 @@ class Trace:
         self.n = 0
         self.shots = []
         self.uploads = []
+        self.clear_previous()
+
+    def clear_previous(self):
+        """Delete the last run's trail for this job.
+
+        Re-filling a form produces a fresh numbered sequence, and leaving the
+        old one behind interleaves two runs in the same folder - the dashboard
+        sorts by the number in the name, so step 3 of an abandoned attempt sits
+        between steps of the real one. Only this job's own .png and manifest
+        are touched; the CV and cover letter are left alone.
+        """
+        removed = 0
+        for directory in {self.folder, OUTPUT_DIR}:
+            if not directory or not os.path.isdir(directory):
+                continue
+            for name in os.listdir(directory):
+                if not name.startswith(f'{self.job_id}_'):
+                    continue
+                if not (name.endswith('.png') or name == f'{self.job_id}_run.json'):
+                    continue
+                try:
+                    os.remove(os.path.join(directory, name))
+                    removed += 1
+                except OSError as e:
+                    print(f'  -> could not remove {name}: {e}')
+        if removed:
+            print(f'  -> cleared {removed} file(s) from the previous run')
+        return removed
 
     def set_folder(self, folder):
         if folder:

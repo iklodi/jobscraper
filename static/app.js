@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
         if (e.target === document.getElementById('add-job-modal')) closeAddJob();
+        if (e.target === document.getElementById('settings-modal')) closeSettings();
     });
 });
 
@@ -841,4 +842,89 @@ document.addEventListener('keydown', (e) => {
     if (!modal || !modal.classList.contains('active')) return;
     if (e.key === 'Escape') closeAddJob();
     if (e.key === 'Enter' && e.target.id === 'add-job-url') submitAddJob();
+});
+
+// --- Search settings --------------------------------------------------------
+
+window.openSettings = function() {
+    const modal = document.getElementById('settings-modal');
+    const status = document.getElementById('settings-status');
+    const btn = document.getElementById('settings-save');
+    status.style.display = 'none';
+    status.innerHTML = '';
+    modal.classList.add('active');
+    // Nothing is loaded yet; saving now would post two empty files.
+    document.getElementById('settings-criteria').value = '';
+    document.getElementById('settings-rules').value = '';
+    btn.disabled = true;
+    btn.innerText = 'Loading...';
+
+    fetch('/api/settings').then(r => r.json()).then(data => {
+        btn.disabled = false;
+        btn.innerText = 'Save';
+        document.getElementById('settings-criteria').value = data.search_criteria.content;
+        document.getElementById('settings-rules').value = data.rules.content;
+        document.getElementById('settings-path-criteria').innerText = ' — ' + data.search_criteria.path;
+        document.getElementById('settings-path-rules').innerText = ' — ' + data.rules.path;
+        document.getElementById('settings-pass').innerText =
+            'Jobs scoring ' + data.min_pass_score + '+ go to To Do';
+    }).catch(e => {
+        status.style.display = 'block';
+        status.style.color = '#f87171';
+        status.innerText = 'Could not load the settings: ' + e;
+    });
+}
+
+window.closeSettings = function() {
+    document.getElementById('settings-modal').classList.remove('active');
+}
+
+window.saveSettings = async function() {
+    const btn = document.getElementById('settings-save');
+    const status = document.getElementById('settings-status');
+    btn.disabled = true;
+    btn.innerText = 'Saving...';
+
+    try {
+        const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                search_criteria: document.getElementById('settings-criteria').value,
+                rules: document.getElementById('settings-rules').value
+            })
+        });
+        const data = await res.json();
+        status.style.display = 'block';
+
+        if (data.error) {
+            status.style.color = '#f87171';
+            status.innerText = data.error;
+        } else {
+            const p = data.parsed || {};
+            let html = '<strong style="color:#4ade80;">Saved.</strong> ';
+            if (p.error) {
+                html += '<span style="color:#fbbf24;">But the file did not parse: ' + p.error + '</span>';
+            } else {
+                html += `The next run will make ${p.searches} searches` +
+                    (p.job_types && p.job_types.length ? ` (${p.job_types.join(', ')})` : '') + ':<br>' +
+                    p.keywords.map(k =>
+                        `&nbsp;&nbsp;<code>${k.keyword}</code> in ${k.locations.join(', ')}`).join('<br>');
+            }
+            status.style.color = 'var(--text-secondary)';
+            status.innerHTML = html;
+        }
+    } catch (e) {
+        status.style.display = 'block';
+        status.style.color = '#f87171';
+        status.innerText = 'Could not save: ' + e;
+    } finally {
+        btn.disabled = false;
+        btn.innerText = 'Save';
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('settings-modal');
+    if (modal && modal.classList.contains('active') && e.key === 'Escape') closeSettings();
 });

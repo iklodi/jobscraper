@@ -18,6 +18,7 @@
             <div style="display: flex; align-items: center; gap: 1.5rem;">
                 <button id="add-job-btn" class="btn-add" title="Add a job by URL"
                         onclick="openAddJob()" aria-label="Add a job by URL">+</button>
+                <button class="btn" onclick="openSettings()" title="Edit search keywords and scoring rules">⚙️ Search Settings</button>
                 <button class="btn" onclick="pullUpdates(this)">☁️ Pull Updates</button>
                 <button class="btn" onclick="manualRefresh(this)">🔄 Refresh</button>
                 <div class="pipeline-controls" style="display: flex; gap: 0.5rem; position: relative;">
@@ -103,6 +104,44 @@
                 <div class="kanban-cards"></div>
             </div>
         </main>
+    </div>
+
+    <!-- Search Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 780px;">
+            <span class="close-btn" onclick="closeSettings()">&times;</span>
+            <h2 style="margin-bottom: 0.4rem;">Search settings</h2>
+            <h3 style="margin-bottom: 1.2rem;">What the scraper looks for, and how the AI scores it.
+                Changes apply to the next run.</h3>
+
+            <div class="detail-section" style="border-bottom: none; padding-bottom: 0;">
+                <h4>Keywords, locations &amp; job types
+                    <span id="settings-path-criteria" style="text-transform: none; opacity: 0.5;"></span></h4>
+                <textarea id="settings-criteria" spellcheck="false"
+                          style="width: 100%; height: 230px; padding: 12px; border-radius: 8px;
+                                 border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25);
+                                 color: white; font-family: ui-monospace, monospace; font-size: 0.82rem;
+                                 line-height: 1.5; resize: vertical;"></textarea>
+
+                <h4 style="margin-top: 1.2rem;">Scoring rules
+                    <span id="settings-path-rules" style="text-transform: none; opacity: 0.5;"></span></h4>
+                <textarea id="settings-rules" spellcheck="false"
+                          style="width: 100%; height: 260px; padding: 12px; border-radius: 8px;
+                                 border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25);
+                                 color: white; font-family: ui-monospace, monospace; font-size: 0.82rem;
+                                 line-height: 1.5; resize: vertical;"></textarea>
+
+                <div id="settings-status" style="display: none; margin-top: 1rem; font-size: 0.9rem;
+                     color: var(--text-secondary);"></div>
+
+                <div style="display: flex; gap: 10px; margin-top: 1.3rem; align-items: center;">
+                    <button class="btn btn-primary" id="settings-save" onclick="saveSettings()">Save</button>
+                    <button class="btn" onclick="closeSettings()">Cancel</button>
+                    <span id="settings-pass" style="margin-left: auto; font-size: 0.85rem;
+                          color: var(--text-secondary);"></span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Add Job By URL Modal -->

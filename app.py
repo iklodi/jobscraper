@@ -283,6 +283,67 @@ def add_job_from_url_status():
         'result': None if running else add_url_result,
     })
 
+# The two files that steer the search: what to look for, and how to score it.
+SETTINGS_FILES = {
+    'search_criteria': 'search_criteria.md',
+    'rules': 'rules.md',
+}
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    out = {}
+    for key, filename in SETTINGS_FILES.items():
+        path = os.path.join(CVS_DIR, filename)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                out[key] = {'content': f.read(), 'path': path}
+        except FileNotFoundError:
+            out[key] = {'content': '', 'path': path}
+        except Exception as e:
+            return jsonify({'error': f'Could not read {filename}: {e}'}), 500
+    out['min_pass_score'] = os.environ.get('MIN_PASS_SCORE', '8')
+    return jsonify(out)
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    data = request.json or {}
+    saved = []
+    for key, filename in SETTINGS_FILES.items():
+        if key not in data:
+            continue
+        content = data[key]
+        if not isinstance(content, str) or not content.strip():
+            return jsonify({'error': f'{filename} would be empty - not saving.'}), 400
+        path = os.path.join(CVS_DIR, filename)
+        try:
+            # Keep one backup so a bad edit is recoverable.
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    previous = f.read()
+                with open(path + '.bak', 'w', encoding='utf-8') as f:
+                    f.write(previous)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content if content.endswith('\n') else content + '\n')
+            saved.append(filename)
+        except Exception as e:
+            return jsonify({'error': f'Could not write {filename}: {e}'}), 500
+
+    # Report back how the search parses now, so a typo is visible immediately.
+    summary = None
+    try:
+        import importlib, scraper
+        importlib.reload(scraper)
+        keyword_specs, locations, job_types = scraper.get_search_criteria()
+        summary = {
+            'keywords': [{'keyword': k, 'locations': locs or locations} for k, locs in keyword_specs],
+            'job_types': job_types,
+            'searches': sum(len(locs or locations) for _, locs in keyword_specs) * 3,
+        }
+    except Exception as e:
+        summary = {'error': str(e)}
+
+    return jsonify({'saved': saved, 'parsed': summary})
+
 @app.route('/download/<path:subpath>')
 def download_file(subpath):
     apps_dir = os.path.join(CVS_DIR, 'applications')

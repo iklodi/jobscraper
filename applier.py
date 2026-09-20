@@ -1052,16 +1052,45 @@ SUBMIT_LABELS = re.compile(
     r'envoyer|absenden)\b', re.I)
 
 
-async def find_control(page, pattern, prefer_last=True):
-    """Return a visible button/link matching the label, or None."""
-    for role in ('button', 'link'):
-        matches = page.get_by_role(role, name=pattern)
-        for control in ([matches.last, matches.first] if prefer_last else [matches.first]):
-            try:
-                await control.wait_for(state='visible', timeout=2500)
-                return control
-            except Exception:
+async def form_scope(page):
+    """The open form dialog, or the whole page when there is none.
+
+    Fields are collected from the dialog, so controls must come from it too.
+    A LinkedIn job page behind an Easy Apply modal carries its own buttons -
+    the messaging widget alone offers "Send" - and matching those makes the
+    wizard think it has reached a submit page while the real form sits
+    untouched behind the overlay.
+    """
+    try:
+        handles = await page.query_selector_all('[role=dialog]')
+        for handle in reversed(handles):
+            box = await handle.bounding_box()
+            if not box or box['width'] < 200 or box['height'] < 150:
                 continue
+            if await handle.query_selector('input, select, textarea, button'):
+                return page.locator('[role=dialog]').nth(handles.index(handle))
+    except Exception:
+        pass
+    return page
+
+
+async def find_control(page, pattern, prefer_last=True):
+    """Return a visible button/link matching the label, or None.
+
+    Scoped to the open dialog when there is one, so a control on the page
+    behind a modal is never mistaken for part of the form.
+    """
+    scope = await form_scope(page)
+    for where in ([scope, page] if scope is not page else [page]):
+        for role in ('button', 'link'):
+            matches = where.get_by_role(role, name=pattern)
+            for control in ([matches.last, matches.first] if prefer_last else [matches.first]):
+                try:
+                    await control.wait_for(state='visible', timeout=2500)
+                    return control
+                except Exception:
+                    continue
+        # Only fall back to the whole page when the dialog offered nothing.
     return None
 
 
@@ -1249,6 +1278,18 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
         # Easy Apply's resume step has no file field to route, so handle it
         # before the normal pass rather than leaving LinkedIn's last-used CV.
         resume_step = await linkedin_resume_step(page)
+        # A review page shows the resume it is about to send. If that is not
+        # ours, go back through its Edit link rather than letting the wrong
+        # CV go out - this is the state the wizard actually lands in when
+        # LinkedIn skips straight from contact details to review.
+        if not resume_step and cv_path:
+            present, ours, shown = await review_resume_is_ours(page, cv_path)
+            if present and not ours:
+                lines.append(f'Step {step}: review lists "{shown}", not our CV - reopening the '
+                             f'resume chooser.')
+                if await open_resume_editor(page):
+                    resume_step = await linkedin_resume_step(page)
+
         if resume_step and cv_path:
             done, detail = await upload_linkedin_resume(page, cv_path)
             if done:
@@ -1518,6 +1559,71 @@ async def upload_linkedin_resume(page, cv_path):
         return False, f'upload control did not accept the file: {type(e).__name__}'
 
 
+async def review_resume_is_ours(page, cv_path):
+    """On an Easy Apply review page, is the listed resume the one we generated?
+
+    Returns (section_present, is_ours, shown_name). LinkedIn's review step
+    summarises the resume it will send and offers an Edit link back to the
+    chooser - the last chance to notice it is about to attach some other
+    job's CV.
+    """
+    try:
+        shown = await page.evaluate(
+            """() => {
+                const d = Array.from(document.querySelectorAll('[role=dialog]'))
+                    .filter(x => x.querySelectorAll('button').length).pop();
+                if (!d) return null;
+                const heads = Array.from(d.querySelectorAll('h3,h4,span,div'))
+                    .filter(e => /^\\s*resume\\s*$/i.test((e.innerText || '').trim()));
+                if (!heads.length) return null;
+                const block = heads[heads.length - 1].closest('div,section') || heads[heads.length - 1].parentElement;
+                const txt = ((block && block.parentElement ? block.parentElement.innerText
+                                                          : (block || {}).innerText) || '');
+                // LinkedIn truncates the name on the review page
+                // ("20260731_YunoJuno_..."), so accept a cut-off name too.
+                const m = txt.match(/[\\w .()\\-]+\\.(pdf|docx?)/i)
+                       || txt.match(/[\\w .()\\-]{6,}(?:\\u2026|\\.\\.\\.)/);
+                return m ? m[0].trim() : '';
+            }"""
+        )
+    except Exception:
+        return False, True, None
+    if shown is None:
+        return False, True, None
+    wanted = os.path.basename(cv_path or '')
+    # LinkedIn truncates long names ("20260731_YunoJuno_..."), so compare the
+    # stem up to the ellipsis rather than demanding an exact match.
+    stem = shown.replace('\u2026', '...').split('...')[0].strip()
+    ours = bool(stem) and (stem in wanted or wanted.startswith(stem[:12]))
+    return True, ours, shown
+
+
+async def open_resume_editor(page):
+    """Click the Edit beside the review page's Resume section.
+
+    The review page labels each Edit by section on the button itself
+    (aria-label="Edit Resume"); the visible text is just "Edit" and is
+    identical for Contact info and Additional Questions, so the label is the
+    only thing that distinguishes them.
+    """
+    candidates = [
+        page.get_by_role('button', name=re.compile(r'^edit\s+resume', re.I)),
+        page.locator('button[aria-label*="Edit Resume" i], a[aria-label*="Edit Resume" i]'),
+    ]
+    for candidate in candidates:
+        try:
+            control = candidate.first
+            if not await control.count():
+                continue
+            await control.click(timeout=6000)
+            await pause(page, 3500)
+            return True
+        except Exception as e:
+            print(f'  -> resume editor click failed: {type(e).__name__}')
+    print('  -> no "Edit Resume" control on this page')
+    return False
+
+
 async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None,
                            uploads=None):
     """Attach the right stored document to each file input on the page.
@@ -1598,13 +1704,34 @@ async def tick_box(page, locator, field):
                 return
         except Exception:
             pass
+    # No blind force-click here. A forced click on a hidden input is delivered
+    # at its coordinates regardless of what is painted on top, so on a modal
+    # wizard it lands on whatever covers it - which on LinkedIn Easy Apply is
+    # the Next button. That silently advanced the form past the resume step,
+    # and the application went out with the wrong CV attached.
+    # Setting the property and announcing it is equivalent for the page and
+    # cannot hit another control.
+    # el.click() is the DOM method, not a pointer event: it fires the page's
+    # own handler without hit-testing, so React sees a real click and nothing
+    # painted on top can intercept it. Setting el.checked directly is not
+    # enough - React re-renders from its own state and drops it.
     try:
-        await locator.click(force=True, timeout=3000)
+        await locator.evaluate('el => el.click()')
+        await page.wait_for_timeout(300)
         if await locator.is_checked():
             return
     except Exception:
         pass
-    await locator.check(force=True, timeout=3000)
+    # Last resort: the styled label, clicked the same way.
+    try:
+        if field_id:
+            await page.locator(f'label[for="{field_id}"]').first.evaluate('el => el.click()')
+            await page.wait_for_timeout(300)
+            if await locator.is_checked():
+                return
+    except Exception:
+        pass
+    raise RuntimeError('could not tick it without clicking through the page')
 
 
 async def select_native(locator, value, field):

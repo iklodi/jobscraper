@@ -30,20 +30,28 @@ import requests
 
 API_ROOT = 'https://api.infomaniak.com'
 # Tried in order. Timings are per real evaluation prompt (career dossier +
-# job description + rules, ~10k tokens), averaged over three backlog jobs:
+# job description + rules, ~10k tokens):
 #
-#   Mistral-Small-4-119B   1.5s   scored 9/7/7 where Gemini said 8/8/8
-#   Apertus-v1.5-70B       4.7s   scored 9/7/7
-#   gemma-4-31B            4.0s   scored 7/7/6, consistently a shade harsher
+#   Mistral-Small-4-119B   1.5s
+#   gemma-4-31B            4.0s
+#   Apertus-v1.5-70B       4.7s
 #   Kimi-K2.6             20.0s   returned unparseable JSON on 2 of 3
 #   Qwen3.5-122B         129.1s   one connection timeout
 #
-# Hence Mistral first. Kimi and Qwen are left out: the first cannot hold the
-# schema, the second is slow enough to stall a nightly run on its own.
+# gemma leads despite being slower than Mistral. Scoring the same 395 jobs
+# with both showed they agree on only 11% and that Mistral runs 1.59 points
+# high - because it treats the hard gates in rules.md as preferences. On the
+# jobs where they diverged most, gemma was the one calling "Location
+# mismatch" on a Dublin hybrid, spotting a US-residents-only remote posting
+# from its HIPAA mandates, and catching an "Already applied" duplicate that
+# Mistral scored 8. A lenient evaluator is worse than a slow one here.
+#
+# Kimi and Qwen are left out: the first cannot hold the schema, the second is
+# slow enough to stall a nightly run on its own.
 DEFAULT_MODELS = [
+    'google/gemma-4-31B-it',
     'mistralai/Mistral-Small-4-119B-2603',
     'swiss-ai/Apertus-v1.5-70B',
-    'google/gemma-4-31B-it',
 ]
 TIMEOUT = 180
 RETRIES = 5

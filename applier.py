@@ -629,11 +629,21 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
                 return page, 'same_tab'
         # Nothing happened - fall through and try the next candidate.
 
-    # Nothing matched. Easy Apply is often just late wiring up its handler, so
-    # reload once and give it a slower, jittered second pass before deciding a
-    # human has to do it.
+    # Nothing reacted. On a direct /jobs/view/ page LinkedIn renders Easy Apply
+    # as an <a> that does nothing when clicked under automation; the same job
+    # in the search pane renders a real <button> that opens the modal. So try
+    # the job again through search before deciding a human has to do it.
     if not retry:
-        await pause(page, 3000)
+        numeric = re.search(r'/jobs/view/(\d+)|currentJobId=(\d+)', linkedin_url)
+        ident = next((g for g in (numeric.groups() if numeric else ()) if g), None)
+        if ident:
+            search_url = f'https://www.linkedin.com/jobs/search/?currentJobId={ident}'
+            print(f'  -> apply control did not respond; retrying via the search view')
+            try:
+                await pause(page, 2000)
+                return await find_apply_url(page, search_url, job_id, trace, retry=True)
+            except Exception:
+                pass
         try:
             await page.reload(timeout=60000)
             await pause(page, 7000)
@@ -1003,9 +1013,12 @@ async def create_or_signin_account(page, client, profile, job_id):
 
 
 # Controls that move a multi-step application forward, and the ones that send it.
+# "Review" is LinkedIn Easy Apply's last step before Submit - without it the
+# wizard stalls one click short and reports the page as the end of the form.
 NEXT_LABELS = re.compile(
     r'^(save and continue|save & continue|continue|next|next step|save and next|'
-    r'weiter|suivant|continuer)\b', re.I)
+    r'review|review your application|weiter|suivant|continuer|'
+    r'\u00fcberpr\u00fcfen|v\u00e9rifier)\b', re.I)
 SUBMIT_LABELS = re.compile(
     r'^(submit|submit application|send application|send|finish|complete application|'
     r'envoyer|absenden)\b', re.I)
@@ -2121,17 +2134,21 @@ def _notify(results, single=False):
     base = notifier.dashboard_url()
     summary = run_summary(results, single=single)
 
-    lines = [f'# {summary["headline"]}\n']
+    # One job per line. A link on its own indented line inside a list item
+    # renders as a sibling of the *next* item, so the mail read as if every
+    # link belonged to the company below it.
+    lines = [f'## {summary["headline"]}', '']
     for j in summary['jobs']:
-        lines.append(f'- **{j["company"]}** - {j["word"]}'
-                     f'\n\n  [Open this application]({base}/?job_id={j["job_id"]})')
+        lines.append(f'- **{j["company"]}** - {j["word"]} '
+                     f'([open]({base}/?job_id={j["job_id"]}))')
+    lines.append('')
 
     if any(j['status'] == 'ready_to_submit' for j in summary['jobs']):
-        lines.append(
-            '\nThe filled forms are open in the browser on the machine that ran this. '
-            'Check them, submit the ones you want, then press "Close forms" on the dashboard.'
-        )
-    lines.append(f'\nReview them on the dashboard: {base}')
+        lines.append('The filled forms are open in the browser on the machine that ran this. '
+                     'Check them, submit the ones you want, then press "Close forms" on '
+                     'the dashboard.')
+        lines.append('')
+    lines.append(f'[Open the dashboard]({base})')
     notifier.send_email('AI Job Scraper - Applications processed', '\n'.join(lines))
 
 

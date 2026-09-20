@@ -34,7 +34,10 @@ import infomaniak
 load_dotenv()
 
 # This host also runs other services, so a long batch must not accumulate tabs.
-MAX_OPEN_REVIEW_TABS = int(os.environ.get('APPLY_MAX_OPEN_TABS', '3'))
+# 0 means keep every filled form open. A closed form is a lost one - nothing
+# persists the values - so capping this silently discards work the run has
+# already done. Set it on a host that shares its memory (each tab is ~150MB).
+MAX_OPEN_REVIEW_TABS = int(os.environ.get('APPLY_MAX_OPEN_TABS', '0'))
 MIN_FREE_MB = int(os.environ.get('APPLY_MIN_FREE_MB', '400'))
 
 
@@ -1925,8 +1928,13 @@ def release_profile_lock():
     time.sleep(1)
 
 
-async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blocked=False):
-    """Fill applications for approved jobs. Returns a per-job result list."""
+async def run_applications(limit=None, job_ids=None, auto_submit=False, include_blocked=False):
+    """Fill applications for approved jobs. Returns a per-job result list.
+
+    limit=None means every approved job. A partial batch is worse than it
+    looks: a filled form that gets closed is not saved anywhere, so the job
+    reads as done on the board while the work is gone.
+    """
     if not acquire_run_lock():
         print('Another application run is already in progress; not starting a second one.')
         return []
@@ -1948,11 +1956,12 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
         )
     else:
         statuses = '"approved", "account_required"' if include_blocked else '"approved"'
-        cursor.execute(
-            'SELECT job_id, title, company, link, description FROM jobs '
-            f'WHERE status IN ({statuses}) ORDER BY score DESC LIMIT ?',
-            (limit,),
-        )
+        query = ('SELECT job_id, title, company, link, description FROM jobs '
+                 f'WHERE status IN ({statuses}) ORDER BY score DESC')
+        if limit:
+            cursor.execute(query + ' LIMIT ?', (limit,))
+        else:
+            cursor.execute(query)
     jobs = cursor.fetchall()
     conn.close()
 
@@ -2000,7 +2009,8 @@ async def run_applications(limit=5, job_ids=None, auto_submit=False, include_blo
             # Only forms still awaiting a human stay open, and only a few: each
             # extra tab costs ~150MB of Chromium, and this box shares its memory
             # with other services. Everything else is closed straight away.
-            if status == 'ready_to_submit' and len(review_tabs) < MAX_OPEN_REVIEW_TABS:
+            if status == 'ready_to_submit' and (not MAX_OPEN_REVIEW_TABS
+                                                or len(review_tabs) < MAX_OPEN_REVIEW_TABS):
                 review_tabs.extend(t for t in browser.pages[1:] if t not in review_tabs)
             for extra in browser.pages[1:]:
                 if extra in review_tabs:
@@ -2094,7 +2104,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Fill in applications for approved jobs.')
-    parser.add_argument('--limit', type=int, default=5, help='How many approved jobs to process')
+    parser.add_argument('--limit', type=int, default=None,
+                        help='Cap how many approved jobs to process (default: all)')
     parser.add_argument('--job-id', action='append', help='Apply for specific job id(s) only')
     parser.add_argument('--include-blocked', action='store_true',
                         help='Also retry jobs parked in Account Required')

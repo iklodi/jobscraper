@@ -263,7 +263,10 @@ def trigger_apply():
         return jsonify({'status': 'already_running'})
 
     data = request.json or {}
-    limit = int(data.get('limit', 5))
+    # No limit by default: a partial batch fills forms it then closes, and a
+    # closed form is lost, so the job looks done while the work is gone.
+    limit = data.get('limit')
+    limit = int(limit) if limit else None
     job_ids = data.get('job_ids')
 
     # The dashboard's Fill Application button submits: the pre-submit gate in

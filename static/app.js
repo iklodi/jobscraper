@@ -643,7 +643,7 @@ window.triggerFill = function(jobId = null) {
 }
 
 window.triggerApply = async function(jobId = null, submit = true) {
-    const what = jobId ? "this job" : "the top approved jobs";
+    const what = jobId ? "this job" : "every approved job";
     const scope = submit ? `Apply for ${what} now?` : `Fill in the form for ${what}, without sending?`;
     const detail = submit
         ? "A browser will open the employer's form, fill it from your profile and SUBMIT it."
@@ -660,7 +660,7 @@ window.triggerApply = async function(jobId = null, submit = true) {
     if (hoverBox) hoverBox.classList.add('active');
 
     try {
-        const body = jobId ? { job_ids: [jobId], submit } : { limit: 5, submit };
+        const body = jobId ? { job_ids: [jobId], submit } : { submit };
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

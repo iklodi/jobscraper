@@ -2,7 +2,7 @@ import sqlite3
 import datetime
 import os
 
-MIN_PASS_SCORE = int(os.environ.get('MIN_PASS_SCORE', 9))
+MIN_PASS_SCORE = int(os.environ.get('MIN_PASS_SCORE', 7))
 
 DB_FILE = 'jobs.db'
 

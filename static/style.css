@@ -480,3 +480,16 @@ h1 {
     cursor: default;
     transform: none;
 }
+
+/* Promoted (paid) LinkedIn listings - the evaluator scores these more harshly,
+   so the badge explains an otherwise puzzling low score. */
+.meta-promoted {
+    background: rgba(234, 179, 8, 0.18);
+    color: #fde68a;
+}
+
+/* A job whose documents are being written after Approve. */
+.meta-writing {
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+}

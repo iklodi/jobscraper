@@ -60,8 +60,8 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
     # Near misses: without these, a run with no 9s has nothing to click.
     near_misses = eval_stats.get('near_misses', [])
     if near_misses:
-        lines.append(f"## Worth a look (scored {os.environ.get('NEAR_MISS_SCORE', 7)}-"
-                     f"{int(os.environ.get('MIN_PASS_SCORE', 9)) - 1})\n")
+        lines.append(f"## Worth a look (scored {os.environ.get('NEAR_MISS_SCORE', 6)}-"
+                     f"{int(os.environ.get('MIN_PASS_SCORE', 7)) - 1})\n")
         for job in sorted(near_misses, key=lambda j: -j['score'])[:10]:
             lines.append(f"- **[{job['score']}/10]** {job['title']} @ **{job['company']}**"
                          + _job_links(job.get('job_id')))

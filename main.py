@@ -52,19 +52,18 @@ async def main():
     else:
         print("\n=== Step 2: Evaluating Skipped (--no-eval flag used) ===")
         
-    skip_gen = '--no-gen' in sys.argv
-    if not skip_gen:
+    # Assets are written only for jobs approved by hand in the dashboard, so
+    # the nightly run stops at scoring. Pass --gen to sweep every to_apply
+    # job the old way.
+    if '--gen' in sys.argv:
         print("\n=== Step 3: Generating Tailored CVs & Cover Letters ===")
-        if not os.environ.get("GEMINI_API_KEY"):
-            print("Warning: GEMINI_API_KEY not found. Skipping generation.")
-        else:
-            await run_generator()
-            if progress_tracker.is_stop_requested():
-                print("Stop requested. Exiting.")
-                progress_tracker.clear_status()
-                return
+        await run_generator()
+        if progress_tracker.is_stop_requested():
+            print("Stop requested. Exiting.")
+            progress_tracker.clear_status()
+            return
     else:
-        print("\n=== Step 3: Generation Skipped (--no-gen flag used) ===")
+        print("\n=== Step 3: Generation skipped - assets are written on Approve ===")
         
     progress_tracker.set_status("Finishing up...", 0, 0)
     print("\n=== Pipeline Complete ===")

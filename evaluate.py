@@ -10,6 +10,13 @@ import progress_tracker
 import infomaniak
 
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
+
+
+def min_pass_score():
+    """The score at or above which a job goes to To Do - and from which the
+    prompt asks for salary, recruiter, hiring manager and language."""
+    return int(os.environ.get('MIN_PASS_SCORE', 7))
+
 DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
 DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
 
@@ -140,7 +147,8 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                             .replace('{is_promoted}', str(is_promoted)) \
                             .replace('{job_desc}', job_desc) \
                             .replace('{rules_text}', rules_text) \
-                            .replace('{previous_applications}', chr(10).join(previous_applications))
+                            .replace('{previous_applications}', chr(10).join(previous_applications)) \
+                            .replace('{min_score}', str(min_pass_score()))
     
     if custom_instructions:
         prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER FOR RE-EVALUATION:\n{custom_instructions}\n"
@@ -296,11 +304,11 @@ def run_evaluation():
             jd_language = result.get('jd_language', None)
             
             eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
-            pass_score = int(os.environ.get('MIN_PASS_SCORE', 9))
+            pass_score = min_pass_score()
             entry = {'job_id': job_id, 'title': title, 'company': company, 'score': score}
             if score >= pass_score:
                 eval_stats['recent_backlog'].append(entry)
-            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 7)):
+            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 6)):
                 # Worth a look even though they did not clear the bar - otherwise a
                 # run with no 9s produces a summary with nothing to click.
                 eval_stats['near_misses'].append(entry)
@@ -309,7 +317,7 @@ def run_evaluation():
             if score >= 8:
                 print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter} | HM: {hiring_manager_name} | Lang: {jd_language}")
             
-            if score >= int(os.environ.get('MIN_PASS_SCORE', 9)):
+            if score >= min_pass_score():
                 competing = db.get_competing_jobs(company, job_id)
                 if competing:
                     c_id, c_title, c_desc = competing[0]

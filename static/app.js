@@ -171,6 +171,9 @@ function createCard(job) {
     if (job.location) metaHtml += `<span class="meta-tag">📍 ${job.location}</span>`;
     if (salaryStr !== 'Unknown') metaHtml += `<span class="meta-tag">💰 ${salaryStr}</span>`;
     if (recruiterStr) metaHtml += `<span class="meta-tag">${recruiterStr}</span>`;
+    // Promoted listings are paid placements, so the evaluator marks them down.
+    if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
+    if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
 
     card.innerHTML = `
         <div class="card-header">
@@ -330,8 +333,8 @@ function openJobDetails(jobId) {
 
     modalBody.innerHTML = `
         <h2>${job.title}</h2>
-        <h3>${job.company} • ${job.location}</h3>
-        
+        <h3>${job.company} • ${job.location}${job.is_promoted ? ' • 📢 Promoted listing' : ''}</h3>
+
         ${actionSection}
         
         ${notesHtml}
@@ -463,22 +466,47 @@ setInterval(() => {
 
 window.changeJobStatus = async function(jobId, newStatus) {
     try {
-        await fetch(`/api/jobs/${jobId}/status`, {
+        const res = await fetch(`/api/jobs/${jobId}/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         });
-        
+        const data = await res.json().catch(() => ({}));
+
         const idx = allJobs.findIndex(j => j.job_id === jobId);
         if (idx > -1) {
             allJobs[idx].status = newStatus;
+            // Approving commissions the documents; the card stays in Approved
+            // and shows that it is working until the files land.
+            allJobs[idx].writing_assets = !!data.generating;
             renderBoard();
             renderStats();
             closeModal();
         }
+        if (data.generating) waitForAssets(jobId);
     } catch(e) {
         alert("Failed to update status: " + e);
     }
+}
+
+// Poll a freshly approved job until its documents exist (or it lands in
+// Failed), then redraw so the badge clears and the files show up.
+async function waitForAssets(jobId, attempts = 60) {
+    for (let i = 0; i < attempts; i++) {
+        await new Promise(r => setTimeout(r, 5000));
+        let job;
+        try {
+            job = await (await fetch(`/api/jobs/${jobId}`)).json();
+        } catch (e) {
+            continue;
+        }
+        if ((job.files && job.files.length) || job.status === 'failed') {
+            await fetchJobs();
+            return;
+        }
+    }
+    const idx = allJobs.findIndex(j => j.job_id === jobId);
+    if (idx > -1) { allJobs[idx].writing_assets = false; renderBoard(); }
 }
 
 window.showApplyOptions = function(jobId) {

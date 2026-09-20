@@ -55,7 +55,7 @@ def get_jobs():
     conn = get_db_connection()
     jobs = conn.execute('''
         SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
-               estimated_salary, is_recruiter, description, application_notes
+               estimated_salary, is_recruiter, is_promoted, description, application_notes
         FROM jobs
         WHERE status NOT IN ('rejected', 'scored')
            OR created_at >= datetime('now', ?)
@@ -111,15 +111,26 @@ def update_status(job_id):
         
     conn.commit()
     conn.close()
-    
-    return jsonify({'success': True, 'status': new_status})
+
+    # Approving is what commissions the CV and cover letter - the nightly run
+    # no longer writes assets for everything that clears the bar. Skip it when
+    # the job already has documents (re-approving after a detour through
+    # Failed, say); use Regenerate Assets to deliberately redo them.
+    generating = False
+    if new_status == 'approved' and old_status != 'approved' and not get_files_for_job(job_id):
+        import threading
+        threading.Thread(target=bg_generate,
+                         args=(job_id, None), kwargs={'final_status': 'approved'}).start()
+        generating = True
+
+    return jsonify({'success': True, 'status': new_status, 'generating': generating})
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):
     conn = get_db_connection()
     job = conn.execute('''
         SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
-               estimated_salary, is_recruiter, description, application_notes
+               estimated_salary, is_recruiter, is_promoted, description, application_notes
         FROM jobs WHERE job_id = ?
     ''', (job_id,)).fetchone()
     conn.close()
@@ -131,22 +142,27 @@ def get_job(job_id):
     j_dict['files'] = get_files_for_job(job_id)
     return jsonify(j_dict)
 
-def bg_generate(job_id, instructions):
+def bg_generate(job_id, instructions, final_status='generated'):
     import asyncio
     from generator import generate_for_job
-    asyncio.run(generate_for_job(job_id, instructions))
+    asyncio.run(generate_for_job(job_id, instructions, final_status=final_status))
 
 @app.route('/api/jobs/<job_id>/regenerate', methods=['POST'])
 def regenerate_job(job_id):
     conn = get_db_connection()
+    row = conn.execute('SELECT status FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    # Regenerating an approved job should hand it back to Approved rather than
+    # dropping it into To Do.
+    final_status = 'approved' if row and row['status'] == 'approved' else 'generated'
     conn.execute('UPDATE jobs SET status = "generating" WHERE job_id = ?', (job_id,))
     conn.commit()
     conn.close()
-    
+
     data = request.json or {}
     instructions = data.get('instructions')
     import threading
-    t = threading.Thread(target=bg_generate, args=(job_id, instructions))
+    t = threading.Thread(target=bg_generate, args=(job_id, instructions),
+                         kwargs={'final_status': final_status})
     t.start()
     return jsonify({'success': True})
 
@@ -174,7 +190,7 @@ def run_scraper_bg(mode='full'):
     try:
         cmd = [sys.executable, 'main.py']
         if mode == 'eval_only':
-            cmd.extend(['--no-scrape', '--no-gen'])
+            cmd.append('--no-scrape')
         subprocess.run(cmd)
     except Exception as e:
         print(f"Scraper error: {e}")
@@ -301,7 +317,7 @@ def get_settings():
             out[key] = {'content': '', 'path': path}
         except Exception as e:
             return jsonify({'error': f'Could not read {filename}: {e}'}), 500
-    out['min_pass_score'] = os.environ.get('MIN_PASS_SCORE', '8')
+    out['min_pass_score'] = os.environ.get('MIN_PASS_SCORE', '7')
     return jsonify(out)
 
 @app.route('/api/settings', methods=['POST'])

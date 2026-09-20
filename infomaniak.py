@@ -27,13 +27,21 @@ import os
 import requests
 
 API_ROOT = 'https://api.infomaniak.com'
-# Tried in order. The 122B answers a scoring prompt in a few seconds; the
-# 397B is markedly slower (~40s) and only worth reaching for when the
-# smaller one is down.
+# Tried in order. Timings are per real evaluation prompt (career dossier +
+# job description + rules, ~10k tokens), averaged over three backlog jobs:
+#
+#   Mistral-Small-4-119B   1.5s   scored 9/7/7 where Gemini said 8/8/8
+#   Apertus-v1.5-70B       4.7s   scored 9/7/7
+#   gemma-4-31B            4.0s   scored 7/7/6, consistently a shade harsher
+#   Kimi-K2.6             20.0s   returned unparseable JSON on 2 of 3
+#   Qwen3.5-122B         129.1s   one connection timeout
+#
+# Hence Mistral first. Kimi and Qwen are left out: the first cannot hold the
+# schema, the second is slow enough to stall a nightly run on its own.
 DEFAULT_MODELS = [
-    'Qwen/Qwen3.5-122B-A10B-FP8',
     'mistralai/Mistral-Small-4-119B-2603',
-    'Qwen/Qwen3.5-397B-A17B-FP8',
+    'swiss-ai/Apertus-v1.5-70B',
+    'google/gemma-4-31B-it',
 ]
 TIMEOUT = 180
 

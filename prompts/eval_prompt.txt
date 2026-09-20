@@ -23,12 +23,12 @@ CRITICAL DUPLICATE RULE: If this job is highly likely to be the exact same role 
 
 Provide a brief reasoning, and list any key missing skills.
 
-If the score you are giving is 8 or higher, you MUST also determine:
+If the score you are giving is {min_score} or higher, you MUST also determine:
 1. "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR") based on the location, role, and typical market rates. If completely unknown, output "Unknown".
 2. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
 3. "hiring_manager_name": The full name of the hiring manager or recruiter, IF it is clearly stated in the job description. If not stated, output null.
 4. "jd_language": The language the job description is primarily written in (e.g. "English", "French", "German").
-If the score is below 8, you may leave these as null.
+If the score is below {min_score}, you may leave these as null.
 
 Your response must be valid JSON in the following format:
 {

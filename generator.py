@@ -367,7 +367,7 @@ def convert_to_pdf_libreoffice(docx_path):
         docx_path
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-async def generate_for_job(job_id, custom_instructions=None):
+async def generate_for_job(job_id, custom_instructions=None, final_status='generated'):
     import db
     conn = db.get_connection()
     cursor = conn.cursor()
@@ -502,7 +502,9 @@ async def generate_for_job(job_id, custom_instructions=None):
         print(f"Failed to generate JD PDF for {job_id}: {pdf_err}")
         
     # Update status
-    cursor.execute('UPDATE jobs SET status = "generated" WHERE job_id = ?', (job_id,))
+    # Generation triggered from the Approve button must leave the job in the
+    # Approved column, not bounce it back to To Do.
+    cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (final_status, job_id))
     conn.commit()
     conn.close()
     print(f"Finished generating assets for {company}.")

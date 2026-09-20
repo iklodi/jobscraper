@@ -108,7 +108,7 @@ async def run_scraper():
                 "in the browser window that is already open.\n\n"
                 "This run waits **5 minutes** for the login, then aborts; scraping resumes "
                 "on the next scheduled run once you are logged in.\n\n"
-                f"Dashboard: {os.environ.get('DASHBOARD_URL', 'http://localhost:5050')}"
+                f"Dashboard: {notifier.dashboard_url()}"
             )
             try:
                 await page.wait_for_url('**/feed/**', timeout=300000)

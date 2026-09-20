@@ -2042,8 +2042,13 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
     progress_tracker.clear_status()
     release_run_lock()
-    progress_tracker.set_result(run_summary(results, single=bool(job_ids) and len(jobs) == 1))
-    _notify(results, single=bool(job_ids) and len(jobs) == 1)
+    single = bool(job_ids) and len(jobs) == 1
+    # The dashboard always says what happened. Email is for batches only:
+    # filling one form at a time is something you are sat in front of, and a
+    # mail per form buries the summaries that are actually worth reading.
+    progress_tracker.set_result(run_summary(results, single=single))
+    if not single:
+        _notify(results, single=False)
     return results
 
 
@@ -2072,32 +2077,25 @@ def run_summary(results, single=False):
 
 
 def _notify(results, single=False):
-    """Email the outcome. One job gets a direct link; a batch gets a list."""
+    """Email a batch outcome. Single-job runs report through the dashboard
+    instead - see run_applications."""
     if not results:
         return
-    dashboard = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
+    base = notifier.dashboard_url()
     summary = run_summary(results, single=single)
 
     lines = [f'# {summary["headline"]}\n']
     for j in summary['jobs']:
-        line = f'- **{j["company"]}** - {j["word"]}'
-        # A single-job run is something the candidate asked for by hand and is
-        # waiting on, so link straight to it. A batch would be a wall of links.
-        if single:
-            line += f'\n\n  [Open this application]({dashboard}/?job_id={j["job_id"]})'
-        lines.append(line)
+        lines.append(f'- **{j["company"]}** - {j["word"]}'
+                     f'\n\n  [Open this application]({base}/?job_id={j["job_id"]})')
 
     if any(j['status'] == 'ready_to_submit' for j in summary['jobs']):
         lines.append(
             '\nThe filled forms are open in the browser on the machine that ran this. '
             'Check them, submit the ones you want, then press "Close forms" on the dashboard.'
         )
-    if not single:
-        lines.append(f'\nReview them on the dashboard: {dashboard}')
-
-    subject = ('AI Job Scraper - ' +
-               (summary['headline'] if single else 'Applications processed'))
-    notifier.send_email(subject, '\n'.join(lines))
+    lines.append(f'\nReview them on the dashboard: {base}')
+    notifier.send_email('AI Job Scraper - Applications processed', '\n'.join(lines))
 
 
 if __name__ == '__main__':

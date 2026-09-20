@@ -5,12 +5,17 @@ import markdown
 import db
 import urllib.parse
 
+def dashboard_url():
+    """Base URL for links that have to work from another device."""
+    return os.environ.get('DASHBOARD_URL', 'http://localhost:5050').rstrip('/')
+
+
 def _job_links(job_id):
     """The ' - [View Details] | [LinkedIn]' suffix for a job line."""
     if not job_id:
         return ""
-    dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
-    links = [f"[View Details]({dashboard_url}/?job_id={job_id})"]
+    base = dashboard_url()
+    links = [f"[View Details]({base}/?job_id={job_id})"]
     try:
         job_links = db.get_job_links(job_id)
         if job_links.get('linkedin'):
@@ -74,8 +79,7 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
     else:
         lines.append("- No status counts available.")
 
-    dashboard_url = os.environ.get('DASHBOARD_URL', 'http://localhost:5050')
-    lines.append(f"\n---\n[Open the dashboard]({dashboard_url})")
+    lines.append(f"\n---\n[Open the dashboard]({dashboard_url()})")
 
     return "\n".join(lines)
 

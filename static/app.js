@@ -206,9 +206,16 @@ function openJobDetails(jobId) {
             <small>This usually takes 20-40 seconds. The data will update automatically.</small>
         </div>`;
     } else {
+        // The applier writes its screenshots into the same folder as the CV
+        // and cover letter, so split them out: documents to send, versus the
+        // record of what was actually sent.
+        const allFiles = job.files || [];
+        const shots = allFiles.filter(f => f.name.endsWith('.png'));
+        const docs = allFiles.filter(f => !f.name.endsWith('.png'));
+
         let filesHtml = '';
-        if (job.files && job.files.length > 0) {
-            const sortedFiles = [...job.files].sort((a, b) => {
+        if (docs.length > 0) {
+            const sortedFiles = [...docs].sort((a, b) => {
                 const aIsCV = a.name.includes('CV');
                 const bIsCV = b.name.includes('CV');
                 if (aIsCV && !bIsCV) return -1;
@@ -229,11 +236,42 @@ function openJobDetails(jobId) {
                 </div>
             `;
         }
+
+        let traceHtml = '';
+        if (shots.length > 0) {
+            // Trace shots are named <job>_<NN>_<label>.png, so the number is the
+            // running order. Older runs have no number; those sort to the end.
+            const stepOf = n => {
+                const m = n.match(/_(\d{2})_/);
+                return m ? parseInt(m[1], 10) : 999;
+            };
+            const labelOf = n => {
+                const m = n.match(/_\d{2}_(.+)\.png$/);
+                return m ? m[1].replace(/_/g, ' ') : n.replace(/\.png$/, '');
+            };
+            const ordered = [...shots].sort((a, b) => stepOf(a.name) - stepOf(b.name)
+                                                   || a.name.localeCompare(b.name));
+            traceHtml = `
+                <div class="detail-section">
+                    <h4>Application Trace (${ordered.length} step${ordered.length === 1 ? '' : 's'})</h4>
+                    <div class="trace-grid">
+                        ${ordered.map(f => {
+                            const step = stepOf(f.name);
+                            return `<a href="${f.url}" target="_blank" class="trace-shot" title="${f.name}">
+                                <img src="${f.url}" alt="${labelOf(f.name)}" loading="lazy">
+                                <span class="trace-caption">${step < 999 ? step + '. ' : ''}${labelOf(f.name)}</span>
+                            </a>`;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        }
         
         let contextButtonsHtml = '';
         if (['generated', 'synced', 'backlog', 'to_apply'].includes(job.status)) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">✓ Approve</button>
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
                 <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
             `;
         } else if (job.status === 'approved') {
@@ -246,16 +284,18 @@ function openJobDetails(jobId) {
         } else if (job.status === 'ready_to_submit') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Submitted - Mark as Applied</button>
-                <button class="btn" onclick="triggerApply('${job.job_id}')">Re-fill Form</button>
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now (retry)</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Move to Account Required</button>
             `;
         } else if (job.status === 'account_required') {
             contextButtonsHtml = `
+                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
@@ -268,6 +308,7 @@ function openJobDetails(jobId) {
 
         actionSection = `
             ${filesHtml}
+            ${traceHtml}
             <div class="detail-section">
                 ${contextButtonsHtml ? `<div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">${contextButtonsHtml}</div>` : ''}
                 

@@ -493,3 +493,44 @@ h1 {
     background: rgba(59, 130, 246, 0.2);
     color: #93c5fd;
 }
+
+/* Application trace: the applier's screenshot of every step, newest run in
+   the same folder as the documents. Thumbnails open the full-size shot. */
+.trace-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+
+.trace-shot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    text-decoration: none;
+    color: var(--text-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 0.4rem;
+    background: rgba(255, 255, 255, 0.03);
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.trace-shot:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--accent);
+}
+
+.trace-shot img {
+    width: 100%;
+    height: 96px;
+    object-fit: cover;
+    object-position: top center;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.trace-caption {
+    font-size: 0.72rem;
+    line-height: 1.25;
+    word-break: break-word;
+}

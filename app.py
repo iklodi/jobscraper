@@ -53,13 +53,31 @@ REJECTED_BOARD_DAYS = int(os.environ.get('REJECTED_BOARD_DAYS', 7))
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
     conn = get_db_connection()
+    # applied_at: when the job actually moved to Applied. Older rows predate
+    # job_history, so fall back to the last thing that happened to them and
+    # finally to when they were scraped, rather than sorting them as blank.
     jobs = conn.execute('''
-        SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
-               estimated_salary, is_recruiter, is_promoted, description, application_notes
-        FROM jobs
-        WHERE status NOT IN ('rejected', 'scored')
-           OR created_at >= datetime('now', ?)
-        ORDER BY score DESC, created_at DESC
+        SELECT j.job_id, j.title, j.company, j.location, j.link, j.score, j.reasoning,
+               j.status, j.created_at, j.estimated_salary, j.is_recruiter, j.is_promoted,
+               j.description, j.application_notes,
+               COALESCE(
+                   (SELECT MAX(h.created_at) FROM job_history h
+                     WHERE h.job_id = j.job_id AND h.new_status = 'applied'),
+                   (SELECT MAX(h.created_at) FROM job_history h
+                     WHERE h.job_id = j.job_id),
+                   j.created_at
+               ) AS applied_at,
+               -- Last time anything happened to this job: a move between
+               -- columns or a note. Falls back to when it was scraped.
+               COALESCE(
+                   (SELECT MAX(h.created_at) FROM job_history h
+                     WHERE h.job_id = j.job_id),
+                   j.created_at
+               ) AS updated_at
+        FROM jobs j
+        WHERE j.status NOT IN ('rejected', 'scored')
+           OR j.created_at >= datetime('now', ?)
+        ORDER BY updated_at DESC
     ''', (f'-{REJECTED_BOARD_DAYS} days',)).fetchall()
     
     job_list = []

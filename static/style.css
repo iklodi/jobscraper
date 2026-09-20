@@ -593,3 +593,9 @@ h1 {
     color: #05230f !important;
     font-weight: 600;
 }
+
+/* When an application actually went out, on the Applied board. */
+.meta-applied-at {
+    background: rgba(236, 72, 153, 0.18);
+    color: #fbcfe8;
+}

@@ -117,6 +117,16 @@ function renderBoard() {
         }
     });
     
+    // Newest first everywhere. Applied goes by when the application actually
+    // went out; every other board by when the job was last touched, so
+    // whatever you just moved or annotated is at the top.
+    const stamp = (job, status) => status === 'applied'
+        ? (job.applied_at || job.updated_at || job.created_at || '')
+        : (job.updated_at || job.created_at || '');
+    Object.keys(groupedJobs).forEach(status => {
+        groupedJobs[status].sort((a, b) => stamp(b, status).localeCompare(stamp(a, status)));
+    });
+
     // Render columns with limits
     Object.entries(columns).forEach(([status, col]) => {
         if (col) {
@@ -127,7 +137,7 @@ function renderBoard() {
             // Slice the array up to the limit
             const visibleJobs = jobsInCol.slice(0, limit);
             visibleJobs.forEach(job => {
-                col.appendChild(createCard(job));
+                col.appendChild(createCard(job, status));
             });
             
             // Add Load More button if needed
@@ -158,7 +168,18 @@ function renderBoard() {
     setupDragAndDrop();
 }
 
-function createCard(job) {
+
+// "2026-09-20 14:38:42.834506" -> "20 Sep 2026, 14:38". The value is written
+// by the server in local time, so it is parsed as local, not UTC.
+function formatStamp(raw) {
+    if (!raw) return '';
+    const d = new Date(String(raw).split('.')[0].replace(' ', 'T'));
+    if (isNaN(d)) return String(raw).slice(0, 16);
+    return d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric',
+                                         hour: '2-digit', minute: '2-digit' });
+}
+
+function createCard(job, columnStatus) {
     const card = document.createElement('div');
     card.className = 'card';
     card.draggable = true;
@@ -174,6 +195,11 @@ function createCard(job) {
     // Promoted listings are paid placements, so the evaluator marks them down.
     if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
     if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
+    // On the Applied board the date that matters is when it went out.
+    if (columnStatus === 'applied' && (job.applied_at || job.created_at)) {
+        metaHtml += `<span class="meta-tag meta-applied-at" title="Applied on">📮 ${
+            formatStamp(job.applied_at || job.created_at)}</span>`;
+    }
 
     card.innerHTML = `
         <div class="card-header">

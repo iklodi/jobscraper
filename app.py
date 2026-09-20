@@ -144,8 +144,10 @@ def get_job(job_id):
 
 def bg_generate(job_id, instructions, final_status='generated'):
     import asyncio
-    from generator import generate_for_job
-    asyncio.run(generate_for_job(job_id, instructions, final_status=final_status))
+    import importlib
+    import generator
+    importlib.reload(generator)          # same reason as run_applier_bg
+    asyncio.run(generator.generate_for_job(job_id, instructions, final_status=final_status))
 
 @app.route('/api/jobs/<job_id>/regenerate', methods=['POST'])
 def regenerate_job(job_id):
@@ -167,8 +169,10 @@ def regenerate_job(job_id):
     return jsonify({'success': True})
 
 def bg_reevaluate(job_id, instructions):
-    from evaluate import evaluate_single_job
-    evaluate_single_job(job_id, instructions)
+    import importlib
+    import evaluate
+    importlib.reload(evaluate)           # same reason as run_applier_bg
+    evaluate.evaluate_single_job(job_id, instructions)
 
 @app.route('/api/jobs/<job_id>/reevaluate', methods=['POST'])
 def reevaluate_job(job_id):
@@ -234,7 +238,14 @@ apply_thread = None
 def run_applier_bg(limit, job_ids, auto_submit=False):
     global apply_thread
     import asyncio
-    from applier import run_applications
+    import importlib
+    import applier
+    # The dashboard is long-lived, so an edit to applier.py after it started
+    # would otherwise never take effect - a run would quietly use the code the
+    # process imported hours ago. Reloading here is safe: apply_thread already
+    # prevents two runs at once.
+    importlib.reload(applier)
+    run_applications = applier.run_applications
     try:
         asyncio.run(run_applications(limit=limit, job_ids=job_ids, auto_submit=auto_submit))
     except Exception as e:

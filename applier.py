@@ -98,6 +98,13 @@ COLLECT_FIELDS_JS = """
             const l = document.getElementById(labelledby);
             if (l) return l.innerText.trim();
         }
+        // An upload widget's wrapper says "Choose file" and lists accepted
+        // formats - neither is the question. These inputs usually carry it on
+        // name= instead ("Resume", "Diplomas & Certificates"), so prefer that.
+        if (el.type === 'file') {
+            const n = (el.name || '').trim();
+            if (n && /[a-z]{3}/i.test(n) && !/^input[_-]/i.test(n)) return n;
+        }
         const wrapper = el.closest('div,fieldset,section,li');
         if (wrapper) {
             const t = wrapper.innerText.trim().split('\\n')[0];
@@ -113,8 +120,16 @@ COLLECT_FIELDS_JS = """
         if (HONEYPOT_TEXT.test(label)) return true;
         if (HONEYPOT_NAME.test(el.name || '')) return true;
         // File inputs are legitimately hidden behind styled upload buttons, so the
-        // visibility heuristics below would wrongly discard them.
+        // visibility heuristics below would wrongly discard them. So are radios
+        // and checkboxes: nearly every design system sets opacity:0 on the real
+        // input and paints a <label> on top, which is exactly what tick_box
+        // exists to click. Discarding those loses whole questions - a Title
+        // radio group went unanswered and unreported because of this.
         if (el.type === 'file') return false;
+        if (el.type === 'radio' || el.type === 'checkbox') {
+            const lab = el.labels && el.labels[0];
+            if (lab && lab.getBoundingClientRect().width > 0) return false;
+        }
         const st = window.getComputedStyle(el);
         if (st.opacity === '0' || st.visibility === 'hidden' || st.display === 'none') return true;
         const r = el.getBoundingClientRect();
@@ -140,18 +155,57 @@ COLLECT_FIELDS_JS = """
             placeholder: el.placeholder || '',
             required: el.required || el.getAttribute('aria-required') === 'true',
             value: el.type === 'file' ? '' : (el.value || ''),
+            // Raw surroundings. Heuristics cannot reliably turn a styled widget
+            // into a question - an upload wrapper says "Choose file" and lists
+            // accepted formats - so hand the model the text near the field and
+            // let it decide what is being asked.
+            context: (() => {
+                let box = el.closest('div,fieldset,section,li') || el.parentElement;
+                for (let hop = 0; box && hop < 3; hop += 1) {
+                    const t = (box.innerText || '').replace(/\\s+/g, ' ').trim();
+                    if (t.length > 3) return t.slice(0, 300);
+                    box = box.parentElement;
+                }
+                return '';
+            })(),
         };
         if (el.tagName.toLowerCase() === 'select') {
             entry.options = Array.from(el.options).map((o) => o.text.trim()).filter(Boolean);
         }
         if (el.type === 'radio' || el.type === 'checkbox') {
             // The option's own label is "Yes"/"No"; the question lives on the group.
-            const grp = el.closest('fieldset,[role=radiogroup],[role=group]');
-            if (grp) {
-                const lg = grp.querySelector('legend');
-                const t = (lg ? lg.innerText : grp.getAttribute('aria-label') || '').trim();
-                if (t) entry.group = t.split('\\n')[0].slice(0, 200);
+            const siblings = el.name
+                ? Array.from(root.querySelectorAll(
+                    el.tagName.toLowerCase() + '[name="' + CSS.escape(el.name) + '"]'))
+                : [el];
+            let grp = el.parentElement;
+            while (grp && grp !== document.body
+                   && !siblings.every((s) => grp.contains(s))) grp = grp.parentElement;
+            const explicit = el.closest('[role=radiogroup],[role=group]');
+            const lg = grp ? grp.querySelector('legend') : null;
+            let t = (lg ? lg.innerText
+                        : (explicit && explicit.getAttribute('aria-label')) || '').trim();
+            if (!t && grp) {
+                // The question is the line just above the options, so read the
+                // text that precedes the first one rather than the first line
+                // of a container that may hold half the form.
+                const opts = new Set(siblings
+                    .map((s) => s.labels && s.labels[0] ? s.labels[0].innerText.trim() : '')
+                    .filter(Boolean));
+                let node = grp.previousElementSibling;
+                while (node && !(node.innerText || '').trim()) node = node.previousElementSibling;
+                if (node) {
+                    const lines = (node.innerText || '').trim().split('\\n')
+                        .map((x) => x.trim()).filter((x) => x && !opts.has(x));
+                    if (lines.length) t = lines[lines.length - 1];
+                }
+                if (!t) {
+                    const lines = (grp.innerText || '').trim().split('\\n')
+                        .map((x) => x.trim()).filter((x) => x && !opts.has(x));
+                    if (lines.length) t = lines[0];
+                }
             }
+            if (t) entry.group = t.slice(0, 200);
         }
         out.push(entry);
         idx += 1;
@@ -219,6 +273,9 @@ For every field, decide what to do. Output valid JSON only:
   "unanswered": [
     {{"idx": 3, "question": "the question as shown", "reason": "why the profile does not answer it"}}
   ],
+  "uploads": [
+    {{"idx": 7, "document": "cv|cover_letter|diplomas|reference_letter|none"}}
+  ],
   "page_kind": "application_form|login_or_register|job_description_only|confirmation|other",
   "notes": "anything the human should know"
 }}
@@ -246,7 +303,18 @@ ABSOLUTE RULES:
 - For "check" (checkbox/radio) use value "true" or "false". Only tick consent or
   affirmation boxes when the profile clearly supports it; never tick anything that
   asserts a fact you cannot verify from the profile.
-- Skip file inputs entirely (action "skip") - uploads are handled separately.
+- Skip file inputs entirely in "actions" (action "skip"); route them in "uploads" instead.
+
+CHOOSING A DOCUMENT FOR EACH FILE INPUT ("uploads"):
+Every file field gets one entry. Available documents:
+{documents}
+Read the field's "label" and "context" together - an upload widget's own text
+is "Choose file" and a list of accepted formats, so the question is usually in
+"label" or "name". Match on meaning, not wording: "Diplomas & Certificates",
+"Diplomes", "Zeugnisse" and "Qualifications" all want the diplomas document,
+while "Reference" or "Recommendation" wants the reference letter. Use "none"
+when no available document fits - never send a document the field did not ask
+for.
 - Skip any field whose label tells you not to fill it, or that is clearly a bot trap;
   filling one gets the whole application rejected as spam.
 - Skip password fields and anything that is part of account creation; set page_kind to
@@ -322,6 +390,15 @@ MAPPING_SCHEMA = {
                     'reason': {'type': 'string'},
                 },
                 'required': ['question'],
+            },
+        },
+        'uploads': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {'idx': {'type': 'integer'},
+                               'document': {'type': 'string'}},
+                'required': ['idx', 'document'],
             },
         },
         'page_kind': {'type': 'string'},
@@ -1096,6 +1173,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                 description=(description or '')[:3000],
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
+                documents=describe_documents(attachments),
             ), MAPPING_SCHEMA)
             kind = plan.get('page_kind') if plan else None
             if kind == 'confirmation':
@@ -1114,7 +1192,8 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
-        uploaded = await upload_documents(page, fields, cv_path, cl_path, attachments, trace)
+        uploaded = await upload_documents(page, fields, cv_path, cl_path, attachments,
+                                          trace, (plan or {}).get('uploads'))
         uploaded_all.extend(uploaded)
 
         shot = await trace.shot(page, f'step{step}_{step_name}') if trace else None
@@ -1277,7 +1356,28 @@ def attachment_paths(profile):
     return resolved
 
 
-async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None):
+DOCUMENT_BLURBS = {
+    'cv': 'the tailored CV / resume for this job',
+    'cover_letter': 'the tailored cover letter for this job',
+    'diplomas': 'university diplomas and work certificates, in one PDF',
+    'reference_letter': 'a written reference letter from a former employer',
+}
+
+
+def describe_documents(attachments):
+    """The document menu the model picks from, limited to what actually exists."""
+    lines = []
+    for key in ('cv', 'cover_letter', 'diplomas', 'reference_letter'):
+        if attachments.get(key):
+            lines.append(f'  - "{key}": {DOCUMENT_BLURBS[key]}')
+    for key, path in sorted(attachments.items()):
+        if key not in DOCUMENT_BLURBS and path:
+            lines.append(f'  - "{key}": {os.path.basename(path)}')
+    return '\n'.join(lines) or '  (none configured)'
+
+
+async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None,
+                           uploads=None):
     """Attach the right stored document to each file input on the page.
 
     Records what went where on `trace`, so the note and the manifest can say
@@ -1286,6 +1386,7 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
     attachments = dict(attachments or {})
     attachments.setdefault('cv', cv_path)
     attachments.setdefault('cover_letter', cl_path)
+    routing = {u['idx']: u.get('document') for u in (uploads or []) if 'idx' in u}
 
     uploaded = []
     for field in fields:
@@ -1295,17 +1396,28 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
             [field.get('label', ''), field.get('name', ''), field.get('id', '')]
         ).lower()
         target = None
-        for key, pattern in ATTACHMENT_RULES:
-            if re.search(pattern, haystack):
-                target = attachments.get(key)
-                if not target:
-                    print(f'  -> no "{key}" attachment configured for field '
-                          f'"{(field.get("label") or "")[:50]}"')
-                break
-        else:
-            # An unlabelled first file input is almost always the CV.
-            if not uploaded:
-                target = attachments.get('cv')
+        chosen = routing.get(field['idx'])
+        if chosen == 'none':
+            continue
+        if chosen:
+            target = attachments.get(chosen)
+            if not target:
+                print(f'  -> model asked for "{chosen}" but no such attachment is '
+                      f'configured; falling back to the label rules')
+        if not target:
+            # No routing, or a document the profile does not have: fall back to
+            # matching the label, which is deterministic and needs no model.
+            for key, pattern in ATTACHMENT_RULES:
+                if re.search(pattern, haystack):
+                    target = attachments.get(key)
+                    if not target:
+                        print(f'  -> no "{key}" attachment configured for field '
+                              f'"{(field.get("label") or "")[:50]}"')
+                    break
+            else:
+                # An unlabelled first file input is almost always the CV.
+                if not uploaded:
+                    target = attachments.get('cv')
         if not target or not os.path.exists(target):
             continue
         try:
@@ -1569,6 +1681,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
         return 'failed', 'No generated CV/cover letter found for this job - regenerate the assets first.'
 
     trace = Trace(job_id, folder)
+    attachments = attachment_paths(profile)
     target, mode = await find_apply_url(page, link, job_id, trace)
     if not target and mode == 'easy_apply_manual':
         trace.write_manifest(job, 'ready_to_submit', False)
@@ -1638,6 +1751,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
                 description=(description or '')[:4000],
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
+                documents=describe_documents(attachments),
             ), MAPPING_SCHEMA)
             if not plan:
                 return 'failed', f'Could not map the form fields (every model failed) at {apply_url}.'
@@ -1683,8 +1797,6 @@ async def process_job(page, client, profile, job, auto_submit=False):
             + (f'\nWhat the page looked like: {shot}' if shot else '')
             + f'\nApply manually; documents are in: {folder}'
         )
-
-    attachments = attachment_paths(profile)
 
     step_lines, reached_submit, submitted = await fill_wizard(
         target, client, profile, job, cv_path, cl_path, attachments, folder,

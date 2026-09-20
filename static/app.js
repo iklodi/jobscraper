@@ -117,14 +117,13 @@ function renderBoard() {
         }
     });
     
-    // Newest first everywhere. Applied goes by when the application actually
-    // went out; every other board by when the job was last touched, so
-    // whatever you just moved or annotated is at the top.
-    const stamp = (job, status) => status === 'applied'
-        ? (job.applied_at || job.updated_at || job.created_at || '')
-        : (job.updated_at || job.created_at || '');
+    // Every board newest first, by when the job was last touched - a move
+    // between columns or a note - so whatever you just handled is on top.
+    // Applied cards still *display* the date the application went out, which
+    // is the same moment today but does not move when a note is added later.
+    const stamp = (job) => job.updated_at || job.created_at || '';
     Object.keys(groupedJobs).forEach(status => {
-        groupedJobs[status].sort((a, b) => stamp(b, status).localeCompare(stamp(a, status)));
+        groupedJobs[status].sort((a, b) => stamp(b).localeCompare(stamp(a)));
     });
 
     // Render columns with limits

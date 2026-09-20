@@ -23,6 +23,8 @@ Gemini and Groq exactly as before.
 
 import json
 import os
+import random
+import time
 
 import requests
 
@@ -44,6 +46,20 @@ DEFAULT_MODELS = [
     'google/gemma-4-31B-it',
 ]
 TIMEOUT = 180
+RETRIES = 5
+# 429 is the throttle, the 5xx family shows up as a transient under load.
+RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+
+
+def _retry_after(res, fallback):
+    """Honour Retry-After when the server sends it, jittered otherwise."""
+    header = res.headers.get('Retry-After')
+    if header:
+        try:
+            return min(float(header), 60)
+        except ValueError:
+            pass
+    return fallback + random.uniform(0, 1)
 
 
 def get_config():
@@ -84,8 +100,11 @@ def _strip_fence(text):
     return text
 
 
-def chat_json(prompt, schema, temperature=0.1):
+def chat_json(prompt, schema, temperature=0.1, models=None):
     """Ask Infomaniak for an object matching `schema` (a JSON Schema dict).
+
+    `models` overrides the configured cascade, for callers that want one
+    named model rather than whichever answers first.
 
     Returns None if unconfigured or if every model in the cascade fails, so
     the caller can fall through to its existing providers.
@@ -93,7 +112,8 @@ def chat_json(prompt, schema, temperature=0.1):
     config = get_config()
     if not config:
         return None
-    token, product_id, models = config
+    token, product_id, cascade = config
+    models = models or cascade
     url = f'{API_ROOT}/2/ai/{product_id}/openai/v1/chat/completions'
     headers = {'Authorization': f'Bearer {token}',
                'Content-Type': 'application/json'}
@@ -102,20 +122,36 @@ def chat_json(prompt, schema, temperature=0.1):
         'json_schema': {'name': 'result', 'strict': True, 'schema': schema},
     }
 
+    body_for = lambda model: {
+        'model': model,
+        'messages': [{'role': 'user', 'content': prompt}],
+        'response_format': response_format,
+        'temperature': temperature,
+    }
+
     for model in models:
-        try:
-            res = requests.post(url, headers=headers, timeout=TIMEOUT, json={
-                'model': model,
-                'messages': [{'role': 'user', 'content': prompt}],
-                'response_format': response_format,
-                'temperature': temperature,
-            })
-            res.raise_for_status()
-            content = res.json()['choices'][0]['message']['content']
-            return json.loads(_strip_fence(content))
-        except Exception as e:
-            print(f"  -> Infomaniak {model} failed: {e}")
-            continue
+        delay = 2
+        for attempt in range(RETRIES):
+            try:
+                res = requests.post(url, headers=headers, timeout=TIMEOUT,
+                                    json=body_for(model))
+                # The API throttles hard under concurrency; back off and retry
+                # rather than burning the model slot in the cascade.
+                if res.status_code in RETRY_STATUS:
+                    wait = _retry_after(res, delay)
+                    if attempt < RETRIES - 1:
+                        time.sleep(wait)
+                        delay = min(delay * 2, 30)
+                        continue
+                res.raise_for_status()
+                content = res.json()['choices'][0]['message']['content']
+                return json.loads(_strip_fence(content))
+            except Exception as e:
+                if attempt < RETRIES - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 30)
+                    continue
+                print(f"  -> Infomaniak {model} failed: {e}")
     return None
 
 

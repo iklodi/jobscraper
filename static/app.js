@@ -272,11 +272,13 @@ function openJobDetails(jobId) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">✓ Approve</button>
                 <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Mark as Account Required</button>
@@ -285,17 +287,20 @@ function openJobDetails(jobId) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Submitted - Mark as Applied</button>
                 <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now (retry)</button>
+                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now (retry)</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Move to Account Required</button>
             `;
         } else if (job.status === 'account_required') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
@@ -631,14 +636,23 @@ window.triggerScrape = async function(mode = 'full') {
     }
 }
 
-window.triggerApply = async function(jobId = null) {
-    const scope = jobId
-        ? "Apply for this job now?"
-        : "Apply for the top approved jobs now?";
-    if (!confirm(scope + "\n\nA browser will open the employer's form, fill it from your profile "
-        + "and SUBMIT it.\n\nIt will not submit if any required field is empty, any question went "
-        + "unanswered, or a field refused input - those land in 'Ready to Submit' for you instead. "
-        + "Every step is screenshotted.")) return;
+// Fill without sending: same run, the applier just stops at the submit
+// button. Everything lands in Ready to Submit for a human to send.
+window.triggerFill = function(jobId = null) {
+    return triggerApply(jobId, false);
+}
+
+window.triggerApply = async function(jobId = null, submit = true) {
+    const what = jobId ? "this job" : "the top approved jobs";
+    const scope = submit ? `Apply for ${what} now?` : `Fill in the form for ${what}, without sending?`;
+    const detail = submit
+        ? "A browser will open the employer's form, fill it from your profile and SUBMIT it."
+            + "\n\nIt will not submit if any required field is empty, any question went "
+            + "unanswered, or a field refused input - those land in 'Ready to Submit' for you instead."
+        : "A browser will open the employer's form and fill it from your profile, then stop at the "
+            + "submit button.\n\nNothing is sent. The job lands in 'Ready to Submit' so you can "
+            + "check it and submit yourself.";
+    if (!confirm(scope + "\n\n" + detail + "\n\nEvery step is screenshotted.")) return;
 
     const btnApply = document.getElementById('run-apply-btn');
     const hoverBox = document.getElementById('pipeline-status-hover');
@@ -646,7 +660,7 @@ window.triggerApply = async function(jobId = null) {
     if (hoverBox) hoverBox.classList.add('active');
 
     try {
-        const body = jobId ? { job_ids: [jobId] } : { limit: 5 };
+        const body = jobId ? { job_ids: [jobId], submit } : { limit: 5, submit };
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -1138,6 +1138,15 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
     Returns (summary_lines, reached_submit).
     """
     job_id, title, company, _link, description = job
+    # The generated CV and cover letter are attachments like any other. Merging
+    # them here, once, is what keeps the menu the model chooses from and the
+    # files actually available to upload from drifting apart - when they did,
+    # the model was told the CV did not exist and answered "none" for it.
+    attachments = dict(attachments or {})
+    attachments.setdefault('cv', cv_path)
+    attachments.setdefault('cover_letter', cl_path)
+    attachments = {k: v for k, v in attachments.items() if v}
+
     lines, unanswered, uploaded_all = [], [], []
     seen = set()
     reached_submit = False
@@ -1192,9 +1201,13 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
-        uploaded = await upload_documents(page, fields, cv_path, cl_path, attachments,
-                                          trace, (plan or {}).get('uploads'))
+        uploaded, skipped_uploads = await upload_documents(
+            page, fields, cv_path, cl_path, attachments, trace, (plan or {}).get('uploads'))
         uploaded_all.extend(uploaded)
+        if skipped_uploads:
+            all_errors.append('required upload(s) left empty: ' + '; '.join(skipped_uploads))
+            lines.append(f'Step {step}: no document matched required upload(s) - '
+                         + '; '.join(skipped_uploads))
 
         shot = await trace.shot(page, f'step{step}_{step_name}') if trace else None
 
@@ -1387,6 +1400,7 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
     attachments.setdefault('cv', cv_path)
     attachments.setdefault('cover_letter', cl_path)
     routing = {u['idx']: u.get('document') for u in (uploads or []) if 'idx' in u}
+    skipped = []
 
     uploaded = []
     for field in fields:
@@ -1419,6 +1433,8 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
                 if not uploaded:
                     target = attachments.get('cv')
         if not target or not os.path.exists(target):
+            if field.get('required'):
+                skipped.append(field.get('label') or field.get('name') or f'#{field["idx"]}')
             continue
         try:
             await page.locator(f'[data-jsapply="{field["idx"]}"]').set_input_files(target)
@@ -1429,7 +1445,11 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
             await pause(page, 1500)
         except Exception as e:
             print(f"  -> Upload failed for field {field['idx']}: {e}")
-    return uploaded
+    if skipped:
+        # A required upload left empty blocks the application, so it must not
+        # pass quietly - the pre-submit gate refuses to send in this state.
+        print('  -> WARNING: required upload(s) with no document: ' + '; '.join(skipped))
+    return uploaded, skipped
 
 
 async def tick_box(page, locator, field):

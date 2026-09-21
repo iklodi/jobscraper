@@ -17,6 +17,7 @@ import random
 import re
 import secrets
 import string
+import time
 import urllib.parse
 
 import yaml
@@ -2285,20 +2286,52 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
         # Hold the filled forms open so a human can check and submit them.
         if any(r['status'] == 'ready_to_submit' for r in results):
-            minutes = int(os.environ.get('APPLY_REVIEW_WINDOW_MINUTES', '30'))
+            # Measured from the last time anything changed, not from the end of
+            # the run. A flat timer closed the browser while the forms were
+            # being filled in by hand, losing work that cannot be recovered -
+            # nothing persists a half-finished form.
+            idle_minutes = int(os.environ.get('APPLY_REVIEW_IDLE_MINUTES', '120'))
             print(f'\n{len(browser.pages) - 1} filled form(s) left open for review.')
-            print(f'Connect over VNC to check and submit them. Closing in {minutes} min, '
-                  f'or immediately if you press Stop on the dashboard.')
-            progress_tracker.set_status(
-                f'Done - {len(results)} form(s) filled and left open. Check them, then press '
-                f'"Close forms" (closing automatically in {minutes} min).',
-                len(results), len(results), awaiting_review=True
-            )
-            for _ in range(minutes * 60 // 5):
+            print(f'Check and submit them, then press "Close forms" on the dashboard. '
+                  f'They close on their own only after {idle_minutes} min with no activity.')
+
+            async def tab_signature():
+                """What the held tabs look like right now."""
+                marks = []
+                for tab in browser.pages[1:]:
+                    try:
+                        marks.append(tab.url)
+                        marks.append(await tab.evaluate(
+                            '() => document.querySelectorAll("input,select,textarea").length'
+                            ' + "|" + (document.title || "")'))
+                    except Exception:
+                        marks.append('gone')
+                return '\n'.join(marks)
+
+            last_change = time.monotonic()
+            previous = await tab_signature()
+            while True:
                 if progress_tracker.is_stop_requested():
                     print('Stop requested; closing the browser.')
                     break
+                if len(browser.pages) <= 1:
+                    print('All review tabs were closed by hand; finishing.')
+                    break
+                idle = time.monotonic() - last_change
+                if idle >= idle_minutes * 60:
+                    print(f'No activity for {idle_minutes} min; closing the review tabs.')
+                    break
+                progress_tracker.set_status(
+                    f'Done - {len(results)} form(s) filled and left open. Check them, then '
+                    f'press "Close forms". Closing after {idle_minutes} min idle '
+                    f'({int((idle_minutes * 60 - idle) // 60)} min left).',
+                    len(results), len(results), awaiting_review=True
+                )
                 await asyncio.sleep(5)
+                current = await tab_signature()
+                if current != previous:
+                    previous = current
+                    last_change = time.monotonic()
 
         await browser.close()
 

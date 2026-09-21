@@ -310,6 +310,9 @@ ABSOLUTE RULES:
   asserts a fact you cannot verify from the profile.
 - Skip file inputs entirely in "actions" (action "skip"); route them in "uploads" instead.
 
+COVER LETTER TEXT BOXES:
+{cover_letter_rule}
+
 CHOOSING A DOCUMENT FOR EACH FILE INPUT ("uploads"):
 Every file field gets one entry. Available documents:
 {documents}
@@ -1221,6 +1224,8 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
     attachments.setdefault('cv', cv_path)
     attachments.setdefault('cover_letter', cl_path)
     attachments = {k: v for k, v in attachments.items() if v}
+    # Read once: a form may ask for the letter as prose on any step.
+    cover_letter = cover_letter_body(folder, cl_path)
 
     lines, unanswered, uploaded_all = [], [], []
     seen = set()
@@ -1258,6 +1263,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
                 documents=describe_documents(attachments),
+                cover_letter_rule=cover_letter_rule(fields, cover_letter),
             ), MAPPING_SCHEMA)
             kind = plan.get('page_kind') if plan else None
             if kind == 'confirmation':
@@ -1270,7 +1276,8 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                 )
                 break
             if plan:
-                filled, errors = await apply_actions(page, plan.get('actions', []), fields)
+                filled, errors = await apply_actions(page, plan.get('actions', []),
+                                                     fields, cover_letter)
                 unanswered.extend(plan.get('unanswered') or [])
                 if errors:
                     all_errors.extend(errors)
@@ -1894,7 +1901,79 @@ async def fill_checked(page, locator, value, field):
     return candidates[-1], problem
 
 
-async def apply_actions(page, actions, fields=None):
+COVER_LETTER_MARKER = '<COVER_LETTER>'
+SALUTATION = re.compile(
+    r'^\s*(dear\b|to whom it may concern|madame|monsieur|mesdames|messieurs|'
+    r'ch[e\u00e8]re?s?\b|sehr geehrte|gentile|egregio|estimad[oa])', re.I)
+
+
+def cover_letter_body(folder, cl_path=None):
+    """The letter as prose, from the salutation down.
+
+    A form's cover-letter box wants the letter, not the letterhead: the
+    recipient block and date above "Dear ..." are page furniture that reads
+    as noise when pasted into a textarea.
+    """
+    candidates = []
+    if folder and os.path.isdir(folder):
+        for name in sorted(os.listdir(folder)):
+            if 'coverletter' in name.lower().replace('_', '').replace(' ', ''):
+                if name.lower().endswith(('.docx', '.md', '.txt')):
+                    candidates.append(os.path.join(folder, name))
+    if cl_path:
+        candidates.append(cl_path)
+
+    for path in candidates:
+        try:
+            if path.lower().endswith('.docx'):
+                from docx import Document
+                lines = []
+                for para in Document(path).paragraphs:
+                    lines.extend(para.text.split('\n'))
+            elif path.lower().endswith(('.md', '.txt')):
+                lines = open(path, encoding='utf-8').read().splitlines()
+            else:
+                continue
+        except Exception as e:
+            print(f'  -> could not read {os.path.basename(path)}: {e}')
+            continue
+
+        lines = [l.rstrip() for l in lines]
+        start = next((i for i, l in enumerate(lines) if SALUTATION.match(l)), None)
+        if start is None:
+            continue
+        body = '\n'.join(lines[start:]).strip()
+        # Collapse the blank runs a .docx leaves behind, keeping paragraphs.
+        body = re.sub(r'\n{3,}', '\n\n', body)
+        if len(body) > 80:
+            return body
+    return None
+
+
+def cover_letter_rule(fields, cover_letter):
+    """What to tell the model about pasting the letter into a text box."""
+    if not cover_letter:
+        return ('- No cover letter text is available, so never claim to paste one; '
+                'answer motivation questions from the profile instead.')
+    has_letter_upload = any(
+        f.get('type') == 'file' and re.search(
+            r'cover|motivation|lettre|anschreiben',
+            ' '.join([str(f.get('label') or ''), str(f.get('name') or ''),
+                      str(f.get('id') or '')]).lower())
+        for f in fields)
+    if has_letter_upload:
+        return ('- This form takes the cover letter as a file upload, which is handled '
+                'separately. Do not paste the letter into a text box as well.')
+    return ('- This form has no file upload for a cover letter. If a free-text field asks '
+            'for one - "Cover letter", "Motivation", "Message to the hiring manager", '
+            '"Why do you want to work here" - fill it with the exact value ' + repr(COVER_LETTER_MARKER) +
+            ' and nothing else. That placeholder is replaced with the real letter, so do '
+            'not write it out, summarise it or translate it. Use it for at most one field, '
+            'the one most clearly meant for a cover letter, and only when the box is large '
+            'enough for prose (a textarea, not a one-line input).')
+
+
+async def apply_actions(page, actions, fields=None, cover_letter=None):
     """Execute the model's fill plan; returns (filled_count, errors)."""
     by_idx = {f['idx']: f for f in (fields or [])}
     filled, errors = 0, []
@@ -1903,6 +1982,14 @@ async def apply_actions(page, actions, fields=None):
         if kind in (None, 'skip'):
             continue
         value = action.get('value', '')
+        # The model asks for the letter by name rather than reproducing it, so
+        # what lands in the box is exactly what the PDF says.
+        if isinstance(value, str) and COVER_LETTER_MARKER in value:
+            if not cover_letter:
+                errors.append(f'"{(by_idx.get(action.get("idx")) or {}).get("label", "field")}": '
+                              'asked for the cover letter but none could be read')
+                continue
+            value = value.replace(COVER_LETTER_MARKER, cover_letter)
         selector = f'[data-jsapply="{action.get("idx")}"]'
         locator = page.locator(selector)
         field = by_idx.get(action.get('idx')) or {}
@@ -1959,6 +2046,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
 
     trace = Trace(job_id, folder)
     attachments = attachment_paths(profile)
+    cover_letter = cover_letter_body(folder, cl_path)
     target, mode = await find_apply_url(page, link, job_id, trace)
     if not target and mode == 'easy_apply_manual':
         trace.write_manifest(job, 'ready_to_submit', False)
@@ -2029,6 +2117,7 @@ async def process_job(page, client, profile, job, auto_submit=False):
                 fields=json.dumps(fields, ensure_ascii=False)[:20000],
                 page_text=page_text[:3000],
                 documents=describe_documents(attachments),
+                cover_letter_rule=cover_letter_rule(fields, cover_letter),
             ), MAPPING_SCHEMA)
             if not plan:
                 return 'failed', f'Could not map the form fields (every model failed) at {apply_url}.'

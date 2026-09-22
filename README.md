@@ -12,7 +12,7 @@ Playwright browser using your own logged-in LinkedIn session.
 | Stage | What happens |
 |---|---|
 | **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. |
-| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Rejected**. |
+| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Rejected**. Re-scoring never moves a job you approved or applied to. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
 | **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. |
 
@@ -32,9 +32,10 @@ generate for everything on To Do the old way.
    ```
 
 3. **Configuration**: copy `.env.example` to `.env` and fill it in. Every
-   setting is documented there; the ones you cannot skip are a model key
-   (`INFOMANIAK_API_TOKEN` + `INFOMANIAK_PRODUCT_ID`, or `GEMINI_API_KEY`) and
-   `CVS_DIR`.
+   setting is documented there; the ones you cannot skip are one model provider
+   (`INFOMANIAK_API_TOKEN` + `INFOMANIAK_PRODUCT_ID`, `GEMINI_API_KEY` or
+   `GROQ_API_KEY` — any one is enough) and `CVS_DIR`. Then copy
+   `profile.example.yaml` to `CVS_DIR/profile.yaml` and fill in your answers.
 
 4. **Log in to LinkedIn once**:
    ```bash
@@ -55,7 +56,7 @@ Everything personal sits in `CVS_DIR` and is never committed:
 
 | File | What it is |
 |---|---|
-| `docs/<CV_TEMPLATE_NAME>` | Your CV. Needs a `Skills` paragraph with entries separated by ` · ` — the generator swaps that whole block. |
+| `docs/<CV_TEMPLATE_NAME>` | Your CV. Keep the skills in one paragraph separated by ` · ` — the generator's prompt has the model rewrite that paragraph whole. |
 | `docs/<CL_TEMPLATE_NAME>` | Cover letter template. Must keep `[COMPANY]`, `[LOCATION]` and `[DATE]` in the addressee block. |
 | `docs/<DOSSIER_NAME>` | Career history in markdown. The scorer and generator both read it. |
 | `search_criteria.md` | Keywords, locations and job types. A keyword can pin its own: `- Interim Manager @ Switzerland / France`. |
@@ -70,7 +71,7 @@ will search for.
 
 ## Using the dashboard
 
-- **＋** — paste any job URL (LinkedIn or an employer's own page). It reads the
+- **+** — paste any job URL (LinkedIn or an employer's own page). It reads the
   advert, scores it, and puts it on To Do whatever it scores; approving it there
   writes the documents.
 - **⚙️ Search Settings** — edit the keywords and scoring rules.
@@ -85,7 +86,7 @@ will search for.
 
 Run it on a residential connection — LinkedIn is aggressive about datacentre IPs.
 On macOS use a launchd agent for `main.py` (this repo uses
-`com.iklodi.jobscraper`); on Linux, cron or a systemd timer.
+`com.example.jobscraper.plist` as the template); on Linux, cron or a systemd timer.
 
 ## Command line
 
@@ -101,8 +102,11 @@ python infomaniak.py              # list available models and check the credenti
 
 ## Notes
 
-- **Windows**: see [HANDOVER.md](HANDOVER.md). Set `SOFFICE_PATH` to your
-  LibreOffice executable and start the dashboard with `start_dashboard.bat`.
+- **Windows**: set `SOFFICE_PATH` to your LibreOffice `soffice.exe` and start
+  the dashboard with `start_dashboard.bat`.
+- **How it works, and what not to break**: [AGENTS.md](AGENTS.md) — also the
+  file coding agents (Claude Code, Codex and others) load as project
+  instructions.
 - **Fonts**: if an exported PDF does not match the Word original, LibreOffice
   could not see the template's fonts and substituted them. The converter warns
   when that happens; see `SOFFICE_VCLPLUGIN` in `.env.example`.

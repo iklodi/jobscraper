@@ -1,8 +1,8 @@
 # Application answer bank - copy to $CVS_DIR/profile.yaml and fill in.
 #
 # This is the ONLY source of answers the applier will use. It never invents or
-# approximates an answer: any question this file does not cover is left blank,
-# reported in the job's notes, and emailed to you. Add the question here and it
+# approximates an answer: any question this file does not cover is left blank
+# and listed in the job's notes on the dashboard. Add the question here and it
 # will never block an application again.
 #
 # Keep the real file in your CVS_DIR (alongside your CV), never in this repo -
@@ -13,6 +13,10 @@ identity:
   full_name_ascii: "Jane Doe"          # used where a form rejects accented characters
   first_name: "Jane"
   last_name: "Doe"
+  # The model will not derive a form answer from an adjacent fact (it will not turn
+  # demographics.gender into a "Title" radio), so state it.
+  salutation: "Ms."
+  salutation_alternatives: "Ms, Mme, Frau, Madame"
   email: "jane@example.com"
   phone: "+00 00 000 00 00"
   phone_country: "Country"             # phone widgets often default to the US
@@ -76,6 +80,15 @@ compensation:
   numeric_fallback: 0                  # used only when the field rejects text
   by_currency: {}
   current_salary_bracket: "Other"
+  # For contract, freelance, interim and fractional work - kept separate from the
+  # annual salary figures above so a day-rate field is never answered with a salary.
+  contract_rates:
+    EUR: {daily: 0, hourly: 0}
+  contract_rate_text:
+    EUR: "EUR 0 per day / EUR 0 per hour"
+  rate_note: >-
+    Quote the rate in the currency the advert or the form uses. These are for
+    contract work; the annual figures above are for a permanent salary.
 
 availability:
   notice_period: "Immediate"
@@ -113,6 +126,14 @@ essay_material:
   technical_stack: []
   no_experience_in: []                 # things to answer "no" to honestly
 
+# Documents for upload fields, relative to CVS_DIR. The model picks one per file
+# input from these keys plus the generated cv and cover_letter; ATTACHMENT_RULES in
+# applier.py is the fallback when it does not. A bundle (diplomas plus certificates
+# in one PDF) is the better answer to a vague "additional documents" slot.
+attachments:
+  diplomas: "attach/diplomas.pdf"
+  reference_letter: "attach/reference_letter.pdf"
+
 known_gaps:
   # Anything listed here will stop an application rather than be guessed at.
   - field: "Professional references"
@@ -125,7 +146,9 @@ policies:
   # Email verification links are always left for you to click.
   allow_account_creation: false
   never_solve_captchas: true
-  never_submit_without_review: true
+  # Not enforced by code: whether an application is submitted is decided by the
+  # dashboard button (Apply Now submits, Fill Now does not) or `applier.py --submit`.
+  # The pre-submit gate still refuses to send anything incomplete.
   never_inflate_experience: true
   decline_premium_upsells: true
   decline_optional_marketing_consent: true

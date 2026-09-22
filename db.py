@@ -13,7 +13,7 @@ def min_pass_score():
 # move it out of one of these - an application you sent is not undone because
 # the model now scores the advert differently.
 PROTECTED_STATUSES = ('approved', 'ready_to_submit', 'applied', 'interviewing',
-                      'account_required')
+                      'account_required', 'easy_apply')
 
 
 def get_job_status(job_id):

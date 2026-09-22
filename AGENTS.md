@@ -98,14 +98,15 @@ what the next run will search for.
 | `to_apply` | At or above the bar. (`generated` is the same column, with documents.) |
 | `approved` | Approved by hand; documents are written on this transition. |
 | `ready_to_submit` | Form filled, waiting for a person to send it. |
+| `easy_apply` | LinkedIn Easy Apply only — left for a person, nothing clicked. Shown with Ready to Submit. |
 | `applied` | Submitted — set only when the applier pressed submit itself, or by hand. |
 | `interviewing` | Set by hand. |
 | `account_required` | The employer wants an account before the form can be filled. |
 | `failed` | No apply button, closed listing, CAPTCHA, or unmappable fields. |
 | `generating` / `evaluating` / `applying` | Transient, while a background run holds the job. |
 
-**Protected statuses.** `approved`, `ready_to_submit`, `applied`,
-`interviewing` and `account_required` record a person's decision
+**Protected statuses.** `approved`, `ready_to_submit`, `easy_apply`,
+`applied`, `interviewing` and `account_required` record a person's decision
 (`db.PROTECTED_STATUSES`). Re-evaluating, regenerating or re-adding a job by
 link must leave it in one of those — a new score informs, it does not undo an
 application.
@@ -142,8 +143,8 @@ Do not weaken these. Each one exists because it failed once.
   silently advances. Tick boxes with the DOM `click()` method, which fires the
   page's handler without hit-testing. Setting `el.checked` is not enough: React
   re-renders from its own state and drops it.
-- **Controls come from the open dialog, never the page behind it** — the
-  LinkedIn page behind an Easy Apply modal offers its own "Send" button.
+- **Controls come from the open dialog, never the page behind it** — a site's
+  own chrome (a chat widget's "Send") must not be taken for the form's submit.
 - **Values are checked after filling.** A rejected value is retried in other
   shapes (phone numbers: E.164, 00-prefixed, national) and otherwise reported.
 - **Submitting can be switched off** with
@@ -173,19 +174,18 @@ it cannot name a file that does not exist. `ATTACHMENT_RULES` is the fallback.
 Where a form wants the cover letter as text rather than a file, the model asks
 for it by placeholder and the letter is pasted verbatim from its salutation on.
 
-### LinkedIn Easy Apply
+### LinkedIn Easy Apply is not automated
 
-1. On a direct `/jobs/view/<id>` URL — what the scraper stores — Easy Apply is
-   an `<a>` that does nothing under automation. The same job opened through
-   `/jobs/search/?currentJobId=<id>` renders a real `<button>`; the applier
-   retries that way.
-2. **"Review"** is the last step before Submit and counts as an advance.
-3. The résumé step has no file field: it lists previously uploaded CVs as radio
-   cards and preselects the last one used. The applier uploads the tailored CV
-   explicitly. LinkedIn also **resumes a saved draft mid-way**, so that step may
-   never render; the review page names the résumé about to be sent, and
-   `aria-label="Edit Resume"` is the way back — every section's button reads
-   "Edit", only the label tells them apart.
+Deliberately. Easy Apply runs inside LinkedIn on the candidate's own logged-in
+account — the most bot-like thing this tool could do with it, for a saving of
+about three clicks, against the risk of a restricted account and a lost
+network. The applier reads the apply control's accessible name and, if it says
+"Easy Apply", stops *without clicking*: the job becomes `easy_apply` with a
+direct link, shown in the Ready to Submit column. Do not add Easy Apply
+automation back.
+
+Only external applications are automated: the applier follows the posting's
+Apply link off LinkedIn and fills the employer's own form.
 
 ## Quirks
 

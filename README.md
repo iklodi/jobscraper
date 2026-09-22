@@ -14,7 +14,7 @@ Playwright browser using your own logged-in LinkedIn session.
 | **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. |
 | **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Rejected**. Re-scoring never moves a job you approved or applied to. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
-| **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. |
+| **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
 
 The nightly run stops after scoring. Pass `--gen` to `main.py` if you want it to
 generate for everything on To Do the old way.

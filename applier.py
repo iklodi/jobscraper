@@ -569,37 +569,48 @@ class Trace:
         except Exception as e:
             print(f'  -> Could not write the run manifest: {e}')
 
-async def form_dialog_open(page):
-    """True when a modal holding actual form fields is up.
+EASY_APPLY_LABEL = re.compile(r'\beasy apply\b', re.I)
 
-    LinkedIn's messaging widget is also role=dialog, so presence alone is not
-    enough - the dialog must contain inputs.
+
+async def is_easy_apply(page):
+    """True when the posting's apply control is LinkedIn Easy Apply.
+
+    Read from the accessible name only - nothing is clicked. Easy Apply is not
+    automated at all: it runs inside LinkedIn on the candidate's own session,
+    which is the riskiest thing this tool could do with that account, to save
+    about three clicks.
     """
-    try:
-        return await page.evaluate(
-            """() => Array.from(document.querySelectorAll('[role=dialog]'))
-                   .filter(d => { const r = d.getBoundingClientRect();
-                                  return r.width > 300 && r.height > 200; })
-                   .some(d => d.querySelectorAll('input,select,textarea').length > 0)"""
-        )
-    except Exception:
-        return False
+    for role in ('button', 'link'):
+        control = page.get_by_role(role, name=EASY_APPLY_LABEL).first
+        try:
+            await control.wait_for(state='visible', timeout=4000)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry=False):
-    """Open the LinkedIn posting and follow its apply button to the employer's form."""
+    """Open the LinkedIn posting and follow its apply link to the employer's form.
+
+    Returns (page, mode). mode 'easy_apply' means the posting only takes Easy
+    Apply: nothing was clicked and the job is left for the candidate.
+    """
     await page.goto(linkedin_url, timeout=60000)
     await pause(page, 5000)
     if trace:
         await trace.shot(page, 'linkedin_posting')
 
+    if await is_easy_apply(page):
+        return None, 'easy_apply'
+
     # LinkedIn ships obfuscated class names and renders the apply control as a
     # button, a link, or a div with role=button depending on the posting, so go
-    # through the accessibility tree rather than CSS.
-    # Anchored first, then loose: the button's accessible name varies ("Apply",
-    # "Easy Apply", "Apply on LinkedIn", sometimes prefixed by icon text).
-    strict_re = re.compile(r'^\s*(easy apply|apply)\b', re.I)
-    loose_re = re.compile(r'\b(easy apply|apply)\b', re.I)
+    # through the accessibility tree rather than CSS. Anchored first, then
+    # loose: the accessible name varies ("Apply", "Apply on company website",
+    # sometimes prefixed by icon text). Easy Apply was ruled out above.
+    strict_re = re.compile(r'^\s*apply\b', re.I)
+    loose_re = re.compile(r'\bapply\b', re.I)
     candidates = [
         page.get_by_role('button', name=strict_re),
         page.get_by_role('link', name=strict_re),
@@ -613,22 +624,19 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
         try:
             await button.wait_for(state='visible', timeout=6000)
             await button.scroll_into_view_if_needed(timeout=3000)
+            if EASY_APPLY_LABEL.search((await button.inner_text()) or ''):
+                return None, 'easy_apply'       # belt and braces: never click it
         except Exception:
             continue
 
         # On many postings the apply control is an <a> whose click does nothing
-        # under automation. Navigating to its href directly is far more reliable.
+        # under automation. Navigating to its href directly is more reliable -
+        # but only for links that leave LinkedIn.
         try:
             href = await button.get_attribute('href')
         except Exception:
             href = None
-        # Only follow links that leave LinkedIn: an in-site href belongs to Easy
-        # Apply, where navigating away closes the modal we actually want.
-        external = False
-        if href and href.startswith('http'):
-            host = urllib.parse.urlparse(href).netloc.lower()
-            external = 'linkedin.com' not in host
-        if external:
+        if href and href.startswith('http') and 'linkedin.com' not in urllib.parse.urlparse(href).netloc.lower():
             try:
                 await page.goto(href, timeout=60000)
                 await pause(page, 4000)
@@ -636,32 +644,23 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
             except Exception:
                 pass
 
-        # Click, then verify something actually happened. Some apply controls are
-        # inert anchors, so a click that changes nothing means try the next one.
+        # Click, then verify something actually happened: a new tab or a new
+        # URL. A click that changes nothing means try the next candidate.
         before_url = page.url
         before_pages = len(page.context.pages)
         try:
             await button.click(timeout=8000)
         except Exception:
             continue
-
-        # Some controls ignore a synthesised click; dispatching one on the
-        # element itself still triggers the site's own handler.
-        reacted = False
-        for _ in range(4):
+        for attempt in range(12):                # up to ~12s for a reaction
             await pause(page, 1000)
-            if (len(page.context.pages) > before_pages or page.url != before_url
-                    or await form_dialog_open(page)):
-                reacted = True
-                break
-        if not reacted:
-            try:
-                await button.evaluate('el => el.click()')
-            except Exception:
-                pass
-
-        for _ in range(12):                      # up to ~12s for a reaction
-            await pause(page, 1000)
+            if attempt == 4 and len(page.context.pages) == before_pages and page.url == before_url:
+                # Some controls ignore a synthesised click; the DOM method still
+                # runs the site's own handler.
+                try:
+                    await button.evaluate('el => el.click()')
+                except Exception:
+                    pass
             if len(page.context.pages) > before_pages:
                 new_page = page.context.pages[-1]
                 try:
@@ -670,31 +669,13 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
                     pass
                 await pause(new_page, 2000)
                 return new_page, 'external'
-            if await form_dialog_open(page):
-                await pause(page, 1500)
-                if trace:
-                    await trace.shot(page, 'easy_apply_modal')
-                return page, 'easy_apply'
             if page.url != before_url:
                 await pause(page, 3000)
                 return page, 'same_tab'
-        # Nothing happened - fall through and try the next candidate.
 
-    # Nothing reacted. On a direct /jobs/view/ page LinkedIn renders Easy Apply
-    # as an <a> that does nothing when clicked under automation; the same job
-    # in the search pane renders a real <button> that opens the modal. So try
-    # the job again through search before deciding a human has to do it.
+    # Nothing reacted. The control is sometimes just late wiring up its handler,
+    # so reload once and give it a slower second pass.
     if not retry:
-        numeric = re.search(r'/jobs/view/(\d+)|currentJobId=(\d+)', linkedin_url)
-        ident = next((g for g in (numeric.groups() if numeric else ()) if g), None)
-        if ident:
-            search_url = f'https://www.linkedin.com/jobs/search/?currentJobId={ident}'
-            print('  -> apply control did not respond; retrying via the search view')
-            try:
-                await pause(page, 2000)
-                return await find_apply_url(page, search_url, job_id, trace, retry=True)
-            except Exception:
-                pass
         try:
             await page.reload(timeout=60000)
             await pause(page, 7000)
@@ -704,30 +685,7 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
 
     if trace:
         await trace.shot(page, 'apply_lookup_failure')
-    else:
-        try:
-            await page.screenshot(
-                path=os.path.join(OUTPUT_DIR, f'{job_id}_apply_lookup_failure.png'))
-        except Exception:
-            pass
-
-    # Distinguish a LinkedIn Easy Apply posting, which does not drive reliably
-    # under automation, from a genuinely broken or closed one - they need
-    # different things from the candidate.
-    easy_js = (
-        "() => {"
-        " const a = Array.from(document.querySelectorAll('button,a,[role=button]'))"
-        "   .find(e => /^\\s*(easy apply|apply)\\b/i.test((e.innerText || '').trim()));"
-        " if (!a) return false;"
-        " const href = a.getAttribute('href') || '';"
-        " return !href || href.startsWith('#') || href.includes('linkedin.com');"
-        "}"
-    )
-    try:
-        is_easy = await page.evaluate(easy_js)
-    except Exception:
-        is_easy = False
-    return (None, 'easy_apply_manual') if is_easy else (None, None)
+    return None, None
 
 
 def generate_password(length=18):
@@ -1303,33 +1261,6 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
                     all_errors.extend(errors)
                     lines.append(f'Step {step} ({step_name}): fields that refused input - {"; ".join(errors)}')
 
-        # Easy Apply's resume step has no file field to route, so handle it
-        # before the normal pass rather than leaving LinkedIn's last-used CV.
-        resume_step = await linkedin_resume_step(page)
-        # A review page shows the resume it is about to send. If that is not
-        # ours, go back through its Edit link rather than letting the wrong
-        # CV go out - this is the state the wizard actually lands in when
-        # LinkedIn skips straight from contact details to review.
-        if not resume_step and cv_path:
-            present, ours, shown = await review_resume_is_ours(page, cv_path)
-            if present and not ours:
-                lines.append(f'Step {step}: review lists "{shown}", not our CV - reopening the '
-                             f'resume chooser.')
-                if await open_resume_editor(page):
-                    resume_step = await linkedin_resume_step(page)
-
-        if resume_step and cv_path:
-            done, detail = await upload_linkedin_resume(page, cv_path)
-            if done:
-                lines.append(f'Step {step}: replaced the preselected resume'
-                             + (f' ({resume_step["selected"]})' if resume_step.get('selected') else '')
-                             + f' with {detail}.')
-                if trace:
-                    trace.record_upload('Resume (LinkedIn Easy Apply)', cv_path)
-            else:
-                all_errors.append(f'could not attach the tailored CV: {detail}')
-                lines.append(f'Step {step}: kept LinkedIn\'s stored resume - {detail}.')
-
         uploaded, skipped_uploads = await upload_documents(
             page, fields, cv_path, cl_path, attachments, trace, (plan or {}).get('uploads'))
         uploaded_all.extend(uploaded)
@@ -1523,140 +1454,6 @@ def describe_documents(attachments):
         if key not in DOCUMENT_BLURBS and path:
             lines.append(f'  - "{key}": {os.path.basename(path)}')
     return '\n'.join(lines) or '  (none configured)'
-
-
-UPLOAD_RESUME_LABELS = re.compile(r'^\s*(upload|add)\s+(resume|cv|cover letter)', re.I)
-
-
-async def linkedin_resume_step(page):
-    """The Easy Apply step that offers stored resumes, or None.
-
-    LinkedIn does not put a file input on this step: it lists resumes you
-    uploaded before as radio cards, preselects the last one used, and hides the
-    real input behind an "Upload resume" control. So nothing here matches the
-    normal file-field path - the tailored CV has to be pushed in deliberately.
-    """
-    try:
-        found = await page.evaluate(
-            """() => {
-                const d = Array.from(document.querySelectorAll('[role=dialog]'))
-                    .filter(x => x.querySelectorAll('input,select,textarea,button').length).pop();
-                if (!d) return null;
-                const txt = (d.innerText || '');
-                if (!/resume|cv\\b|lebenslauf/i.test(txt)) return null;
-                const btn = Array.from(d.querySelectorAll('button,label'))
-                    .find(b => /^\\s*(upload|add)\\s+(resume|cv|cover letter)/i.test(
-                        (b.innerText || b.getAttribute('aria-label') || '').trim()));
-                return {hasUpload: !!btn,
-                        files: d.querySelectorAll('input[type=file]').length,
-                        selected: (Array.from(d.querySelectorAll('input[type=radio]'))
-                            .filter(r => r.checked)
-                            .map(r => (r.labels && r.labels[0] ? r.labels[0].innerText : ''))
-                            .join(' ') || '').replace(/\\s+/g, ' ').trim().slice(0, 80)};
-            }"""
-        )
-    except Exception:
-        return None
-    return found if found and (found['hasUpload'] or found['files']) else None
-
-
-async def upload_linkedin_resume(page, cv_path):
-    """Attach our tailored CV on an Easy Apply resume step.
-
-    Returns (uploaded, detail). Leaving LinkedIn's preselected resume alone
-    would send whichever CV was last used for some other job.
-    """
-    if not cv_path or not os.path.exists(cv_path):
-        return False, 'no generated CV to upload'
-
-    # A hidden input is the most reliable target when one is present: setting
-    # files on it needs no click and no native chooser.
-    try:
-        hidden = page.locator('[role=dialog] input[type=file]').first
-        if await hidden.count():
-            await hidden.set_input_files(cv_path)
-            await pause(page, 3500)
-            return True, os.path.basename(cv_path)
-    except Exception as e:
-        print(f'  -> direct resume upload failed ({e}); trying the button')
-
-    control = await find_control(page, UPLOAD_RESUME_LABELS, prefer_last=False)
-    if not control:
-        return False, 'no upload control on the resume step'
-    try:
-        async with page.expect_file_chooser(timeout=10000) as chooser_info:
-            await control.click(timeout=6000)
-        chooser = await chooser_info.value
-        await chooser.set_files(cv_path)
-        await pause(page, 3500)
-        return True, os.path.basename(cv_path)
-    except Exception as e:
-        return False, f'upload control did not accept the file: {type(e).__name__}'
-
-
-async def review_resume_is_ours(page, cv_path):
-    """On an Easy Apply review page, is the listed resume the one we generated?
-
-    Returns (section_present, is_ours, shown_name). LinkedIn's review step
-    summarises the resume it will send and offers an Edit link back to the
-    chooser - the last chance to notice it is about to attach some other
-    job's CV.
-    """
-    try:
-        shown = await page.evaluate(
-            """() => {
-                const d = Array.from(document.querySelectorAll('[role=dialog]'))
-                    .filter(x => x.querySelectorAll('button').length).pop();
-                if (!d) return null;
-                const heads = Array.from(d.querySelectorAll('h3,h4,span,div'))
-                    .filter(e => /^\\s*resume\\s*$/i.test((e.innerText || '').trim()));
-                if (!heads.length) return null;
-                const block = heads[heads.length - 1].closest('div,section') || heads[heads.length - 1].parentElement;
-                const txt = ((block && block.parentElement ? block.parentElement.innerText
-                                                          : (block || {}).innerText) || '');
-                // LinkedIn truncates the name on the review page
-                // ("20260101_Example_..."), so accept a cut-off name too.
-                const m = txt.match(/[\\w .()\\-]+\\.(pdf|docx?)/i)
-                       || txt.match(/[\\w .()\\-]{6,}(?:\\u2026|\\.\\.\\.)/);
-                return m ? m[0].trim() : '';
-            }"""
-        )
-    except Exception:
-        return False, True, None
-    if shown is None:
-        return False, True, None
-    wanted = os.path.basename(cv_path or '')
-    # LinkedIn truncates long names ("20260101_Example_..."), so compare the
-    # stem up to the ellipsis rather than demanding an exact match.
-    stem = shown.replace('\u2026', '...').split('...')[0].strip()
-    ours = bool(stem) and (stem in wanted or wanted.startswith(stem[:12]))
-    return True, ours, shown
-
-
-async def open_resume_editor(page):
-    """Click the Edit beside the review page's Resume section.
-
-    The review page labels each Edit by section on the button itself
-    (aria-label="Edit Resume"); the visible text is just "Edit" and is
-    identical for Contact info and Additional Questions, so the label is the
-    only thing that distinguishes them.
-    """
-    candidates = [
-        page.get_by_role('button', name=re.compile(r'^edit\s+resume', re.I)),
-        page.locator('button[aria-label*="Edit Resume" i], a[aria-label*="Edit Resume" i]'),
-    ]
-    for candidate in candidates:
-        try:
-            control = candidate.first
-            if not await control.count():
-                continue
-            await control.click(timeout=6000)
-            await pause(page, 3500)
-            return True
-        except Exception as e:
-            print(f'  -> resume editor click failed: {type(e).__name__}')
-    print('  -> no "Edit Resume" control on this page')
-    return False
 
 
 async def upload_documents(page, fields, cv_path, cl_path, attachments=None, trace=None,
@@ -2075,16 +1872,14 @@ async def process_job(page, client, profile, job, auto_submit=False):
     attachments = attachment_paths(profile)
     cover_letter = cover_letter_body(folder, cl_path)
     target, mode = await find_apply_url(page, link, job_id, trace)
-    if not target and mode == 'easy_apply_manual':
-        trace.write_manifest(job, 'ready_to_submit', False)
-        return 'ready_to_submit', (
-            'This is a LinkedIn Easy Apply posting and its apply control never '
-            'responded - clicked through every selector, dispatched the event on the '
-            'element itself, reloaded and tried again. There was nothing to drive, so '
-            'the form was never reached.\n'
-            f'It takes about three clicks by hand: {link}\n'
-            f'Your tailored CV and cover letter are in: {folder}\n'
-            + '\n'.join(trace.shots and ['Screenshots: ' + ', '.join(trace.shots)] or [])
+    if mode == 'easy_apply':
+        trace.write_manifest(job, 'easy_apply', False)
+        return 'easy_apply', (
+            'LinkedIn Easy Apply posting - left for you. Easy Apply is not automated: it '
+            'runs inside LinkedIn on your own account, which is the riskiest thing this '
+            'tool could do with it. Nothing was clicked.\n'
+            f'Apply here, about three clicks: {link}\n'
+            f'Your tailored CV and cover letter are in: {folder}'
         )
     if not target:
         try:
@@ -2519,6 +2314,7 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
 STATUS_WORDS = {
     'applied': 'submitted',
+    'easy_apply': 'LinkedIn Easy Apply - left for you to apply by hand',
     'ready_to_submit': 'filled, waiting for you to submit',
     'account_required': 'blocked - the employer wants an account',
     'failed': 'failed',
@@ -2541,8 +2337,9 @@ def run_summary(results, single=False):
             'ready_to_submit': f'{j["company"]}: form filled, waiting for you to submit.',
             'account_required': f'{j["company"]} needs an account before the form can be filled.',
             'failed': f'{j["company"]}: could not fill the form.',
+            'easy_apply': f'{j["company"]} only takes LinkedIn Easy Apply - apply by hand, about three clicks.',
         }.get(j['status'], f'{j["company"]}: {j["word"]}.')
-        return {'ok': j['status'] in ('applied', 'ready_to_submit'),
+        return {'ok': j['status'] in ('applied', 'ready_to_submit', 'easy_apply'),
                 'headline': headline, 'single': True, 'jobs': jobs}
 
     # Say what actually happened rather than scoring the run out of ten:
@@ -2555,12 +2352,14 @@ def run_summary(results, single=False):
         parts.append(plural(counts['applied'], 'application') + ' submitted')
     if counts['ready_to_submit']:
         parts.append(plural(counts['ready_to_submit'], 'form') + ' filled')
+    if counts['easy_apply']:
+        parts.append(plural(counts['easy_apply'], 'Easy Apply job') + ' left for you')
     if counts['account_required']:
         parts.append(plural(counts['account_required'], 'job') + ' needs an account')
     if counts['failed']:
         parts.append(plural(counts['failed'], 'failure'))
     for status, n in counts.items():
-        if status not in ('applied', 'ready_to_submit', 'account_required', 'failed'):
+        if status not in ('applied', 'ready_to_submit', 'account_required', 'failed', 'easy_apply'):
             parts.append(f'{n} {status}')
 
     headline = ', '.join(parts[:-1]) + (' and ' if len(parts) > 1 else '') + parts[-1]

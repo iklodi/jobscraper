@@ -90,7 +90,7 @@ function renderStats() {
     const statsContainer = document.getElementById('stats-container');
     const total = allJobs.length;
     const pending = allJobs.filter(j => j.status === 'new').length;
-    const active = allJobs.filter(j => ['to_apply', 'approved', 'applied', 'interviewing'].includes(j.status)).length;
+    const active = allJobs.filter(j => ['to_apply', 'approved', 'ready_to_submit', 'easy_apply', 'applied', 'interviewing'].includes(j.status)).length;
     
     statsContainer.innerHTML = `
         <div class="stat-pill">Total: ${total}</div>
@@ -136,6 +136,10 @@ function renderBoard() {
         }
         if (status === 'scored') {
             status = 'rejected';
+        }
+        // Easy Apply jobs wait on the candidate just like filled forms do.
+        if (status === 'easy_apply') {
+            status = 'ready_to_submit';
         }
         if (groupedJobs[status]) {
             groupedJobs[status].push(job);
@@ -221,6 +225,7 @@ function createCard(job, columnStatus) {
     // Promoted listings are paid placements, so the evaluator marks them down.
     if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
     if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
+    if (job.status === 'easy_apply') metaHtml += `<span class="meta-tag meta-easy" title="Easy Apply is never automated">✋ Easy Apply - by hand</span>`;
     // On the Applied board the date that matters is when it went out.
     if (columnStatus === 'applied' && (job.applied_at || job.created_at)) {
         metaHtml += `<span class="meta-tag meta-applied-at" title="Applied on">📮 ${
@@ -334,6 +339,14 @@ function openJobDetails(jobId) {
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Mark as Account Required</button>
+            `;
+        } else if (job.status === 'easy_apply') {
+            // Not automated, by design: it would run inside LinkedIn on the
+            // candidate's own account. So: a link, and the bookkeeping buttons.
+            contextButtonsHtml = `
+                <a class="btn btn-primary" href="${job.link}" target="_blank" rel="noopener">🔗 Apply on LinkedIn</a>
+                <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Applied - Mark as Applied</button>
+                <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'ready_to_submit') {
             contextButtonsHtml = `

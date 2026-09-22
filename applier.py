@@ -670,7 +670,7 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
         ident = next((g for g in (numeric.groups() if numeric else ()) if g), None)
         if ident:
             search_url = f'https://www.linkedin.com/jobs/search/?currentJobId={ident}'
-            print(f'  -> apply control did not respond; retrying via the search view')
+            print('  -> apply control did not respond; retrying via the search view')
             try:
                 await pause(page, 2000)
                 return await find_apply_url(page, search_url, job_id, trace, retry=True)
@@ -1084,17 +1084,18 @@ async def find_control(page, pattern, prefer_last=True):
     Scoped to the open dialog when there is one, so a control on the page
     behind a modal is never mistaken for part of the form.
     """
-    scope = await form_scope(page)
-    for where in ([scope, page] if scope is not page else [page]):
-        for role in ('button', 'link'):
-            matches = where.get_by_role(role, name=pattern)
-            for control in ([matches.last, matches.first] if prefer_last else [matches.first]):
-                try:
-                    await control.wait_for(state='visible', timeout=2500)
-                    return control
-                except Exception:
-                    continue
-        # Only fall back to the whole page when the dialog offered nothing.
+    # With a dialog open, only the dialog counts: falling back to the page would
+    # find exactly the controls this scoping exists to avoid, e.g. the messaging
+    # widget's "Send" taken for a submit button.
+    where = await form_scope(page)
+    for role in ('button', 'link'):
+        matches = where.get_by_role(role, name=pattern)
+        for control in ([matches.last, matches.first] if prefer_last else [matches.first]):
+            try:
+                await control.wait_for(state='visible', timeout=2500)
+                return control
+            except Exception:
+                continue
     return None
 
 
@@ -1422,6 +1423,8 @@ async def try_advance_to_form(page):
                 continue
 
             before = page.url
+            fields_before = await page.evaluate(
+                '() => document.querySelectorAll("input,select,textarea").length')
             try:
                 async with page.context.expect_page(timeout=8000) as new_page_info:
                     await control.click(timeout=5000)
@@ -1430,9 +1433,14 @@ async def try_advance_to_form(page):
                 await pause(new_page, 2500)
                 return new_page
             except Exception:
-                # No new tab: either a same-tab navigation or an in-page reveal.
+                # No new tab: a same-tab navigation or an in-page reveal - or
+                # nothing at all, in which case try the next candidate rather
+                # than reporting that the wizard moved on.
                 await pause(page, 3500)
-                return page
+                fields_after = await page.evaluate(
+                    '() => document.querySelectorAll("input,select,textarea").length')
+                if page.url != before or fields_after != fields_before:
+                    return page
     return None
 
 
@@ -1440,7 +1448,7 @@ async def try_advance_to_form(page):
 #
 # Two things drive the order. "Diplomas & Certificates" contains the word
 # "certificate", so it has to be tested before any reference rule that also
-# matches it. And the diplomas PDF is a bundle - diplomas plus the SAP work
+# matches it. And the diplomas PDF is a bundle - diplomas plus a work
 # certificate - so it is the better answer to a vague "additional documents"
 # slot than the standalone reference letter, which it already contains.
 # Only a field that names a reference or recommendation gets that letter on
@@ -1588,7 +1596,7 @@ async def review_resume_is_ours(page, cv_path):
                 const txt = ((block && block.parentElement ? block.parentElement.innerText
                                                           : (block || {}).innerText) || '');
                 // LinkedIn truncates the name on the review page
-                // ("20260731_YunoJuno_..."), so accept a cut-off name too.
+                // ("20260101_Example_..."), so accept a cut-off name too.
                 const m = txt.match(/[\\w .()\\-]+\\.(pdf|docx?)/i)
                        || txt.match(/[\\w .()\\-]{6,}(?:\\u2026|\\.\\.\\.)/);
                 return m ? m[0].trim() : '';
@@ -1599,7 +1607,7 @@ async def review_resume_is_ours(page, cv_path):
     if shown is None:
         return False, True, None
     wanted = os.path.basename(cv_path or '')
-    # LinkedIn truncates long names ("20260731_YunoJuno_..."), so compare the
+    # LinkedIn truncates long names ("20260101_Example_..."), so compare the
     # stem up to the ellipsis rather than demanding an exact match.
     stem = shown.replace('\u2026', '...').split('...')[0].strip()
     ours = bool(stem) and (stem in wanted or wanted.startswith(stem[:12]))
@@ -2231,35 +2239,69 @@ def available_memory_mb():
     return None
 
 
-def release_profile_lock():
-    """Close a browser left open by an earlier run.
+def _process_alive_ancestor(pid):
+    """The nearest live Python ancestor of a process, or None if it is orphaned.
 
-    Runs hold the browser open so filled forms can be reviewed over VNC, which
-    keeps the Chrome profile locked. A new run supersedes that review session,
-    so reclaim the profile rather than failing to launch.
+    Playwright's Chromium hangs off a node driver, which hangs off the Python
+    process that launched it. If that Python process is still running, the
+    browser belongs to a live run - the nightly scraper, an add-by-URL fetch,
+    or a review window someone is filling in by hand.
+    """
+    import subprocess
+    seen = set()
+    while pid and pid > 1 and pid not in seen:
+        seen.add(pid)
+        try:
+            out = subprocess.run(['ps', '-o', 'ppid=,comm=', '-p', str(pid)],
+                                 capture_output=True, text=True).stdout.strip()
+        except Exception:
+            return None
+        if not out:
+            return None
+        ppid, _, comm = out.partition(' ')
+        if 'python' in comm.lower() and pid != os.getpid():
+            return pid
+        try:
+            pid = int(ppid)
+        except ValueError:
+            return None
+    return None
+
+
+def release_profile_lock():
+    """Reclaim the Chrome profile from a browser nothing owns any more.
+
+    Only orphans are killed. This used to kill every browser on the profile,
+    which meant starting an application run could tear down the nightly scrape
+    mid-run, or an add-by-URL fetch. A browser still owned by a live run is
+    left alone, and the caller is told the profile is busy.
+
+    Returns True when the profile is free (or was freed), False when another
+    live run is using it.
     """
     import subprocess
     profile = os.path.abspath(CHROME_PROFILE_DIR)
     try:
-        out = subprocess.run(['pgrep', '-f', f'--user-data-dir={profile}'],
+        out = subprocess.run(['pgrep', '-f', '--', f'--user-data-dir={profile}'],
                              capture_output=True, text=True).stdout.split()
     except Exception:
-        return
-    if not out:
-        return
-    print(f'Closing {len(out)} browser process(es) left over from an earlier run...')
-    for pid in out:
+        return True
+    pids = [int(p) for p in out if p.isdigit()]
+    if not pids:
+        return True
+    owned = [p for p in pids if _process_alive_ancestor(p)]
+    if owned:
+        return False
+    print(f'Closing {len(pids)} orphaned browser process(es) from an earlier run...')
+    for pid in pids:
         try:
-            os.kill(int(pid), 15)
+            os.kill(pid, 15)
         except Exception:
             pass
-    import time
     time.sleep(4)
-    for pid in out:
+    for pid in pids:
         try:
-            os.kill(int(pid), 9)
-        except (ProcessLookupError, ValueError):
-            pass
+            os.kill(pid, 9)
         except Exception:
             pass
     # Chromium leaves these behind when killed, and refuses to start with them.
@@ -2269,6 +2311,7 @@ def release_profile_lock():
         except OSError:
             pass
     time.sleep(1)
+    return True
 
 
 async def run_applications(limit=None, job_ids=None, auto_submit=False, include_blocked=False):
@@ -2316,7 +2359,10 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
     results = []
     review_tabs = []
     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
-    release_profile_lock()
+    if not release_profile_lock():
+        release_run_lock()
+        raise RuntimeError('The browser profile is in use by another run (the scraper or an '
+                           'add-by-link fetch). Try again when it has finished.')
     async with async_playwright() as p:
         browser = await p.chromium.launch_persistent_context(
             user_data_dir=CHROME_PROFILE_DIR,
@@ -2390,9 +2436,20 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
                 for tab in browser.pages[1:]:
                     try:
                         marks.append(tab.url)
+                        # The values, not just the field count: typing into a
+                        # long answer changes nothing else on the page, and a
+                        # signature that missed it closed the tab mid-sentence.
                         marks.append(await tab.evaluate(
-                            '() => document.querySelectorAll("input,select,textarea").length'
-                            ' + "|" + (document.title || "")'))
+                            '''() => {
+                                let h = 0;
+                                const s = Array.from(document.querySelectorAll(
+                                    "input,select,textarea")).map(e =>
+                                    e.type === "file" ? String(e.files.length)
+                                    : (e.checked ? "1" : "0") + e.value).join("|")
+                                    + "|" + (document.title || "");
+                                for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+                                return String(h);
+                            }'''))
                     except Exception:
                         marks.append('gone')
                 return '\n'.join(marks)

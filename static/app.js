@@ -1071,7 +1071,7 @@ window.saveSettings = async function() {
             if (p.error) {
                 html += '<span style="color:#fbbf24;">But the file did not parse: ' + p.error + '</span>';
             } else {
-                html += `The next run will make ${p.searches} searches` +
+                html += `The next run will make ${p.searches} searches (${p.pages} result pages)` +
                     (p.job_types && p.job_types.length ? ` (${p.job_types.join(', ')})` : '') + ':<br>' +
                     p.keywords.map(k =>
                         `&nbsp;&nbsp;<code>${k.keyword}</code> in ${k.locations.join(', ')}`).join('<br>');

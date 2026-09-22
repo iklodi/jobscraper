@@ -21,21 +21,23 @@ JOB_TYPE_CODES = {
 
 def get_search_criteria():
     """Read keywords, locations and job types from search_criteria.md (or env)."""
-    env_keywords = os.environ.get('SEARCH_KEYWORDS')
-    env_locations = os.environ.get('SEARCH_LOCATIONS')
-    env_job_types = os.environ.get('SEARCH_JOB_TYPES')
-
-    if env_keywords and env_locations:
-        keywords = [(k.strip(), None) for k in env_keywords.split(',')]
-        locations = [l.strip() for l in env_locations.split(',')]
-        job_types = [j.strip() for j in env_job_types.split(',')] if env_job_types else []
-        return keywords, locations, job_types
-
+    # search_criteria.md is the source of truth - it is what the dashboard's
+    # Search Settings edits. The env vars are only a fallback for when the file
+    # does not exist; they used to be checked first, so anyone who copied
+    # .env.example had the file, and every edit made in the dashboard, ignored.
     criteria_path = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'search_criteria.md')
     keywords = []
     locations = []
     job_types = []
     if not os.path.exists(criteria_path):
+        env_keywords = os.environ.get('SEARCH_KEYWORDS')
+        env_locations = os.environ.get('SEARCH_LOCATIONS')
+        env_job_types = os.environ.get('SEARCH_JOB_TYPES')
+        if env_keywords and env_locations:
+            return ([(k.strip(), None) for k in env_keywords.split(',') if k.strip()],
+                    [l.strip() for l in env_locations.split(',') if l.strip()],
+                    [j.strip() for j in env_job_types.split(',') if j.strip()]
+                    if env_job_types else [])
         return [("Software Engineer", None)], ["Remote"], []
         
     with open(criteria_path, 'r') as f:
@@ -104,8 +106,8 @@ async def run_scraper():
             notifier.send_email(
                 'AI Job Scraper - LinkedIn re-login required',
                 "The scraper landed on the LinkedIn login page, so the saved browser session has expired.\n\n"
-                "Connect to the scraper machine over VNC (port 5900) and complete the login "
-                "in the browser window that is already open.\n\n"
+                "Complete the login in the browser window that is already open on the "
+                "machine running the scraper (over VNC if it runs headless).\n\n"
                 "This run waits **5 minutes** for the login, then aborts; scraping resumes "
                 "on the next scheduled run once you are logged in.\n\n"
                 f"Dashboard: {notifier.dashboard_url()}"

@@ -4,7 +4,7 @@ Point it at a LinkedIn posting or any employer's job page; it reads the advert,
 records the job, and produces the same documents the nightly pipeline does:
 
     python generate_from_url.py "https://www.linkedin.com/jobs/view/4448054855/"
-    python generate_from_url.py "https://careers.example.com/job/123" -i "stress the SAP work"
+    python generate_from_url.py "https://careers.example.com/job/123" -i "stress the cloud work"
 
 LinkedIn pages need the logged-in browser profile the scraper uses. If the page
 comes back as a login wall, run once with --headed and sign in.
@@ -261,6 +261,7 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None,
     step(f"Scoring {meta.get('company') or 'Unknown'}: "
          f"{meta.get('title') or 'the role'} ...")
     score = reasoning = None
+    prior_status = db.get_job_status(job_id)
     try:
         evaluate_single_job(job_id, instructions)
         row = db.get_connection().execute(
@@ -272,8 +273,10 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None,
 
     # Whatever it scored, it stays in To Do: evaluate_single_job files a job
     # below the bar as 'scored', which would drop a hand-picked URL into
-    # Rejected the moment it was added.
-    db.update_job_status(job_id, 'to_apply')
+    # Rejected the moment it was added. Unless the link is for a job already
+    # approved or applied to - then it goes back exactly where it was.
+    db.update_job_status(job_id, prior_status if prior_status in db.PROTECTED_STATUSES
+                         else 'to_apply')
 
     folder = None
     if generate:

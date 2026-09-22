@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from scraper import run_scraper
-from evaluate import run_evaluation
+from evaluate import run_evaluation, any_model_configured, get_groq_client, get_gemini_client
 from generator import run_generator
 import db
 import notifier
@@ -38,9 +38,10 @@ async def main():
     skip_eval = '--no-eval' in sys.argv
     
     if not skip_eval:
-        print("\n=== Step 2: Evaluating Jobs with Gemini ===")
-        if not os.environ.get("GEMINI_API_KEY"):
-            print("Warning: GEMINI_API_KEY not found. Skipping evaluation.")
+        print("\n=== Step 2: Evaluating Jobs ===")
+        if not any_model_configured(get_groq_client(), get_gemini_client()):
+            print("Warning: no model configured (INFOMANIAK_API_TOKEN, GEMINI_API_KEY or "
+                  "GROQ_API_KEY). Skipping evaluation.")
         else:
             result = run_evaluation()
             if result is not None:

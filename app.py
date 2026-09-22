@@ -6,6 +6,7 @@ import sys
 import subprocess
 import threading
 import progress_tracker
+import db
 
 load_dotenv(override=True)
 
@@ -171,9 +172,10 @@ def bg_generate(job_id, instructions, final_status='generated'):
 def regenerate_job(job_id):
     conn = get_db_connection()
     row = conn.execute('SELECT status FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
-    # Regenerating an approved job should hand it back to Approved rather than
-    # dropping it into To Do.
-    final_status = 'approved' if row and row['status'] == 'approved' else 'generated'
+    # Regenerating hands a job back to where a person put it - Approved,
+    # Applied, Interviewing... - rather than dropping it into To Do.
+    final_status = (row['status'] if row and row['status'] in db.PROTECTED_STATUSES
+                    else 'generated')
     conn.execute('UPDATE jobs SET status = "generating" WHERE job_id = ?', (job_id,))
     conn.commit()
     conn.close()
@@ -186,14 +188,22 @@ def regenerate_job(job_id):
     t.start()
     return jsonify({'success': True})
 
-def bg_reevaluate(job_id, instructions):
+def bg_reevaluate(job_id, instructions, prior_status=None):
     import importlib
     import evaluate
     importlib.reload(evaluate)           # same reason as run_applier_bg
-    evaluate.evaluate_single_job(job_id, instructions)
+    try:
+        evaluate.evaluate_single_job(job_id, instructions)
+    finally:
+        # A new score informs; it does not move a job someone approved or
+        # applied to. Without this, re-scoring an Applied job dropped it into
+        # Rejected or To Do by score.
+        if prior_status in db.PROTECTED_STATUSES:
+            db.update_job_status(job_id, prior_status)
 
 @app.route('/api/jobs/<job_id>/reevaluate', methods=['POST'])
 def reevaluate_job(job_id):
+    prior_status = db.get_job_status(job_id)
     conn = get_db_connection()
     conn.execute('UPDATE jobs SET status = "evaluating" WHERE job_id = ?', (job_id,))
     conn.commit()
@@ -201,7 +211,7 @@ def reevaluate_job(job_id):
     
     data = request.json or {}
     instructions = data.get('instructions')
-    t = threading.Thread(target=bg_reevaluate, args=(job_id, instructions))
+    t = threading.Thread(target=bg_reevaluate, args=(job_id, instructions, prior_status))
     t.start()
     return jsonify({'success': True})
 
@@ -240,7 +250,6 @@ def stop_scrape():
 
 @app.route('/api/scrape/status', methods=['GET'])
 def scrape_status():
-    global scraper_thread, apply_thread
     is_running = (scraper_thread is not None and scraper_thread.is_alive()) or \
                  (apply_thread is not None and apply_thread.is_alive())
     status_data = progress_tracker.get_status()
@@ -287,8 +296,8 @@ def trigger_apply():
     limit = int(limit) if limit else None
     job_ids = data.get('job_ids')
 
-    # The dashboard's Fill Application button submits: the pre-submit gate in
-    # applier.py is what holds an incomplete application back, not this flag.
+    # Apply Now omits `submit` or sends true; Fill Now sends false. When it is
+    # on, the pre-submit gate in applier.py still refuses anything incomplete.
     auto_submit = bool(data.get('submit', True))
     apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids, auto_submit))
     apply_thread.start()
@@ -396,7 +405,9 @@ def save_settings():
         summary = {
             'keywords': [{'keyword': k, 'locations': locs or locations} for k, locs in keyword_specs],
             'job_types': job_types,
-            'searches': sum(len(locs or locations) for _, locs in keyword_specs) * 3,
+            # One search per keyword/location pair, each read three pages deep.
+            'searches': sum(len(locs or locations) for _, locs in keyword_specs),
+            'pages': sum(len(locs or locations) for _, locs in keyword_specs) * 3,
         }
     except Exception as e:
         summary = {'error': str(e)}

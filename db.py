@@ -2,7 +2,25 @@ import sqlite3
 import datetime
 import os
 
-MIN_PASS_SCORE = int(os.environ.get('MIN_PASS_SCORE', 7))
+def min_pass_score():
+    """The score at or above which a job goes to To Do. Read live, so the
+    dashboard and a long-running process agree with .env without a restart;
+    evaluate.min_pass_score() delegates here, so there is one source."""
+    return int(os.environ.get('MIN_PASS_SCORE', 7))
+
+
+# Statuses a person put a job into. Re-scoring or regenerating a job must never
+# move it out of one of these - an application you sent is not undone because
+# the model now scores the advert differently.
+PROTECTED_STATUSES = ('approved', 'ready_to_submit', 'applied', 'interviewing',
+                      'account_required')
+
+
+def get_job_status(job_id):
+    conn = get_connection()
+    row = conn.execute('SELECT status FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    conn.close()
+    return row[0] if row else None
 
 DB_FILE = 'jobs.db'
 
@@ -104,7 +122,7 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
     conn = get_connection()
     cursor = conn.cursor()
     status = 'scored'
-    if score >= MIN_PASS_SCORE:
+    if score >= min_pass_score():
         status = 'to_apply'
     cursor.execute('''
         UPDATE jobs 
@@ -157,12 +175,14 @@ if __name__ == '__main__':
     print("Database initialized.")
 
 def get_competing_jobs(company, exclude_job_id):
+    # Not 'approved': an approval is a person's decision, and the comparison is
+    # allowed to reject what it picked, never what they picked.
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT job_id, title, description
         FROM jobs
-        WHERE company = ? AND job_id != ? AND status IN ('to_apply', 'generated', 'synced', 'backlog', 'approved')
+        WHERE company = ? AND job_id != ? AND status IN ('to_apply', 'generated', 'synced', 'backlog')
     ''', (company, exclude_job_id))
     jobs = cursor.fetchall()
     conn.close()

@@ -15,7 +15,7 @@ CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 def min_pass_score():
     """The score at or above which a job goes to To Do - and from which the
     prompt asks for salary, recruiter, hiring manager and language."""
-    return int(os.environ.get('MIN_PASS_SCORE', 7))
+    return db.min_pass_score()
 
 DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
 DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
@@ -125,6 +125,13 @@ def get_evaluation_rules():
         return ""
     with open(rules_path, 'r') as f:
         return f.read()
+
+def any_model_configured(groq_client=None, gemini_client=None):
+    """True when at least one provider can answer. Infomaniak alone is enough;
+    the gates used to check only Gemini and Groq, so an Infomaniak-only setup
+    silently skipped evaluation."""
+    return bool(infomaniak.get_config() or groq_client or gemini_client)
+
 
 def get_groq_client():
     api_key = os.environ.get("GROQ_API_KEY")
@@ -239,8 +246,8 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                         print(f"  -> Groq Error on {model_name}: {e}")
                         continue
         
-        if not groq_client and not gemini_client:
-            print("Error: Neither GROQ_API_KEY nor GEMINI_API_KEY are configured.")
+        if not any_model_configured(groq_client, gemini_client):
+            print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
             return None
             
         # If we exhausted ALL models in the cascade, we hit a hard wall.
@@ -264,8 +271,8 @@ def run_evaluation():
     groq_client = get_groq_client()
     gemini_client = get_gemini_client()
     
-    if not groq_client and not gemini_client:
-        print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
+    if not any_model_configured(groq_client, gemini_client):
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
         return
 
     print("Loading Career Dossier...")
@@ -303,21 +310,14 @@ def run_evaluation():
             hiring_manager_name = result.get('hiring_manager_name', None)
             jd_language = result.get('jd_language', None)
             
-            eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
-            pass_score = min_pass_score()
-            entry = {'job_id': job_id, 'title': title, 'company': company, 'score': score}
-            if score >= pass_score:
-                eval_stats['recent_backlog'].append(entry)
-            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 6)):
-                # Worth a look even though they did not clear the bar - otherwise a
-                # run with no 9s produces a summary with nothing to click.
-                eval_stats['near_misses'].append(entry)
-                
             print(f"--> Score: {score}/10")
-            if score >= 8:
+            if score >= min_pass_score():
                 print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter} | HM: {hiring_manager_name} | Lang: {jd_language}")
             
-            if score >= min_pass_score():
+            # One role per company only makes sense for a direct employer. A
+            # recruiter or job aggregator posts for many unrelated
+            # clients under one name, and comparing those rejected real matches.
+            if score >= min_pass_score() and not is_recruiter:
                 competing = db.get_competing_jobs(company, job_id)
                 if competing:
                     c_id, c_title, c_desc = competing[0]
@@ -331,9 +331,12 @@ def run_evaluation():
                                                       .replace('{cv_text}', cv_text)
                     comp_result = compare_jobs(groq_client, gemini_client, comp_prompt)
                     if comp_result:
-                        pref = comp_result.get('preferred_job', 'OLD')
+                        # The prompt asks for "new"/"old" in lower case; this
+                        # compared against 'NEW' for months, so the new job was
+                        # rejected even when the model preferred it.
+                        pref = str(comp_result.get('preferred_job', 'old')).strip().lower()
                         comp_reason = comp_result.get('reasoning', '')
-                        if pref == 'NEW':
+                        if pref == 'new':
                             print(f"--> AI prefers the NEW job. Rejecting old job '{c_title}'...")
                             db.update_job_status(c_id, 'rejected')
                         else:
@@ -341,10 +344,20 @@ def run_evaluation():
                             score = 1
                             reasoning = f"Rejected in favor of existing backlog job '{c_title}'. AI Reasoning: {comp_reason}"
             
-            # Save to DB
+            # Counted after the comparison, so a job rejected in favour of an
+            # existing one is not announced in the summary as a new match.
+            eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
+            entry = {'job_id': job_id, 'title': title, 'company': company, 'score': score}
+            if score >= min_pass_score():
+                eval_stats['recent_backlog'].append(entry)
+            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 6)):
+                # Worth a look even though they did not clear the bar - otherwise a
+                # run with nothing over the bar produces a summary with nothing to click.
+                eval_stats['near_misses'].append(entry)
+
             db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter, hiring_manager_name, jd_language)
         else:
-            print(f"--> Failed to evaluate.")
+            print("--> Failed to evaluate.")
             
         # Dynamic Rate limit sleep
         # We don't want a fixed 4.5s delay if we are using Pro models, but 1.5s should be safe since the cascade handles the rest.
@@ -367,8 +380,8 @@ def evaluate_single_job(job_id, custom_instructions=None):
     groq_client = get_groq_client()
     gemini_client = get_gemini_client()
     
-    if not groq_client and not gemini_client:
-        print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
+    if not any_model_configured(groq_client, gemini_client):
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
         return False
         
     try:

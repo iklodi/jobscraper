@@ -52,7 +52,7 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts):
                 
     recent_backlog = eval_stats.get('recent_backlog', [])
     if recent_backlog:
-        lines.append("## New Backlog Additions (Score 9+)\n")
+        lines.append(f"## New on To Do (scored {os.environ.get('MIN_PASS_SCORE', 7)}+)\n")
         for job in recent_backlog:
             job_id = job.get('job_id')
             title = job['title']

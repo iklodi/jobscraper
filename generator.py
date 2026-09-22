@@ -12,6 +12,7 @@ from google.genai import types
 import time
 import progress_tracker
 import infomaniak
+from evaluate import GEMINI_MODELS, GROQ_MODELS, any_model_configured
 from playwright.async_api import async_playwright
 import PyPDF2
 
@@ -40,8 +41,8 @@ CV_PATH = os.path.join(CVS_DIR, 'docs', CV_TEMPLATE_NAME)
 DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
 CL_PATH = os.path.join(CVS_DIR, 'docs', CL_TEMPLATE_NAME)
 OUTPUT_DIR = os.path.join(CVS_DIR, 'applications')
-GROQ_MODEL = 'llama-3.3-70b-versatile'
-GEMINI_MODEL = 'gemini-3.5-flash'
+# Fallback cascades are shared with evaluate.py. This file used to pin one model
+# of each, and the Groq one was retired, so generation had no working fallback.
 
 # Infomaniak only accepts response_format 'json_schema', so Task 1-5 of the
 # generator prompt are restated here as a shape.
@@ -109,32 +110,34 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
         result = infomaniak.chat_json(prompt, GEN_SCHEMA)
 
         if not result and gemini_client:
-            try:
-                response = gemini_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
-                import json
-                result = json.loads(response.text)
-            except Exception as e:
-                error_msg += f"Gemini Error: {str(e)} | "
-                
+            for model_name in GEMINI_MODELS:
+                try:
+                    response = gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    result = json.loads(response.text)
+                    break
+                except Exception as e:
+                    error_msg += f"Gemini {model_name}: {str(e)} | "
+
         if not result and groq_client:
-            try:
-                response = groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.1
-                )
-                import json
-                result = json.loads(response.choices[0].message.content)
-            except Exception as e:
-                error_msg += f"Groq Error: {str(e)}"
-                
+            for model_name in GROQ_MODELS:
+                try:
+                    response = groq_client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_format={"type": "json_object"},
+                        temperature=0.1
+                    )
+                    result = json.loads(response.choices[0].message.content)
+                    break
+                except Exception as e:
+                    error_msg += f"Groq {model_name}: {str(e)} | "
+
         if result:
             break
             
@@ -430,6 +433,9 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
                              jd_language, application_notes
                       FROM jobs WHERE job_id = ?''', (job_id,))
     job = cursor.fetchone()
+    # A failed regeneration of an approved or applied job leaves it where it was;
+    # Failed is for jobs that never got as far as a person's decision.
+    failure_status = final_status if final_status in db.PROTECTED_STATUSES else 'failed'
     if not job:
         print(f"Job {job_id} not found.")
         conn.close()
@@ -438,8 +444,8 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
     groq_client = get_groq_client()
     gemini_client = get_gemini_client()
     
-    if not groq_client and not gemini_client:
-        print("Error: You must set either GROQ_API_KEY or GEMINI_API_KEY in your .env file.")
+    if not any_model_configured(groq_client, gemini_client):
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
         conn.close()
         return False
         
@@ -469,13 +475,13 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
             texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions)
             if not texts:
                 print(f"AI returned empty result for job {job_id}")
-                cursor.execute('UPDATE jobs SET status = "failed" WHERE job_id = ?', (job_id,))
+                cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (failure_status, job_id))
                 conn.commit()
                 conn.close()
                 return False
         except Exception as e:
             print(f"Error generating texts for job {job_id}: {e}")
-            cursor.execute('UPDATE jobs SET status = "failed" WHERE job_id = ?', (job_id,))
+            cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (failure_status, job_id))
             conn.commit()
             conn.close()
             return False

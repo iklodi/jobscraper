@@ -1,9 +1,9 @@
 # Application answer bank - copy to $CVS_DIR/profile.yaml and fill in.
 #
 # This is the ONLY source of answers the applier will use. It never invents or
-# approximates an answer: any question this file does not cover is left blank
-# and listed in the job's notes on the dashboard. Add the question here and it
-# will never block an application again.
+# approximates an answer: any question this file does not cover is left blank,
+# listed in the job's notes, and collected into the email after a batch run.
+# Add the question here and it will never block an application again.
 #
 # Keep the real file in your CVS_DIR (alongside your CV), never in this repo -
 # it contains personal data.
@@ -146,9 +146,11 @@ policies:
   # Email verification links are always left for you to click.
   allow_account_creation: false
   never_solve_captchas: true
-  # Not enforced by code: whether an application is submitted is decided by the
-  # dashboard button (Apply Now submits, Fill Now does not) or `applier.py --submit`.
-  # The pre-submit gate still refuses to send anything incomplete.
+  # true = the applier only ever fills forms and leaves them for you to send:
+  # Apply Now is disabled (its tooltip says so) and `applier.py --submit` fills
+  # only. With false, Apply Now submits - the pre-submit gate still refuses to
+  # send anything incomplete.
+  never_submit_without_review: false
   never_inflate_experience: true
   decline_premium_upsells: true
   decline_optional_marketing_consent: true

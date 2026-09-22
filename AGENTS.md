@@ -131,8 +131,9 @@ number the DOM elements on the image and ask which number.
 Do not weaken these. Each one exists because it failed once.
 
 - **It never invents an answer.** Anything `profile.yaml` does not cover is
-  left blank and listed in the job's note (visible in the dashboard) so it can be
-  added there. It is not emailed.
+  left blank, listed in the job's note, and collected into the batch email
+  (grouped by question) so it can be added there. Single-job runs report on the
+  dashboard only.
 - **The pre-submit gate** blocks submission unless every required field is
   filled, nothing was left unanswered, no field refused input, and every
   required upload got a document.
@@ -145,6 +146,11 @@ Do not weaken these. Each one exists because it failed once.
   LinkedIn page behind an Easy Apply modal offers its own "Send" button.
 - **Values are checked after filling.** A rejected value is retried in other
   shapes (phone numbers: E.164, 00-prefixed, national) and otherwise reported.
+- **Submitting can be switched off** with
+  `policies.never_submit_without_review: true` in `profile.yaml`. The applier
+  then only fills, whatever it is asked (`--submit` included), the endpoint
+  refuses a submit request, and Apply Now is disabled with a tooltip saying how
+  to enable it.
 - **It does not solve CAPTCHAs.** That gate is deliberate.
 - **Account creation is allowed** when `policies.allow_account_creation` is set.
   Generated passwords go to `CVS_DIR/ats_accounts.yaml` (chmod 600) *before* the

@@ -283,6 +283,18 @@ def run_applier_bg(limit, job_ids, auto_submit=False):
         progress_tracker.clear_status()
         apply_thread = None
 
+@app.route('/api/apply/policy', methods=['GET'])
+def apply_policy():
+    """Whether Apply Now may submit, and if not, what would allow it."""
+    import applier
+    blocked = applier.submit_blocked_by_profile()
+    return jsonify({
+        'submit_allowed': not blocked,
+        'reason': (f'Submitting is switched off: policies.{applier.SUBMIT_POLICY_KEY} is true '
+                   f'in {applier.PROFILE_PATH}. Set it to false to enable Apply Now. '
+                   'Fill Now still completes the form for you to send.') if blocked else '',
+    })
+
 @app.route('/api/apply', methods=['POST'])
 def trigger_apply():
     global apply_thread
@@ -299,6 +311,11 @@ def trigger_apply():
     # Apply Now omits `submit` or sends true; Fill Now sends false. When it is
     # on, the pre-submit gate in applier.py still refuses anything incomplete.
     auto_submit = bool(data.get('submit', True))
+    import applier
+    if auto_submit and applier.submit_blocked_by_profile():
+        return jsonify({'status': 'blocked',
+                        'error': f'policies.{applier.SUBMIT_POLICY_KEY} is true in profile.yaml '
+                                 '- use Fill Now, or set it to false to submit.'}), 409
     apply_thread = threading.Thread(target=run_applier_bg, args=(limit, job_ids, auto_submit))
     apply_thread.start()
     return jsonify({'status': 'started'})

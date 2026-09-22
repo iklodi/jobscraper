@@ -77,6 +77,10 @@ will search for.
 - **⚙️ Search Settings** — edit the keywords and scoring rules.
 - **Run Pipeline / Run Evaluations Only** — trigger a run by hand.
 - **📤 Apply to Approved / 📝 Fill Approved** — work through every approved job.
+  Apply is greyed out when `policies.never_submit_without_review` is `true` in
+  `profile.yaml`; hover it to see why. Fill always works.
+- After a batch, the email lists every question your profile could not answer,
+  grouped by question, so you can add the answers to `profile.yaml`.
 - Each card shows its score, location, estimated salary, whether the poster is a
   recruiter, and 📢 for LinkedIn's promoted (paid) listings, which the evaluator
   marks down. Opening a job shows its documents and the full screenshot trail of

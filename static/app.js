@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    fetchJobs();
+    loadApplyPolicy().then(fetchJobs);
     pollScraperStatus();
 
     const modal = document.getElementById('job-modal');
@@ -35,6 +35,33 @@ window.filterColumn = function(input) {
     });
 }
 
+
+// Apply Now honours policies.never_submit_without_review in profile.yaml. When
+// submitting is off the button stays visible but disabled, and says why - a
+// disabled button swallows hover, so the explanation sits on a wrapper.
+window.applyPolicy = { submit_allowed: true, reason: '' };
+
+function applyNowButton(jobId, label = '📤 Apply Now') {
+    const btn = `<button class="btn btn-primary" onclick="triggerApply('${jobId}')"`;
+    if (window.applyPolicy.submit_allowed) return `${btn}>${label}</button>`;
+    const why = window.applyPolicy.reason.replace(/"/g, '&quot;');
+    return `<span class="btn-blocked" title="${why}">${btn} disabled>${label}</button></span>`;
+}
+
+async function loadApplyPolicy() {
+    try {
+        window.applyPolicy = await (await fetch('/api/apply/policy')).json();
+    } catch (e) { /* keep the permissive default; the server enforces it anyway */ }
+    const header = document.getElementById('run-apply-btn');
+    if (header && !window.applyPolicy.submit_allowed) {
+        header.disabled = true;
+        const wrap = document.createElement('span');
+        wrap.className = 'btn-blocked';
+        wrap.title = window.applyPolicy.reason;
+        header.parentNode.insertBefore(wrap, header);
+        wrap.appendChild(header);
+    }
+}
 
 let allJobs = [];
 
@@ -296,13 +323,13 @@ function openJobDetails(jobId) {
         if (['generated', 'synced', 'backlog', 'to_apply'].includes(job.status)) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">✓ Approve</button>
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                ${applyNowButton(job.job_id)}
                 <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                ${applyNowButton(job.job_id)}
                 <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
@@ -311,20 +338,20 @@ function openJobDetails(jobId) {
         } else if (job.status === 'ready_to_submit') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Submitted - Mark as Applied</button>
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now (retry)</button>
+                ${applyNowButton(job.job_id, '📤 Apply Now (retry)')}
                 <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now (retry)</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                ${applyNowButton(job.job_id)}
                 <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Move to Account Required</button>
             `;
         } else if (job.status === 'account_required') {
             contextButtonsHtml = `
-                <button class="btn btn-primary" onclick="triggerApply('${job.job_id}')">📤 Apply Now</button>
+                ${applyNowButton(job.job_id)}
                 <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
@@ -692,6 +719,12 @@ window.triggerApply = async function(jobId = null, submit = true) {
             body: JSON.stringify(body)
         });
         const data = await res.json();
+        if (data.status === 'blocked') {
+            alert(data.error);
+            if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;
+            if (hoverBox) hoverBox.classList.remove('active');
+            return;
+        }
         if (data.status === 'already_running') {
             alert("An application run is already in progress.");
             return;
@@ -700,7 +733,7 @@ window.triggerApply = async function(jobId = null, submit = true) {
         pollScraperStatus();
     } catch (e) {
         alert("Failed to start applications: " + e);
-        if (btnApply) btnApply.disabled = false;
+        if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;
         if (hoverBox) hoverBox.classList.remove('active');
     }
 }
@@ -813,7 +846,7 @@ window.pollScraperStatus = async function() {
                 // If it was running and now it's not, refresh the board
                 btnFull.disabled = false;
                 btnEval.disabled = false;
-                if (btnApply) btnApply.disabled = false;
+                if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;
                 btnStop.style.display = 'none';
                 btnStop.disabled = false;
                 btnStop.innerText = 'Stop';
@@ -822,7 +855,7 @@ window.pollScraperStatus = async function() {
             } else {
                 btnFull.disabled = false;
                 btnEval.disabled = false;
-                if (btnApply) btnApply.disabled = false;
+                if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;
                 btnStop.style.display = 'none';
                 hoverBox.classList.remove('active');
             }

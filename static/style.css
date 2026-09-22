@@ -599,3 +599,8 @@ h1 {
     background: rgba(236, 72, 153, 0.18);
     color: #fbcfe8;
 }
+
+/* A control that is visible but switched off by a profile policy. The wrapper
+   carries the tooltip, since a disabled button does not receive hover. */
+.btn-blocked { display: inline-block; cursor: not-allowed; }
+.btn-blocked .btn:disabled { opacity: 0.45; pointer-events: none; }

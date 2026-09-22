@@ -342,6 +342,25 @@ def load_profile():
         return yaml.safe_load(f)
 
 
+SUBMIT_POLICY_KEY = 'never_submit_without_review'
+
+
+def submit_blocked_by_profile(profile=None):
+    """True when profile.yaml forbids sending an application without review.
+
+    policies.never_submit_without_review: true turns every run into a fill:
+    forms are completed and left for a person to send. Enforced here, in the
+    applier itself, so the dashboard and `--submit` on the command line obey it
+    alike.
+    """
+    if profile is None:
+        try:
+            profile = load_profile()
+        except Exception:
+            return False
+    return bool((profile.get('policies') or {}).get(SUBMIT_POLICY_KEY, False))
+
+
 def get_gemini_client():
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
@@ -1366,7 +1385,7 @@ async def fill_wizard(page, client, profile, job, cv_path, cl_path, attachments,
         lines.append(f'Stopped after {max_steps} steps without reaching a submit page.')
 
     if unanswered:
-        lines.append('\nQUESTIONS THE PROFILE DOES NOT ANSWER (left blank):')
+        lines.append(f'\n{UNANSWERED_HEADER} (left blank):')
         for item in unanswered:
             lines.append(f'  - {item.get("question")}  ({item.get("reason")})')
         lines.append('Add these to profile.yaml so future applications answer them automatically.')
@@ -2327,6 +2346,10 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
     db.init_db()
     profile = load_profile()
+    if auto_submit and submit_blocked_by_profile(profile):
+        print(f'policies.{SUBMIT_POLICY_KEY} is true in profile.yaml: filling only, '
+              f'nothing will be submitted.', flush=True)
+        auto_submit = False
     client = get_gemini_client()
     if not client and not infomaniak.get_config():
         release_run_lock()
@@ -2398,7 +2421,8 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
             db.update_job_status(job_id, status)
             db.add_job_note(job_id, note)
-            results.append({'job_id': job_id, 'company': company, 'status': status})
+            results.append({'job_id': job_id, 'company': company, 'status': status,
+                            'unanswered': unanswered_questions(note)})
             print(f'  -> {status}', flush=True)
 
             # Keep this job's tabs only while a human still has to finish the
@@ -2544,6 +2568,24 @@ def run_summary(results, single=False):
             'headline': headline[0].upper() + headline[1:] + '.',
             'single': False, 'jobs': jobs}
 
+UNANSWERED_HEADER = 'QUESTIONS THE PROFILE DOES NOT ANSWER'
+
+
+def unanswered_questions(note):
+    """The questions a run left blank, read back from the note fill_wizard wrote."""
+    out, inside = [], False
+    for line in (note or '').splitlines():
+        if line.startswith(UNANSWERED_HEADER):
+            inside = True
+            continue
+        if inside:
+            if not line.startswith('  - '):
+                break
+            # "  - <question>  (<why the profile does not answer it>)"
+            out.append(re.sub(r'\s{2}\(.*\)\s*$', '', line[4:]).strip())
+    return [q for q in out if q]
+
+
 def _notify(results, single=False):
     """Email a batch outcome. Single-job runs report through the dashboard
     instead - see run_applications."""
@@ -2560,6 +2602,22 @@ def _notify(results, single=False):
         lines.append(f'- **{j["company"]}** - {j["word"]} '
                      f'([open]({base}/?job_id={j["job_id"]}))')
     lines.append('')
+
+    # Questions the profile could not answer, grouped so one missing answer
+    # that blocked five forms reads as one thing to fix, not five.
+    asked = {}
+    for r in results:
+        for q in r.get('unanswered') or []:
+            asked.setdefault(q, []).append(r['company'])
+    if asked:
+        lines.append('## Questions your profile does not answer')
+        lines.append('')
+        for q, companies in sorted(asked.items(), key=lambda kv: -len(kv[1])):
+            lines.append(f'- {q} — *{", ".join(dict.fromkeys(companies))}*')
+        lines.append('')
+        lines.append('They were left blank. Add the answers to profile.yaml and future '
+                     'applications will fill them in.')
+        lines.append('')
 
     if any(j['status'] == 'ready_to_submit' for j in summary['jobs']):
         lines.append('The filled forms are open in the browser on the machine that ran this. '

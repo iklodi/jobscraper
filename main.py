@@ -13,6 +13,8 @@ from generator import run_generator
 import db
 import notifier
 import progress_tracker
+import mode
+import alerts
 
 async def main():
     progress_tracker.clear_status()
@@ -23,10 +25,18 @@ async def main():
     eval_stats = {'score_counts': {}, 'recent_backlog': []}
     
     skip_scrape = '--no-scrape' in sys.argv
-    
-    if not skip_scrape:
+    print(f"=== Mode: {mode.current_mode()} ===")
+
+    if mode.safe_mode():
+        # Safe mode never browses LinkedIn on the candidate's account. New jobs
+        # arrive through job-alert emails instead.
+        print("=== Step 1: Safe mode - reading LinkedIn job-alert emails ===")
+        keyword_stats = alerts.ingest_alerts() if alerts.configured() else {}
+        if not alerts.configured():
+            print("Note: IMAP is not configured, so no new jobs were read. "
+                  "Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.")
+    elif not skip_scrape:
         print("=== Step 1: Scraping LinkedIn Jobs ===")
-        # Note: Make sure headless=True in scraper.py after initial login
         keyword_stats = await run_scraper()
         if progress_tracker.is_stop_requested():
             print("Stop requested. Exiting.")

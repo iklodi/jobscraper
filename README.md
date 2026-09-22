@@ -27,6 +27,19 @@ Playwright browser using your own logged-in LinkedIn session.
 The nightly run stops after scoring. Pass `--gen` to `main.py` if you want it to
 generate for everything on To Do the old way.
 
+## Full mode and safe mode
+
+`JOBSCRAPER_MODE` in `.env` chooses how new jobs are found:
+
+- **full** (the default) scrapes LinkedIn through a browser signed in to your
+  account. See [DISCLAIMER.md](DISCLAIMER.md) for why that is risky.
+- **safe** never automates your logged-in account. It reads the **job-alert
+  emails** LinkedIn sends you over IMAP, read-only. Set up LinkedIn job alerts
+  for your searches (daily, by email), then fill in the `IMAP_*` settings.
+  Safe mode is still being built (issues #12-#20): for now it finds jobs, but
+  fetching their descriptions, filling forms and the + button still need full
+  mode, and the dashboard greys those out in safe mode.
+
 ## Setup
 
 1. **Prerequisites**: Python 3.14+, Git, LibreOffice.

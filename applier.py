@@ -30,6 +30,7 @@ import db
 import notifier
 import progress_tracker
 import infomaniak
+import mode
 
 # Not override=True: an explicitly exported variable must beat the .env file,
 # otherwise per-run settings passed on the command line are silently ignored.
@@ -57,7 +58,7 @@ async def pause(page, ms, spread=0.35):
     factor = random.uniform(1 - spread, 1 + spread)
     await page.wait_for_timeout(max(250, int(ms * factor * PACE)))
 
-CHROME_PROFILE_DIR = './chrome_profile'
+CHROME_PROFILE_DIR = mode.PROFILE_DIR
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 PROFILE_PATH = os.path.join(CVS_DIR, 'profile.yaml')
 ACCOUNTS_PATH = os.path.join(CVS_DIR, 'ats_accounts.yaml')
@@ -2182,8 +2183,7 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
         raise RuntimeError('The browser profile is in use by another run (the scraper or an '
                            'add-by-link fetch). Try again when it has finished.')
     async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_DIR,
+        browser = await mode.open_linkedin_session(p,
             headless=False,
             viewport={'width': 1440, 'height': 900},
         )

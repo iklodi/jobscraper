@@ -83,6 +83,23 @@ def init_db():
         cursor.execute('ALTER TABLE jobs ADD COLUMN application_notes TEXT')
     except sqlite3.OperationalError:
         pass
+    # Where a job came from: the scraper's search keyword, or in safe mode the
+    # name of the LinkedIn job alert that listed it.
+    try:
+        cursor.execute('ALTER TABLE jobs ADD COLUMN source TEXT')
+    except sqlite3.OperationalError:
+        pass
+    # Safe mode: alert emails already read, so a run never reads one twice.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alert_emails (
+            message_id TEXT PRIMARY KEY,
+            received_at TIMESTAMP,
+            alert TEXT,
+            jobs_listed INTEGER,
+            jobs_added INTEGER,
+            processed_at TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -105,7 +122,11 @@ def add_job(job_id, title, company, location, description, link, is_promoted=Fal
 def get_unscored_jobs():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT job_id, title, company, location, description, is_promoted FROM jobs WHERE status = "new"')
+    # A job without a description cannot be scored. In safe mode an alert email
+    # names a job before its description has been fetched, so it waits here as
+    # 'new' until it has one, rather than being scored on its title alone.
+    cursor.execute('SELECT job_id, title, company, location, description, is_promoted FROM jobs '
+                   "WHERE status = 'new' AND COALESCE(TRIM(description), '') != ''")
     jobs = cursor.fetchall()
     conn.close()
     return jobs

@@ -1,13 +1,13 @@
 import asyncio
 from playwright.async_api import async_playwright
 import urllib.parse
+import mode
 
-CHROME_PROFILE_DIR = './chrome_profile'
+CHROME_PROFILE_DIR = mode.PROFILE_DIR
 
 async def debug():
     async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_DIR,
+        browser = await mode.open_linkedin_session(p,
             headless=True,
             viewport={"width": 1280, "height": 800}
         )

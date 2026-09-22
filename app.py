@@ -283,6 +283,23 @@ def run_applier_bg(limit, job_ids, auto_submit=False):
         progress_tracker.clear_status()
         apply_thread = None
 
+@app.route('/api/mode', methods=['GET'])
+def get_mode():
+    """The current mode, and which features need the logged-in LinkedIn session.
+
+    Until their safe-mode versions exist (#15, #16), the applier and adding a job
+    by link still open the logged-in profile, which safe mode refuses.
+    """
+    import mode
+    safe = mode.safe_mode()
+    later = ('Not available in safe mode yet: it still needs the logged-in LinkedIn '
+             'session, which safe mode never uses. Tracked in issue {}.')
+    return jsonify({
+        'mode': mode.current_mode(),
+        'apply_available': not safe, 'apply_reason': later.format('#15') if safe else '',
+        'add_url_available': not safe, 'add_url_reason': later.format('#16') if safe else '',
+    })
+
 @app.route('/api/apply/policy', methods=['GET'])
 def apply_policy():
     """Whether Apply Now may submit, and if not, what would allow it."""
@@ -311,6 +328,11 @@ def trigger_apply():
     # Apply Now omits `submit` or sends true; Fill Now sends false. When it is
     # on, the pre-submit gate in applier.py still refuses anything incomplete.
     auto_submit = bool(data.get('submit', True))
+    import mode
+    if mode.safe_mode():
+        return jsonify({'status': 'blocked',
+                        'error': 'Safe mode is on: filling forms still needs the logged-in '
+                                 'LinkedIn session (issue #15).'}), 409
     import applier
     if auto_submit and applier.submit_blocked_by_profile():
         return jsonify({'status': 'blocked',
@@ -348,6 +370,11 @@ def add_job_from_url():
     if add_url_thread and add_url_thread.is_alive():
         return jsonify({'status': 'already_running'})
 
+    import mode
+    if mode.safe_mode():
+        return jsonify({'status': 'error',
+                        'error': 'Safe mode is on: adding a job by link still needs the '
+                                 'logged-in LinkedIn session (issue #16).'}), 409
     data = request.json or {}
     url = (data.get('url') or '').strip()
     if not url.startswith(('http://', 'https://')):

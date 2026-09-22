@@ -26,8 +26,9 @@ import db
 from generator import generate_for_job, get_gemini_client, get_groq_client
 from evaluate import GEMINI_MODELS, evaluate_single_job   # the cascade, so one retired model does not break this
 from google.genai import types
+import mode
 
-CHROME_PROFILE_DIR = './chrome_profile'
+CHROME_PROFILE_DIR = mode.PROFILE_DIR
 
 # Pull the readable advert out of a page: prefer the containers employers
 # actually use, and fall back to the biggest block of text on the page.
@@ -119,8 +120,7 @@ def job_id_for(url):
 async def fetch_job_page(url, headed=False):
     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
     async with async_playwright() as p:
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_DIR,
+        browser = await mode.open_linkedin_session(p,
             headless=not headed,
             viewport={'width': 1440, 'height': 900},
         )

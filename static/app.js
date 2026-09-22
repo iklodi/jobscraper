@@ -48,19 +48,50 @@ function applyNowButton(jobId, label = '📤 Apply Now') {
     return `<span class="btn-blocked" title="${why}">${btn} disabled>${label}</button></span>`;
 }
 
+// Wrap a control so it is disabled and says why - a disabled button swallows
+// hover, so the tooltip lives on the wrapper.
+function blockControl(el, why) {
+    if (!el || el.parentElement.classList.contains('btn-blocked')) return;
+    el.disabled = true;
+    const wrap = document.createElement('span');
+    wrap.className = 'btn-blocked';
+    wrap.title = why;
+    el.parentNode.insertBefore(wrap, el);
+    wrap.appendChild(el);
+}
+
+window.modeInfo = { mode: 'full', apply_available: true, add_url_available: true };
+
+function fillNowButton(jobId, label = '📝 Fill Now') {
+    const btn = `<button class="btn" onclick="triggerFill('${jobId}')"`;
+    if (window.applyPolicy.fill_allowed !== false) return `${btn}>${label}</button>`;
+    const why = window.applyPolicy.reason.replace(/"/g, '&quot;');
+    return `<span class="btn-blocked" title="${why}">${btn} disabled>${label}</button></span>`;
+}
+
 async function loadApplyPolicy() {
     try {
-        window.applyPolicy = await (await fetch('/api/apply/policy')).json();
-    } catch (e) { /* keep the permissive default; the server enforces it anyway */ }
-    const header = document.getElementById('run-apply-btn');
-    if (header && !window.applyPolicy.submit_allowed) {
-        header.disabled = true;
-        const wrap = document.createElement('span');
-        wrap.className = 'btn-blocked';
-        wrap.title = window.applyPolicy.reason;
-        header.parentNode.insertBefore(wrap, header);
-        wrap.appendChild(header);
+        window.modeInfo = await (await fetch('/api/mode')).json();
+    } catch (e) { /* server enforces it regardless */ }
+    const badge = document.getElementById('mode-badge');
+    if (badge) {
+        const safe = window.modeInfo.mode === 'safe';
+        badge.textContent = safe ? '🛡️ Safe mode' : '⚠️ Full mode';
+        badge.className = 'mode-badge ' + (safe ? 'mode-safe' : 'mode-full');
+        badge.title = safe
+            ? 'Your logged-in LinkedIn account is never automated. See DISCLAIMER.md.'
+            : 'Automates your logged-in LinkedIn account - at your own risk. Set JOBSCRAPER_MODE=safe to avoid it. See DISCLAIMER.md.';
     }
+    if (!window.modeInfo.add_url_available) blockControl(document.getElementById('add-job-btn'), window.modeInfo.add_url_reason);
+    if (!window.modeInfo.apply_available) {
+        // Fill Now needs the same session as Apply Now, so both wait for #15.
+        window.applyPolicy = { submit_allowed: false, fill_allowed: false, reason: window.modeInfo.apply_reason };
+        blockControl(document.getElementById('run-fill-btn'), window.modeInfo.apply_reason);
+    } else try {
+        window.applyPolicy = await (await fetch('/api/apply/policy')).json();
+        window.applyPolicy.fill_allowed = true;
+    } catch (e) { /* keep the permissive default; the server enforces it anyway */ }
+    if (!window.applyPolicy.submit_allowed) blockControl(document.getElementById('run-apply-btn'), window.applyPolicy.reason);
 }
 
 let allJobs = [];
@@ -329,13 +360,13 @@ function openJobDetails(jobId) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">✓ Approve</button>
                 ${applyNowButton(job.job_id)}
-                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
+                ${fillNowButton(job.job_id)}
                 <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
                 ${applyNowButton(job.job_id)}
-                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
+                ${fillNowButton(job.job_id)}
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Mark as Account Required</button>
@@ -352,20 +383,20 @@ function openJobDetails(jobId) {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">✓ Submitted - Mark as Applied</button>
                 ${applyNowButton(job.job_id, '📤 Apply Now (retry)')}
-                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now (retry)</button>
+                ${fillNowButton(job.job_id, '📝 Fill Now (retry)')}
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="showFailedOptions('${job.job_id}')">Mark as Failed</button>
             `;
         } else if (job.status === 'failed') {
             contextButtonsHtml = `
                 ${applyNowButton(job.job_id)}
-                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
+                ${fillNowButton(job.job_id)}
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" onclick="changeJobStatus('${job.job_id}', 'account_required')">Move to Account Required</button>
             `;
         } else if (job.status === 'account_required') {
             contextButtonsHtml = `
                 ${applyNowButton(job.job_id)}
-                <button class="btn" onclick="triggerFill('${job.job_id}')">📝 Fill Now</button>
+                ${fillNowButton(job.job_id)}
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
                 <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>

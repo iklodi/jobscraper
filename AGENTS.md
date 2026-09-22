@@ -8,6 +8,8 @@ use are in [README.md](README.md); this file is how it works and what not to bre
 
 ## Working rules
 
+- **Run the tests**: `venv/bin/python -m pytest -q tests`. Fixtures are
+  anonymised copies of real emails; keep them that way.
 - **Read [DISCLAIMER.md](DISCLAIMER.md).** Keep it true when behaviour changes -
   it states what the tool does with the candidate's account and data.
 - **This repository is public. Nothing personal goes into it** — not in code,
@@ -32,8 +34,25 @@ use are in [README.md](README.md); this file is how it works and what not to bre
 
 ## Components
 
+### `mode.py` — full or safe
+`JOBSCRAPER_MODE=full|safe` (anything else counts as safe). `open_linkedin_session()`
+is the **only** place allowed to launch the logged-in profile, and it raises
+`SafeModeViolation` in safe mode; `tests/test_mode.py` fails if any other file
+calls `launch_persistent_context`. Safe mode is being built in issues #12-#18
+(epic #20) — the applier and the + button still need full mode (#15, #16), and
+the dashboard disables them in safe mode with a tooltip saying so.
+
+### `alerts.py` — safe mode's source of jobs
+Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
+or moved), parses each job's title, company, location and id, and adds it as
+`new`. Only the numeric id is kept: alert links carry sign-in tokens, so links
+are rebuilt bare. Messages already read are recorded in `alert_emails`. A job
+without a description is never scored — in safe mode the description comes
+from a logged-out fetch (#14).
+
 ### `main.py` — the nightly controller
-Scrapes, scores, emails the summary. **It does not generate documents**: that
+Full mode: scrapes, scores, emails the summary. Safe mode: reads job-alert
+emails instead of scraping. **It does not generate documents**: that
 waits for an explicit Approve on the dashboard, so nothing is written for a job
 that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.

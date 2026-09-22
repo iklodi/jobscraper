@@ -6,9 +6,10 @@ import os
 import difflib
 import progress_tracker
 import notifier
+import mode
 
 # Configuration
-CHROME_PROFILE_DIR = './chrome_profile'
+CHROME_PROFILE_DIR = mode.PROFILE_DIR
 # LinkedIn's job-type filter codes (the f_JT search parameter).
 JOB_TYPE_CODES = {
     'full-time': 'F', 'fulltime': 'F', 'permanent': 'F',
@@ -84,8 +85,7 @@ async def run_scraper():
     
     async with async_playwright() as p:
         print("Launching browser...")
-        browser = await p.chromium.launch_persistent_context(
-            user_data_dir=CHROME_PROFILE_DIR,
+        browser = await mode.open_linkedin_session(p,
             headless=False, # Set to False initially to allow manual login
             viewport={"width": 1280, "height": 800}
         )

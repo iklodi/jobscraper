@@ -50,9 +50,17 @@ are rebuilt bare. Messages already read are recorded in `alert_emails`. A job
 without a description is never scored — in safe mode the description comes
 from a logged-out fetch (#14).
 
+### `public_jobs.py` — safe mode's descriptions
+Opens `https://www.linkedin.com/jobs/view/<id>/` in a fresh `chromium.launch()`
+context — no profile, no cookies — and reads the description every visitor
+sees. Also records `apply_type` (`offsite` / `easy_apply`) from the apply
+control's tracking name; the employer's own URL is **not** exposed logged out.
+On HTTP 999, a sign-in wall or a challenge it stops for the run and leaves the
+rest pending. No proxies or evasion — that is a rule, not a gap.
+
 ### `main.py` — the nightly controller
 Full mode: scrapes, scores, emails the summary. Safe mode: reads job-alert
-emails instead of scraping. **It does not generate documents**: that
+emails and fetches descriptions logged out instead of scraping, then scores. **It does not generate documents**: that
 waits for an explicit Approve on the dashboard, so nothing is written for a job
 that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.

@@ -89,6 +89,13 @@ def init_db():
         cursor.execute('ALTER TABLE jobs ADD COLUMN source TEXT')
     except sqlite3.OperationalError:
         pass
+    # Safe mode: how the public page says to apply ('offsite' / 'easy_apply'),
+    # and how often a logged-out fetch of the description has failed.
+    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0'):
+        try:
+            cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
+        except sqlite3.OperationalError:
+            pass
     # Safe mode: alert emails already read, so a run never reads one twice.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS alert_emails (

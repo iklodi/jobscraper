@@ -15,6 +15,7 @@ import notifier
 import progress_tracker
 import mode
 import alerts
+import public_jobs
 
 async def main():
     progress_tracker.clear_status()
@@ -35,6 +36,13 @@ async def main():
         if not alerts.configured():
             print("Note: IMAP is not configured, so no new jobs were read. "
                   "Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.")
+        # Alert emails carry no description; read it from the public posting,
+        # logged out. Jobs still without one are left out of scoring.
+        print("=== Step 1b: Safe mode - fetching descriptions, logged out ===")
+        fetch_stats = await public_jobs.fetch_descriptions()
+        print(f"Descriptions: {fetch_stats['fetched']} fetched, {fetch_stats['failed']} failed, "
+              f"{fetch_stats['closed']} closed, {fetch_stats['pending']} still pending"
+              + (" - LinkedIn walled the fetcher; retrying next run." if fetch_stats['blocked'] else ""))
     elif not skip_scrape:
         print("=== Step 1: Scraping LinkedIn Jobs ===")
         keyword_stats = await run_scraper()

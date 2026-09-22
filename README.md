@@ -1,5 +1,13 @@
 # LinkedIn AI Job Scraper
 
+> [!WARNING]
+> **Use at your own risk.** In its default mode this tool automates your
+> logged-in LinkedIn account, which LinkedIn's User Agreement prohibits; your
+> account can be restricted or permanently banned. It sends applications in
+> your name and sends your career data to third-party AI providers. A
+> [**safe mode**](DISCLAIMER.md#safe-mode) that never touches your logged-in
+> account is being built. Read [DISCLAIMER.md](DISCLAIMER.md) before using it.
+
 An automated agent that scrapes LinkedIn, scores each job against your CV, and
 — once you approve it — writes a tailored CV and cover letter and fills in the
 employer's application form.

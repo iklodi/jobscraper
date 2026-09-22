@@ -8,6 +8,8 @@ use are in [README.md](README.md); this file is how it works and what not to bre
 
 ## Working rules
 
+- **Read [DISCLAIMER.md](DISCLAIMER.md).** Keep it true when behaviour changes -
+  it states what the tool does with the candidate's account and data.
 - **This repository is public. Nothing personal goes into it** — not in code,
   comments, docstrings, test fixtures, examples or *commit messages*: no names,
   phone numbers, emails, addresses, hostnames, home paths, employers, the

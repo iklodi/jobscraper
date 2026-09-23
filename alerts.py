@@ -31,10 +31,17 @@ import db
 ALERT_SENDER = 'jobalerts-noreply@linkedin.com'
 
 JOB_ID = re.compile(r'linkedin\.com/(?:comm/)?jobs/view/(\d+)')
-ALERT_NAME = re.compile(r'^\s*Your job alert for (.+?)\s*$', re.M)
+# "Your job alert for X in Y" in digests; "Your job alert has been created:
+# X in Y." in the one-off confirmation LinkedIn sends when an alert is set up.
+ALERT_NAME = re.compile(r'^\s*Your job alert (?:for|has been created:) (.+?)\.?\s*$', re.M)
+# LinkedIn lists at most this many jobs in one email and links the rest to a
+# logged-in search, which safe mode does not open. An email at the cap may
+# have left jobs out.
+EMAIL_JOB_CAP = 6
 SEPARATOR = re.compile(r'^\s*-{8,}\s*$', re.M)
 # Header lines that sit above the first job and are not part of it.
-PREAMBLE = re.compile(r'^(your job alert for\b|a new job matches\b|new jobs match\b)', re.I)
+PREAMBLE = re.compile(r'^(your job alert (for|has been created)\b|a new job matches\b|new jobs match\b'
+                      r'|you[’\']ll receive notifications\b)', re.I)
 
 
 def job_url(job_id):
@@ -213,6 +220,9 @@ def ingest_alerts(imap_factory=None):
             conn.close()
             if jobs:
                 print(f'  {key}: {len(jobs)} listed, {added} new')
+            if len(jobs) >= EMAIL_JOB_CAP:
+                print(f'  {key}: the email is at LinkedIn\'s {EMAIL_JOB_CAP}-job cap, so more may '
+                      f'match than it listed. Narrow the alert or have it sent more often.')
     finally:
         try:
             imap.logout()

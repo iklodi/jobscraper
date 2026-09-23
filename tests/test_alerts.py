@@ -128,3 +128,12 @@ def test_ingest_adds_jobs_once_and_leaves_the_mailbox_untouched(scratch_db):
 
     # A second run over the same mailbox adds nothing.
     assert sum(alerts.ingest_alerts(imap_factory=mailbox).values()) == 0
+
+
+def test_confirmation_email_sent_when_an_alert_is_created():
+    name, jobs = alerts.parse_alert_text(read('alert_created.txt'))
+    assert name == 'Head Of Example in Europe'
+    assert [(j['job_id'], j['title'], j['company']) for j in jobs] == [
+        ('1000000011', 'Head of Example Center of Excellence (m/f/d)', 'Example Consulting GmbH'),
+        ('1000000012', 'Corporate Head of Example', 'Example Pharma S.A.'),
+        ('1000000013', 'Head of Example', 'Example IT Collective')]

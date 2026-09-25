@@ -58,11 +58,25 @@ control's tracking name; the employer's own URL is **not** exposed logged out.
 On HTTP 999, a sign-in wall or a challenge it stops for the run and leaves the
 rest pending. No proxies or evasion — that is a rule, not a gap.
 
+### `adzuna.py` — a second source, in either mode
+Runs the `search_criteria.md` searches through Adzuna's official API
+(`title_only`: matching the whole advert brought in assistants to general
+managers). Jobs get ids `adzuna-<id>` and Adzuna's `redirect_url` as their link,
+which its terms require. The API cuts descriptions to 500 characters, so the
+full text is read from that page over plain HTTP, 5-10 s apart. Adzuna answers
+403 when that is done too fast (it did after ~35 pages in a few minutes); the
+fetch then stops for the run **without** spending the jobs' attempts. Adverts
+already on the board are skipped by normalised title and company; Job-Room
+(the Swiss public portal) re-lists employers' adverts, so for it the title
+alone decides. The dashboard labels these jobs "Jobs by Adzuna" (Adzuna's
+terms). Limits: 25 calls/min, 250/day.
+
 ### `main.py` — the nightly controller
 Full mode: scrapes, scores, emails the summary. Safe mode: reads job-alert
-emails and fetches descriptions logged out instead of scraping, then scores. **It does not generate documents**: that
-waits for an explicit Approve on the dashboard, so nothing is written for a job
-that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
+emails and fetches descriptions logged out instead of scraping, then scores.
+Both run the Adzuna searches when it is configured; `--no-scrape` skips them.
+**It does not generate documents**: that waits for an explicit Approve on the
+dashboard, so nothing is written for a job that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.
 
 ### `scraper.py`

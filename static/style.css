@@ -611,6 +611,12 @@ h1 {
     color: #99f6e4;
 }
 
+/* Adzuna's terms ask for every advert it supplies to say "Jobs by Adzuna". */
+.meta-adzuna {
+    background: rgba(99, 102, 241, 0.18);
+    color: #c7d2fe;
+}
+
 /* Which mode the pipeline runs in - a standing reminder of the account risk. */
 .mode-badge {
     font-size: 0.8rem;

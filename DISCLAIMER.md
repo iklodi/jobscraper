@@ -54,7 +54,8 @@ you use the tool.
 To score jobs and write documents, the tool sends your career dossier, your CV
 text, your profile answers and job descriptions to **the AI providers you
 configure**: Infomaniak, Google (Gemini) or Groq. Their own terms and privacy
-policies apply. Screenshots, generated documents and the database stay local.
+policies apply. If you configure Adzuna, your search keywords and locations are
+sent to its API, and its terms apply to the jobs it returns. Screenshots, generated documents and the database stay local.
 Summary emails go through the SMTP server you configure.
 
 ## Everything else

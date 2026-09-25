@@ -36,6 +36,12 @@ window.filterColumn = function(input) {
 }
 
 
+// Jobs from Adzuna's API carry its prefix in their id.
+function isAdzuna(job) {
+    return String(job.job_id || '').startsWith('adzuna-');
+}
+
+
 // Apply Now honours policies.never_submit_without_review in profile.yaml. When
 // submitting is off the button stays visible but disabled, and says why - a
 // disabled button swallows hover, so the explanation sits on a wrapper.
@@ -255,6 +261,8 @@ function createCard(job, columnStatus) {
     if (recruiterStr) metaHtml += `<span class="meta-tag">${recruiterStr}</span>`;
     // Promoted listings are paid placements, so the evaluator marks them down.
     if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
+    // Adzuna's terms: every advert it supplies is labelled as such.
+    if (isAdzuna(job)) metaHtml += `<span class="meta-tag meta-adzuna" title="Found through the Adzuna job-search API">Jobs by Adzuna</span>`;
     if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
     if (job.status === 'easy_apply') metaHtml += `<span class="meta-tag meta-easy" title="Easy Apply is never automated">✋ Easy Apply - by hand</span>`;
     // On the Applied board the date that matters is when it went out.
@@ -475,7 +483,7 @@ function openJobDetails(jobId) {
 
     modalBody.innerHTML = `
         <h2>${job.title}</h2>
-        <h3>${job.company} • ${job.location}${job.is_promoted ? ' • 📢 Promoted listing' : ''}</h3>
+        <h3>${job.company} • ${job.location}${job.is_promoted ? ' • 📢 Promoted listing' : ''}${isAdzuna(job) ? ' • Jobs by Adzuna' : ''}</h3>
 
         ${actionSection}
         
@@ -490,7 +498,7 @@ function openJobDetails(jobId) {
         
         <div class="detail-section">
             <h4>Original Listing</h4>
-            <a href="${job.link}" target="_blank" class="btn">View on LinkedIn</a>
+            <a href="${job.link}" target="_blank" class="btn">View on ${isAdzuna(job) ? 'Adzuna' : 'LinkedIn'}</a>
         </div>
         
         <div class="detail-section">

@@ -19,7 +19,7 @@ Playwright browser using your own logged-in LinkedIn session.
 
 | Stage | What happens |
 |---|---|
-| **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. |
+| **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. In either mode, `adzuna.py` runs the same searches through Adzuna's job API. |
 | **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Rejected**. Re-scoring never moves a job you approved or applied to. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
 | **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
@@ -40,6 +40,27 @@ generate for everything on To Do the old way.
   jobs are scored as usual. Safe mode is still being built (issues #12-#20):
   filling forms and the + button still need full mode, and the dashboard greys
   them out in safe mode.
+
+## A second source: Adzuna
+
+[Adzuna](https://developer.adzuna.com) aggregates many job boards and offers
+an official search API with a free key. Set `ADZUNA_APP_ID` and
+`ADZUNA_APP_KEY` and every run also sends your `search_criteria.md` searches
+there, matching keywords against job titles. It never touches LinkedIn, so it
+runs in both modes. Details:
+
+- **Locations.** Country names map to Adzuna's countries. A city is searched
+  inside `ADZUNA_COUNTRY`. "Worldwide", "Europe" and "Remote" use
+  `ADZUNA_WIDE_COUNTRIES`, and are skipped when that is empty.
+- **Descriptions.** The API returns only the first 500 characters. The full
+  text is read from each advert's Adzuna page, 5-10 seconds apart. If Adzuna
+  refuses the page reader (HTTP 403, which happens when too many pages are read
+  in a short time), the run stops and the rest wait for the next run.
+- **Duplicates.** An advert already on the board, from LinkedIn or from Adzuna
+  under another listing, is not added twice.
+- **Labels.** Adzuna's terms ask for its adverts to be labelled, so they show
+  "Jobs by Adzuna" on the dashboard. Its limits are 25 calls a minute and 250
+  a day; a run makes at most `ADZUNA_MAX_CALLS_PER_RUN`.
 
 ## Setup
 
@@ -124,6 +145,7 @@ python applier.py --limit 5       # fill approved applications, without sending
 python applier.py --submit        # fill and submit
 python generate_from_url.py URL   # score one advert by link (--generate to write documents too)
 python infomaniak.py              # list available models and check the credentials
+python adzuna.py                  # run the Adzuna searches and fetch their descriptions
 ```
 
 ## Notes

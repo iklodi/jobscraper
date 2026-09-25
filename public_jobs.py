@@ -62,7 +62,8 @@ def public_url(job):
 def pending_jobs(limit):
     conn = db.get_connection()
     rows = conn.execute(
-        "SELECT job_id, link FROM jobs WHERE status = 'new' "
+        # Adzuna jobs have their own fetcher (adzuna.fetch_descriptions).
+        "SELECT job_id, link FROM jobs WHERE status = 'new' AND job_id NOT LIKE 'adzuna-%' "
         "AND COALESCE(TRIM(description), '') = '' "
         "AND COALESCE(fetch_attempts, 0) < ? "
         "ORDER BY created_at DESC LIMIT ?",

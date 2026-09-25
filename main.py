@@ -16,6 +16,7 @@ import progress_tracker
 import mode
 import alerts
 import public_jobs
+import adzuna
 
 async def main():
     progress_tracker.clear_status()
@@ -52,6 +53,19 @@ async def main():
             return
     else:
         print("=== Step 1: Scraping Skipped (--no-scrape flag used) ===")
+
+    # Adzuna's API never touches LinkedIn, so it runs in either mode.
+    if adzuna.configured() and not skip_scrape:
+        print("\n=== Step 1c: Adzuna job search ===")
+        try:
+            for key, added in adzuna.ingest().items():
+                keyword_stats[key] = keyword_stats.get(key, 0) + added
+            adzuna_fetch = adzuna.fetch_descriptions()
+            print(f"Adzuna descriptions: {adzuna_fetch['fetched']} fetched, "
+                  f"{adzuna_fetch['failed']} failed, {adzuna_fetch['pending']} still pending"
+                  + (" - Adzuna refused the fetcher; retrying next run." if adzuna_fetch['blocked'] else ""))
+        except Exception as e:
+            print(f"Adzuna search failed: {e}")
     
     skip_eval = '--no-eval' in sys.argv
     

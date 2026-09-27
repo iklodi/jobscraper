@@ -6,8 +6,11 @@ records the job, and produces the same documents the nightly pipeline does:
     python generate_from_url.py "https://www.linkedin.com/jobs/view/4448054855/"
     python generate_from_url.py "https://careers.example.com/job/123" -i "stress the cloud work"
 
-LinkedIn pages need the logged-in browser profile the scraper uses. If the page
-comes back as a login wall, run once with --headed and sign in.
+In full mode, LinkedIn pages are read in the logged-in browser profile the
+scraper uses; if the page comes back as a login wall, run once with --headed
+and sign in. In safe mode every page is read in a fresh browser with no
+profile, and a LinkedIn link is first reduced to its bare public posting
+(issue #16).
 """
 import argparse
 import asyncio
@@ -27,6 +30,7 @@ from generator import generate_for_job, get_gemini_client, get_groq_client
 from evaluate import GEMINI_MODELS, evaluate_single_job   # the cascade, so one retired model does not break this
 from google.genai import types
 import mode
+import public_jobs
 
 CHROME_PROFILE_DIR = mode.PROFILE_DIR
 
@@ -38,7 +42,8 @@ EXTRACT_JS = """
         const el = document.querySelector(sel);
         return el ? el.innerText.trim() : '';
     };
-    const linkedin = pick('#job-details') || pick('.jobs-description__content');
+    const linkedin = pick('#job-details') || pick('.jobs-description__content')
+        || pick('.show-more-less-html__markup');       // the public, logged-out page
     let best = '';
     if (!linkedin) {
         const candidates = Array.from(document.querySelectorAll(
@@ -109,6 +114,17 @@ LOGIN_WALL = re.compile(r'sign in to (view|continue)|join linkedin|new to linked
                         r'log in to continue|please log in', re.I)
 
 
+def canonical_url(url):
+    """A LinkedIn job link reduced to its bare posting; anything else unchanged.
+
+    Links copied from LinkedIn or its emails carry tracking and sign-in
+    parameters (otpToken, midToken). Only the job id is kept.
+    """
+    m = re.search(r'linkedin\.com/(?:comm/)?jobs/view/(?:[^/?#]*?-)?(\d+)', url) \
+        or (re.search(r'currentJobId=(\d+)', url) if 'linkedin.com' in url else None)
+    return f'https://www.linkedin.com/jobs/view/{m.group(1)}/' if m else url
+
+
 def job_id_for(url):
     """LinkedIn's own id where there is one, otherwise a stable id for the URL."""
     m = re.search(r'/jobs/view/(\d+)', url) or re.search(r'currentJobId=(\d+)', url)
@@ -117,29 +133,54 @@ def job_id_for(url):
     return 'url-' + hashlib.sha1(url.encode()).hexdigest()[:12]
 
 
+async def _read_page(page, url):
+    """Load a job page and pull the advert out of it."""
+    response = await page.goto(url, timeout=60000)
+    await page.wait_for_timeout(5000)
+    # LinkedIn hides most of the advert behind a "see more" toggle.
+    for label in ('See more', 'Show more', 'Voir plus'):
+        try:
+            btn = page.get_by_role('button', name=re.compile(f'^{label}', re.I)).first
+            await btn.click(timeout=2000)
+            await page.wait_for_timeout(1000)
+            break
+        except Exception:
+            continue
+    data = await page.evaluate(EXTRACT_JS)
+    data['final_url'] = page.url
+    data['status'] = response.status if response else None
+    return data
+
+
 async def fetch_job_page(url, headed=False):
-    os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
     async with async_playwright() as p:
+        if mode.safe_mode():
+            # A throwaway browser: no profile, no cookies, nothing tied to the
+            # candidate's LinkedIn account - the same rule as public_jobs.py.
+            browser = await p.chromium.launch(headless=not headed)
+            try:
+                context = await browser.new_context(locale='en-US', viewport={'width': 1440, 'height': 900})
+                page = await context.new_page()
+                data = await _read_page(page, url)
+                if 'linkedin.com' in url:
+                    data['walled'] = (data['status'] in public_jobs.BLOCKED_STATUS
+                                      or bool(public_jobs.WALL_URL.search(data['final_url'])))
+                    if not data['walled']:
+                        info = await page.evaluate(public_jobs.READ_PAGE_JS,
+                                                   list(public_jobs.DESCRIPTION_SELECTORS))
+                        data['apply_type'] = info.get('applyType')
+                return data
+            finally:
+                await browser.close()
+
+        os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
         browser = await mode.open_linkedin_session(p,
             headless=not headed,
             viewport={'width': 1440, 'height': 900},
         )
         page = browser.pages[0] if browser.pages else await browser.new_page()
         try:
-            await page.goto(url, timeout=60000)
-            await page.wait_for_timeout(5000)
-            # LinkedIn hides most of the advert behind a "see more" toggle.
-            for label in ('See more', 'Show more', 'Voir plus'):
-                try:
-                    btn = page.get_by_role('button', name=re.compile(f'^{label}', re.I)).first
-                    await btn.click(timeout=2000)
-                    await page.wait_for_timeout(1000)
-                    break
-                except Exception:
-                    continue
-            data = await page.evaluate(EXTRACT_JS)
-            data['final_url'] = page.url
-            return data
+            return await _read_page(page, url)
         finally:
             await browser.close()
 
@@ -218,14 +259,24 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None,
         if on_progress:
             on_progress(message)
 
+    url = canonical_url(url)
     step(f'Reading {url} ...')
     page = await fetch_job_page(url, headed=headed)
     description = (page.get('description') or '').strip()
 
+    if page.get('walled'):
+        return {'ok': False, 'error': (
+            f'LinkedIn showed its sign-in wall instead of the public posting at {url}. '
+            'Safe mode does not sign in to get past it: try again later, or paste the '
+            "employer's own job page instead.")}
     if len(description) < 200 or LOGIN_WALL.search(page.get('page_text', '')):
-        hint = ('Sign in to LinkedIn in the browser on this machine, then try again.'
-                if 'linkedin.com' in url else
-                'The page may need JavaScript, a login, or be region-blocked.')
+        if 'linkedin.com' in url and mode.safe_mode():
+            hint = ("LinkedIn did not show it to a logged-out visitor; paste the employer's "
+                    'own job page instead.')
+        elif 'linkedin.com' in url:
+            hint = 'Sign in to LinkedIn in the browser on this machine, then try again.'
+        else:
+            hint = 'The page may need JavaScript, a login, or be region-blocked.'
         return {'ok': False, 'error': f'Could not read the advert at {url}. {hint}'}
 
     step(f'Read {len(description)} characters. Identifying the role ...')
@@ -254,9 +305,14 @@ async def run_for_url(url, instructions=None, headed=False, on_progress=None,
             if not meta.get('title'):
                 meta['title'] = m.group('title').strip()
 
-    final_url = page.get('final_url') or url
+    final_url = canonical_url(page.get('final_url') or url)
     job_id = job_id_for(final_url)
     record_job(job_id, meta, description, final_url)
+    if page.get('apply_type'):
+        conn = db.get_connection()
+        conn.execute('UPDATE jobs SET apply_type = ? WHERE job_id = ?', (page['apply_type'], job_id))
+        conn.commit()
+        conn.close()
 
     step(f"Scoring {meta.get('company') or 'Unknown'}: "
          f"{meta.get('title') or 'the role'} ...")

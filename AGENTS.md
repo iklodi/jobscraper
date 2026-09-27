@@ -39,8 +39,8 @@ use are in [README.md](README.md); this file is how it works and what not to bre
 is the **only** place allowed to launch the logged-in profile, and it raises
 `SafeModeViolation` in safe mode; `tests/test_mode.py` fails if any other file
 calls `launch_persistent_context`. Safe mode is being built in issues #12-#18
-(epic #20) — the applier and the + button still need full mode (#15, #16), and
-the dashboard disables them in safe mode with a tooltip saying so.
+(epic #20) — the applier still needs full mode (#15), and the dashboard
+disables it in safe mode with a tooltip saying so.
 
 ### `alerts.py` — safe mode's source of jobs
 Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
@@ -122,7 +122,11 @@ run; `evaluate.any_model_configured()` is the gate.
 One advert by URL, for the dashboard's + button. Reads the page, scores it, and
 files it on To Do *whatever it scores* — a link pasted by hand is a job already
 chosen. If the link is for a job already approved or applied to, it goes back
-where it was. `--generate` writes the documents immediately.
+where it was. `--generate` writes the documents immediately. A LinkedIn link
+is always reduced to `/jobs/view/<id>/` first (`canonical_url`): links copied
+from LinkedIn or its emails carry sign-in tokens. In safe mode every page is
+read in a fresh `chromium.launch()` browser, never the profile, and a LinkedIn
+sign-in wall is reported, not worked around.
 
 ### `app.py` / `static/app.js` / `templates/index.html`
 Flask dashboard. Columns: New, To Do, Approved, Ready to Submit, Applied,

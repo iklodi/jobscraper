@@ -39,9 +39,10 @@ generate for everything on To Do the old way.
   Descriptions are then read from the public job pages, logged out, and the
   jobs are scored as usual. The nightly email opens with a **Sources** section:
   jobs per alert, alerts whose email hit LinkedIn's six-job limit, and whether
-  a fetcher was blocked. Safe mode is still being built (issues #12-#20):
-  filling forms and the + button still need full mode, and the dashboard greys
-  them out in safe mode.
+  a fetcher was blocked. The **+** button works too: a pasted LinkedIn link
+  is stripped of its tracking and sign-in parameters and read logged out.
+  Safe mode is still being built (issues #12-#20): filling forms still needs
+  full mode, and the dashboard greys it out in safe mode.
 
 ## A second source: Adzuna
 

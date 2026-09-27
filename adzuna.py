@@ -34,6 +34,7 @@ import requests
 from lxml import html as lxml_html
 
 import db
+from dedupe import already_listed, title_key  # noqa: F401 (title_key: tests)
 
 API = 'https://api.adzuna.com/v1/api/jobs/{country}/search/{page}'
 RESULTS_PER_PAGE = 50
@@ -104,42 +105,6 @@ def _max_days_old():
                         (ID_PREFIX + '%',)).fetchone()
     conn.close()
     return int(os.environ.get('ADZUNA_MAX_DAYS_OLD', '3')) if seen else FIRST_RUN_DAYS
-
-
-# Boards that re-list other employers' adverts under their own name. Job-Room
-# is the Swiss public employment service's portal; much of what it lists is
-# also on Adzuna under the real employer.
-RELISTERS = {'job room'}
-
-# Parts of a title that vary between copies of one advert: gender markers
-# ("(m/w/d)", "all genders"), workload ("80 - 100 %") and anything in brackets.
-TITLE_NOISE = re.compile(r'\([^)]*\)|\b[mwfdxa](?:\s*/\s*[mwfdxa])+\b|\ball genders\b'
-                         r'|\d+\s*(?:[-–]\s*\d+\s*)?%', re.I)
-
-
-def _norm(text):
-    return re.sub(r'\W+', ' ', (text or '').lower()).strip()
-
-
-def title_key(title):
-    return _norm(TITLE_NOISE.sub(' ', title or ''))
-
-
-def already_listed(title, company):
-    """True when the same role is already in the database, from LinkedIn or an
-    earlier search - the same advert is often on several boards. The company
-    must match too, unless either copy comes from a board that re-lists."""
-    key, company = title_key(title), _norm(company)
-    conn = db.get_connection()
-    rows = conn.execute('SELECT title, company FROM jobs').fetchall()
-    conn.close()
-    for other_title, other_company in rows:
-        if title_key(other_title) != key:
-            continue
-        other_company = _norm(other_company)
-        if company == other_company or company in RELISTERS or other_company in RELISTERS:
-            return True
-    return False
 
 
 def search(keyword, country, where, page, days, contract_filter, session):

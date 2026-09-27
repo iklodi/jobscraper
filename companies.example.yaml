@@ -1,0 +1,18 @@
+# Employers to watch through their own job feeds (ats_feeds.py, issue #22).
+# Copy to CVS_DIR/companies.yaml - never commit the real list.
+#
+# Find ats and board from any posting or careers-page link:
+#   python ats_feeds.py --detect "https://jobs.lever.co/example/..."
+#
+# Supported: greenhouse, lever, ashby, personio, smartrecruiters, recruitee.
+# keywords / locations are optional; without them the searches in
+# search_criteria.md decide which postings are kept.
+companies:
+  - name: Example AG
+    ats: greenhouse
+    board: example
+  - name: Example Labs
+    ats: lever
+    board: examplelabs
+    keywords: [Architect, Head of AI]
+    locations: [Switzerland, Remote]

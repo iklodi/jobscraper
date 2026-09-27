@@ -18,6 +18,7 @@ import mode
 import alerts
 import public_jobs
 import adzuna
+import ats_feeds
 
 async def main():
     progress_tracker.clear_status()
@@ -95,6 +96,19 @@ async def main():
             print(f"Adzuna search failed: {e}")
             source_notes.append(f"⚠️ Adzuna search failed: {e}")
     
+    # Employers' own ATS feeds (#22): public APIs, no LinkedIn, either mode.
+    if ats_feeds.configured() and not skip_scrape:
+        print("\n=== Step 1d: Employers' job feeds ===")
+        try:
+            ats_stats, problems = ats_feeds.ingest()
+            keyword_stats.update(ats_stats)
+            source_notes.append(f"Employer feeds: {len(ats_stats)} companies watched, "
+                                f"{sum(ats_stats.values())} new jobs")
+            source_notes.extend(f"⚠️ {p}" for p in problems)
+        except Exception as e:
+            print(f"Employer feeds failed: {e}")
+            source_notes.append(f"⚠️ Employer feeds failed: {e}")
+
     skip_eval = '--no-eval' in sys.argv
     
     if not skip_eval:

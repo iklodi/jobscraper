@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workzag-jobs>
+  <position>
+    <id>555</id>
+    <office>Basel</office>
+    <additionalOffices><office>Zug</office></additionalOffices>
+    <name>Interim Manager Finance (m/w/d)</name>
+    <jobDescriptions>
+      <jobDescription><name>Your mission</name><value><![CDATA[<p>Take over the finance function of an example company for nine months during a transformation programme, reporting to the CEO. You will work closely with the leadership team, shape the roadmap for the coming years and be the main point of contact for partners.</p>]]></value></jobDescription>
+      <jobDescription><name>Your profile</name><value><![CDATA[<ul><li>Interim experience</li><li>German</li></ul>]]></value></jobDescription>
+    </jobDescriptions>
+  </position>
+</workzag-jobs>

@@ -1,0 +1,9 @@
+{"jobs": [
+ {"id": 101, "title": "Enterprise Architect", "location": {"name": "Zurich, Switzerland"},
+  "absolute_url": "https://job-boards.greenhouse.io/example/jobs/101",
+  "content": "&lt;h3&gt;About the role&lt;/h3&gt;&lt;p&gt;Design the target architecture of an example platform used by thousands of customers across Europe. You will own the roadmap, work with engineering leads and present to the board.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Ten years of architecture experience&lt;/li&gt;&lt;li&gt;German or French&lt;/li&gt;&lt;/ul&gt;"},
+ {"id": 102, "title": "Enterprise Architect", "location": {"name": "Bangalore, India"},
+  "absolute_url": "https://job-boards.greenhouse.io/example/jobs/102", "content": "&lt;p&gt;x&lt;/p&gt;"},
+ {"id": 103, "title": "Sales Development Representative", "location": {"name": "Zurich"},
+  "absolute_url": "https://job-boards.greenhouse.io/example/jobs/103", "content": "&lt;p&gt;x&lt;/p&gt;"}
+]}

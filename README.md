@@ -92,6 +92,20 @@ runs in both modes. Details:
   "Jobs by Adzuna" on the dashboard. Its limits are 25 calls a minute and 250
   a day; a run makes at most `ADZUNA_MAX_CALLS_PER_RUN`.
 
+## A third source: employers' own job feeds
+
+Many employers publish their openings through a hiring system with a public
+job feed: Greenhouse, Lever, Ashby, Personio, SmartRecruiters or Recruitee.
+List the employers you want to follow in `CVS_DIR/companies.yaml` (see
+`companies.example.yaml`). `python ats_feeds.py --detect <link>` works out the
+entry from any of their job links.
+
+Each run reads every feed once. It keeps the postings whose title matches a
+keyword and whose location matches a location, from `search_criteria.md` or
+the company's own `keywords:` / `locations:`. Jobs from feeds come with the full
+description and **the employer's application link**, so Fill Now and Apply Now
+work on them in both modes, with nothing to paste. It never touches LinkedIn.
+
 ## Setup
 
 1. **Prerequisites**: Python 3.14+, Git, LibreOffice.
@@ -177,6 +191,8 @@ python generate_from_url.py URL   # score one advert by link (--generate to writ
 python infomaniak.py              # list available models and check the credentials
 python adzuna.py                  # run the Adzuna searches and fetch their descriptions
 python alerts.py --suggest        # the LinkedIn job alerts that match search_criteria.md
+python ats_feeds.py               # read the employers' feeds in companies.yaml
+python ats_feeds.py --detect URL  # the companies.yaml entry for an employer's job link
 ```
 
 ## Notes

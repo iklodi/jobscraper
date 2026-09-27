@@ -1,0 +1,7 @@
+{"jobs": [
+ {"id": "u-1", "title": "AI Consultant", "location": "Remote - Europe", "secondaryLocations": [{"location": "Zurich"}],
+  "isListed": true, "descriptionPlain": "Advise example customers on adopting AI agents in their enterprise processes, from discovery workshops to production rollout and change management. You will work closely with the leadership team, shape the roadmap for the coming years and be the main point of contact for partners.",
+  "jobUrl": "https://jobs.ashbyhq.com/example/u-1", "applyUrl": "https://jobs.ashbyhq.com/example/u-1/application"},
+ {"id": "u-2", "title": "AI Consultant", "location": "Zurich", "isListed": false,
+  "descriptionPlain": "hidden", "jobUrl": "https://jobs.ashbyhq.com/example/u-2"}
+]}

@@ -75,10 +75,26 @@ already on the board are skipped by normalised title and company; Job-Room
 alone decides. The dashboard labels these jobs "Jobs by Adzuna" (Adzuna's
 terms). Limits: 25 calls/min, 250/day.
 
+### `ats_feeds.py` — employers' own job feeds, in either mode
+One adapter per ATS (Greenhouse, Lever, Ashby, Personio, SmartRecruiters,
+Recruitee), each reading the public feed documented for programs: never the
+careers page's HTML. The watch list is `CVS_DIR/companies.yaml`. Postings are
+kept when a keyword's significant words all appear in the title and the
+location matches (country names expand to cities; "Europe" to European places;
+"Worldwide" matches all). Ids are `ats-<ats>-<board>-<id>`, `apply_url` is the
+employer's form, and a posting under 200 characters is not stored.
+SmartRecruiters' listing has no description, so each new match costs one detail
+call. A broken feed is reported in the summary, never fatal.
+
+### `dedupe.py`
+`already_listed(title, company)`: the cross-source duplicate check every source
+uses before inserting (normalised title, company, and Job-Room as a re-lister).
+
 ### `main.py` — the nightly controller
 Full mode: scrapes, scores, emails the summary. Safe mode: reads job-alert
 emails and fetches descriptions logged out instead of scraping, then scores.
-Both run the Adzuna searches when it is configured; `--no-scrape` skips them.
+Both run the Adzuna searches and the employer feeds when configured;
+`--no-scrape` skips them.
 **It does not generate documents**: that waits for an explicit Approve on the
 dashboard, so nothing is written for a job that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.

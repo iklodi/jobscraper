@@ -231,6 +231,39 @@ def ingest_alerts(imap_factory=None):
     return stats
 
 
+# Locations too broad for one alert: its email would hit the six-job cap.
+WIDE_LOCATIONS = {'worldwide', 'europe', 'emea', 'remote', 'anywhere'}
+
+
+def recent_alerts(days=14):
+    """The alerts seen in emails over the last `days`, busiest first:
+    [{'alert', 'emails', 'listed', 'added', 'capped', 'last'}]."""
+    since = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat(sep=' ')
+    conn = db.get_connection()
+    rows = conn.execute(
+        'SELECT COALESCE(alert, ?), COUNT(*), SUM(jobs_listed), SUM(jobs_added), '
+        'SUM(jobs_listed >= ?), MAX(received_at) FROM alert_emails WHERE received_at >= ? '
+        'GROUP BY 1 ORDER BY 3 DESC',
+        ('job alert', EMAIL_JOB_CAP, since)).fetchall()
+    conn.close()
+    return [dict(zip(('alert', 'emails', 'listed', 'added', 'capped', 'last'), r)) for r in rows]
+
+
+def suggested_alerts(keywords, locations):
+    """The LinkedIn job alerts that reproduce search_criteria.md: one per
+    keyword and location, as [{'keyword', 'location', 'wide'}]. `wide` marks a
+    location broad enough that the alert's email will hit the six-job cap -
+    better split by country."""
+    out = []
+    for keyword, pinned in keywords:
+        for location in pinned or locations:
+            item = {'keyword': keyword, 'location': location,
+                    'wide': location.strip().lower() in WIDE_LOCATIONS}
+            if item not in out:
+                out.append(item)
+    return out
+
+
 def capped_since(since):
     """{alert: emails} for emails processed since `since` (ISO string) that
     listed a full EMAIL_JOB_CAP jobs, and so may have left some out."""
@@ -243,8 +276,20 @@ def capped_since(since):
 
 
 if __name__ == '__main__':
+    import sys
     from dotenv import load_dotenv
     load_dotenv()
+    if '--suggest' in sys.argv:
+        # The alerts to create on LinkedIn -> Jobs -> Job alerts, from the
+        # searches in search_criteria.md. Reading the file touches nothing.
+        from scraper import get_search_criteria
+        keywords, locations, _ = get_search_criteria()
+        print('Create these on LinkedIn (Jobs -> search -> "Set alert"), daily, by email:')
+        for item in suggested_alerts(keywords, locations):
+            print(f"  {item['keyword']}  in  {item['location']}"
+                  + ('   <- broad: one alert per country fits LinkedIn\'s six-job emails better'
+                     if item['wide'] else ''))
+        raise SystemExit(0)
     if not configured():
         raise SystemExit('Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env first.')
     print(ingest_alerts())

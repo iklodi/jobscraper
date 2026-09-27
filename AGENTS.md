@@ -47,7 +47,10 @@ launcher of a persistent profile, and it cannot reach LinkedIn.
 Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
 or moved), parses each job's title, company, location and id, and adds it as
 `new`. Only the numeric id is kept: alert links carry sign-in tokens, so links
-are rebuilt bare. Messages already read are recorded in `alert_emails`. A job
+are rebuilt bare. Messages already read are recorded in `alert_emails`, which also feeds the
+settings dialog's alert table (`recent_alerts`) and the summary's cap warning.
+`suggested_alerts` / `python alerts.py --suggest` turn `search_criteria.md`
+into the alerts to create. A job
 without a description is never scored — in safe mode the description comes
 from a logged-out fetch (#14).
 

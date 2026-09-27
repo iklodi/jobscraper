@@ -1162,11 +1162,44 @@ window.openSettings = function() {
         document.getElementById('settings-path-rules').innerText = ' — ' + data.rules.path;
         document.getElementById('settings-pass').innerText =
             'Jobs scoring ' + data.min_pass_score + '+ go to To Do';
+        window.settingsMode = data.mode;
+        renderAlertSettings(data.alerts);
     }).catch(e => {
         status.style.display = 'block';
         status.style.color = '#f87171';
         status.innerText = 'Could not load the settings: ' + e;
     });
+}
+
+// Safe mode: LinkedIn is never searched, so the candidate's job alerts are the
+// searches. Show what has been arriving, and what to create to match the file.
+function renderAlertSettings(info) {
+    const box = document.getElementById('settings-alerts');
+    if (!info) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const recent = info.recent.length
+        ? '<table style="width: 100%; font-size: 0.85rem; border-collapse: collapse;">' +
+          '<tr style="text-align: left; opacity: 0.7;"><th>Alert</th><th>Emails</th><th>Jobs listed</th><th>New</th><th>At the cap</th></tr>' +
+          info.recent.map(a => `<tr><td>${esc(a.alert)}</td><td>${a.emails}</td><td>${a.listed}</td><td>${a.added}</td>` +
+              `<td style="color: ${a.capped ? '#fbbf24' : 'inherit'};">${a.capped}</td></tr>`).join('') + '</table>'
+        : `<p style="opacity: 0.8;">${info.imap_configured
+            ? 'No job-alert emails read in the last 14 days.'
+            : 'IMAP is not configured, so no job-alert emails are read yet: set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.'}</p>`;
+    const suggested = info.suggested.map(s =>
+        `<li><code>${esc(s.keyword)}</code> in ${esc(s.location)}` +
+        (s.wide ? ` <span style="color: #fbbf24;">- too broad for one alert; create one per country</span>` : '') +
+        '</li>').join('');
+    box.innerHTML = `
+        <h4>Safe mode: your LinkedIn job alerts are the searches</h4>
+        <p style="font-size: 0.9rem; line-height: 1.5;">LinkedIn is not searched in safe mode. New LinkedIn jobs come
+            from the alerts you keep on LinkedIn (<em>Jobs &rarr; Job alerts</em>, daily, by email). Each email lists at most
+            ${info.cap} jobs, so keep alerts narrow: an alert whose emails are often at the cap is missing jobs.</p>
+        <h4 style="margin-top: 1rem;">Alerts seen in the last 14 days</h4>
+        ${recent}
+        <h4 style="margin-top: 1rem;">Alerts that match the searches below</h4>
+        <ul style="font-size: 0.85rem; line-height: 1.6; padding-left: 20px;">${suggested}</ul>
+        <p style="font-size: 0.85rem; opacity: 0.8;">The keywords below still drive the Adzuna search${info.adzuna_configured ? '' : ' (not configured)'}.</p>`;
+    box.style.display = 'block';
 }
 
 window.closeSettings = function() {
@@ -1200,7 +1233,8 @@ window.saveSettings = async function() {
             if (p.error) {
                 html += '<span style="color:#fbbf24;">But the file did not parse: ' + p.error + '</span>';
             } else {
-                html += `The next run will make ${p.searches} searches (${p.pages} result pages)` +
+                html += (window.settingsMode === 'safe'
+                        ? `Adzuna will run ${p.searches} searches` : `The next run will make ${p.searches} searches (${p.pages} result pages)`) +
                     (p.job_types && p.job_types.length ? ` (${p.job_types.join(', ')})` : '') + ':<br>' +
                     p.keywords.map(k =>
                         `&nbsp;&nbsp;<code>${k.keyword}</code> in ${k.locations.join(', ')}`).join('<br>');

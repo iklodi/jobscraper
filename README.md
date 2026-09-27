@@ -48,6 +48,29 @@ generate for everything on To Do the old way.
   paste where it leads into the job's **Employer application link**. Jobs from
   other sources (Adzuna, pasted employer pages) need nothing.
 
+### Setting up job alerts for safe mode
+
+In safe mode LinkedIn is never searched: the alerts you keep on LinkedIn are
+the searches. To recreate the searches in `search_criteria.md`:
+
+1. Run `python alerts.py --suggest`. It prints one alert per keyword and
+   location. The dashboard's **Search Settings** shows the same list in safe
+   mode, next to the alerts that have actually been arriving.
+2. On LinkedIn, search each one, press **Set alert**, and choose **daily** and
+   **email**. LinkedIn offers only daily or weekly.
+3. Put `IMAP_*` in `.env` so the emails can be read.
+
+Know the trade-offs:
+- **Each email lists at most six jobs.** A broad alert ("Europe",
+  "Worldwide") hits that on most days and drops the rest. Prefer one alert per
+  country. The nightly email flags alerts that hit the cap.
+- **LinkedIn matches loosely.** An alert for "Interim Manager" also brings spa
+  and production managers. The scorer filters them out, but they are not what
+  the keyword search would have returned.
+- **Timing.** A job reaches you when LinkedIn sends the alert, up to a day after
+  it was posted.
+- `search_criteria.md` still drives Adzuna in both modes.
+
 ## A second source: Adzuna
 
 [Adzuna](https://developer.adzuna.com) aggregates many job boards and offers
@@ -153,6 +176,7 @@ python applier.py --submit        # fill and submit
 python generate_from_url.py URL   # score one advert by link (--generate to write documents too)
 python infomaniak.py              # list available models and check the credentials
 python adzuna.py                  # run the Adzuna searches and fetch their descriptions
+python alerts.py --suggest        # the LinkedIn job alerts that match search_criteria.md
 ```
 
 ## Notes

@@ -421,6 +421,24 @@ def get_settings():
         except Exception as e:
             return jsonify({'error': f'Could not read {filename}: {e}'}), 500
     out['min_pass_score'] = os.environ.get('MIN_PASS_SCORE', '7')
+    # In safe mode LinkedIn is not searched: the candidate's job alerts are the
+    # searches (#17). Show which alerts have been arriving, and which to create
+    # to cover search_criteria.md - which still drives Adzuna.
+    import mode
+    out['mode'] = mode.current_mode()
+    if mode.safe_mode():
+        import alerts, adzuna, importlib, scraper
+        importlib.reload(scraper)
+        try:
+            keywords, locations, _ = scraper.get_search_criteria()
+            suggested = alerts.suggested_alerts(keywords, locations)
+        except Exception:
+            suggested = []
+        db.init_db()
+        out['alerts'] = {'recent': alerts.recent_alerts(), 'suggested': suggested,
+                         'imap_configured': alerts.configured(),
+                         'adzuna_configured': adzuna.configured(),
+                         'cap': alerts.EMAIL_JOB_CAP}
     return jsonify(out)
 
 @app.route('/api/settings', methods=['POST'])

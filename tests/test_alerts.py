@@ -3,6 +3,7 @@
 Fixtures copy the layout of real alert emails with every name, id and token
 replaced - this repository is public.
 """
+import datetime
 import email.message
 import pathlib
 
@@ -137,3 +138,51 @@ def test_confirmation_email_sent_when_an_alert_is_created():
         ('1000000011', 'Head of Example Center of Excellence (m/f/d)', 'Example Consulting GmbH'),
         ('1000000012', 'Corporate Head of Example', 'Example Pharma S.A.'),
         ('1000000013', 'Head of Example', 'Example IT Collective')]
+
+
+# --- settings: which alerts arrive, and which to create (issue #17) ---------
+
+def test_recent_alerts_counts_emails_and_capped_ones(scratch_db):
+    conn = db.get_connection()
+    now = datetime.datetime.now()
+    for i, (alert, listed) in enumerate([('A in X', 6), ('A in X', 2), ('B in Y', 1)]):
+        conn.execute('INSERT INTO alert_emails VALUES (?, ?, ?, ?, ?, ?)',
+                     (f'<{i}@x>', (now - datetime.timedelta(days=i)).isoformat(sep=' '),
+                      alert, listed, listed, now.isoformat(sep=' ')))
+    conn.execute('INSERT INTO alert_emails VALUES (?, ?, ?, ?, ?, ?)',
+                 ('<old@x>', (now - datetime.timedelta(days=40)).isoformat(sep=' '),
+                  'Old in Z', 6, 6, now.isoformat(sep=' ')))
+    conn.commit()
+    conn.close()
+    recent = alerts.recent_alerts(days=14)
+    assert [(a['alert'], a['emails'], a['listed'], a['capped']) for a in recent] == \
+        [('A in X', 2, 8, 1), ('B in Y', 1, 1, 0)]
+
+
+def test_suggested_alerts_follow_the_search_file_and_flag_broad_places():
+    keywords = [('Head of Example', None), ('Interim Manager', ['Switzerland'])]
+    suggested = alerts.suggested_alerts(keywords, ['Switzerland', 'Worldwide'])
+    assert suggested == [
+        {'keyword': 'Head of Example', 'location': 'Switzerland', 'wide': False},
+        {'keyword': 'Head of Example', 'location': 'Worldwide', 'wide': True},
+        {'keyword': 'Interim Manager', 'location': 'Switzerland', 'wide': False},
+    ]
+
+
+def test_settings_show_alerts_in_safe_mode(scratch_db, tmp_path, monkeypatch):
+    (tmp_path / 'search_criteria.md').write_text(
+        '# Search Keywords\n- Example Role\n# Search Locations\n- Switzerland\n')
+    (tmp_path / 'rules.md').write_text('rules\n')
+    import app as dashboard          # loads .env over the environment - so set CVS_DIR after
+    monkeypatch.setenv('CVS_DIR', str(tmp_path))
+    monkeypatch.setattr(dashboard, 'CVS_DIR', str(tmp_path))
+    client = dashboard.app.test_client()
+
+    monkeypatch.setenv('JOBSCRAPER_MODE', 'safe')
+    data = client.get('/api/settings').get_json()
+    assert data['mode'] == 'safe'
+    assert data['alerts']['suggested'] == [
+        {'keyword': 'Example Role', 'location': 'Switzerland', 'wide': False}]
+
+    monkeypatch.setenv('JOBSCRAPER_MODE', 'full')
+    assert 'alerts' not in client.get('/api/settings').get_json()

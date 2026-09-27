@@ -231,6 +231,17 @@ def ingest_alerts(imap_factory=None):
     return stats
 
 
+def capped_since(since):
+    """{alert: emails} for emails processed since `since` (ISO string) that
+    listed a full EMAIL_JOB_CAP jobs, and so may have left some out."""
+    conn = db.get_connection()
+    rows = conn.execute('SELECT COALESCE(alert, ?), COUNT(*) FROM alert_emails '
+                        'WHERE processed_at >= ? AND jobs_listed >= ? GROUP BY 1',
+                        ('job alert', since, EMAIL_JOB_CAP)).fetchall()
+    conn.close()
+    return dict(rows)
+
+
 if __name__ == '__main__':
     from dotenv import load_dotenv
     load_dotenv()

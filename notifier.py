@@ -25,19 +25,24 @@ def _job_links(job_id):
     return " - " + " | ".join(links)
 
 
-def format_summary(duration, keyword_stats, eval_stats, status_counts):
+def format_summary(duration, keyword_stats, eval_stats, status_counts, source_notes=None):
     lines = []
     lines.append("# AI Job Application Pipeline Summary\n")
     lines.append(f"**Total Duration:** {duration}\n")
-    
-    lines.append("## Scraping Stats (New Jobs Found)")
+
+    if source_notes:
+        lines.append("## Sources")
+        lines.extend(f"- {note}" for note in source_notes)
+        lines.append("")
+
+    lines.append("## New Jobs Found")
     if keyword_stats:
         total_scraped = sum(keyword_stats.values())
         lines.append(f"- **Total**: {total_scraped}")
         for kw, count in keyword_stats.items():
             lines.append(f"- *{kw}*: {count}")
     else:
-        lines.append("- Scraping skipped or no new jobs found.")
+        lines.append("- No new jobs found (or the search step was skipped).")
     lines.append("")
         
     lines.append("## Evaluation Stats\n")
@@ -124,7 +129,7 @@ def send_email(subject, md_body):
         print(f"Failed to send email '{subject}': {e}")
 
 
-def send_email_summary(duration, keyword_stats, eval_stats, status_counts):
-    md_summary = format_summary(duration, keyword_stats, eval_stats, status_counts)
+def send_email_summary(duration, keyword_stats, eval_stats, status_counts, source_notes=None):
+    md_summary = format_summary(duration, keyword_stats, eval_stats, status_counts, source_notes)
     print("\n" + md_summary + "\n")
     send_email('AI Job Scraper - Daily Summary', md_summary)

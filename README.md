@@ -37,7 +37,9 @@ generate for everything on To Do the old way.
   emails** LinkedIn sends you over IMAP, read-only. Set up LinkedIn job alerts
   for your searches (daily, by email), then fill in the `IMAP_*` settings.
   Descriptions are then read from the public job pages, logged out, and the
-  jobs are scored as usual. Safe mode is still being built (issues #12-#20):
+  jobs are scored as usual. The nightly email opens with a **Sources** section:
+  jobs per alert, alerts whose email hit LinkedIn's six-job limit, and whether
+  a fetcher was blocked. Safe mode is still being built (issues #12-#20):
   filling forms and the + button still need full mode, and the dashboard greys
   them out in safe mode.
 

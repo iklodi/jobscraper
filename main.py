@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import os
 import sys
 import time
@@ -27,16 +28,31 @@ async def main():
     eval_stats = {'score_counts': {}, 'recent_backlog': []}
     
     skip_scrape = '--no-scrape' in sys.argv
+    run_started = datetime.datetime.now().isoformat(sep=' ', timespec='seconds')
+    # Where this run's jobs came from and what went wrong on the way, for the
+    # summary email - a walled fetcher or a capped alert is otherwise invisible.
+    source_notes = [f"Mode: **{mode.current_mode()}**"]
     print(f"=== Mode: {mode.current_mode()} ===")
 
     if mode.safe_mode():
         # Safe mode never browses LinkedIn on the candidate's account. New jobs
         # arrive through job-alert emails instead.
         print("=== Step 1: Safe mode - reading LinkedIn job-alert emails ===")
-        keyword_stats = alerts.ingest_alerts() if alerts.configured() else {}
-        if not alerts.configured():
+        if alerts.configured():
+            try:
+                keyword_stats = {f'LinkedIn alert: {name}': added
+                                 for name, added in alerts.ingest_alerts().items()}
+            except Exception as e:
+                print(f"Reading job-alert emails failed: {e}")
+                source_notes.append(f"⚠️ Reading job-alert emails failed: {e}")
+            for name, emails in alerts.capped_since(run_started).items():
+                source_notes.append(f"⚠️ *{name}*: {emails} email(s) listed LinkedIn's maximum of "
+                                    f"{alerts.EMAIL_JOB_CAP} jobs, so some matches were probably left "
+                                    f"out. Narrow the alert.")
+        else:
             print("Note: IMAP is not configured, so no new jobs were read. "
                   "Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.")
+            source_notes.append("⚠️ IMAP is not configured, so no job-alert emails were read.")
         # Alert emails carry no description; read it from the public posting,
         # logged out. Jobs still without one are left out of scoring.
         print("=== Step 1b: Safe mode - fetching descriptions, logged out ===")
@@ -44,6 +60,12 @@ async def main():
         print(f"Descriptions: {fetch_stats['fetched']} fetched, {fetch_stats['failed']} failed, "
               f"{fetch_stats['closed']} closed, {fetch_stats['pending']} still pending"
               + (" - LinkedIn walled the fetcher; retrying next run." if fetch_stats['blocked'] else ""))
+        source_notes.append(
+            f"LinkedIn descriptions (logged out): {fetch_stats['fetched']} fetched, "
+            f"{fetch_stats['failed']} failed, {fetch_stats['closed']} closed, "
+            f"{fetch_stats['pending']} still pending"
+            + (". ⚠️ LinkedIn walled the fetcher; the rest wait for the next run."
+               if fetch_stats['blocked'] else ""))
     elif not skip_scrape:
         print("=== Step 1: Scraping LinkedIn Jobs ===")
         keyword_stats = await run_scraper()
@@ -64,8 +86,14 @@ async def main():
             print(f"Adzuna descriptions: {adzuna_fetch['fetched']} fetched, "
                   f"{adzuna_fetch['failed']} failed, {adzuna_fetch['pending']} still pending"
                   + (" - Adzuna refused the fetcher; retrying next run." if adzuna_fetch['blocked'] else ""))
+            source_notes.append(
+                f"Adzuna descriptions: {adzuna_fetch['fetched']} fetched, {adzuna_fetch['failed']} "
+                f"failed, {adzuna_fetch['pending']} still pending"
+                + (". ⚠️ Adzuna refused the page reader; the rest wait for the next run."
+                   if adzuna_fetch['blocked'] else ""))
         except Exception as e:
             print(f"Adzuna search failed: {e}")
+            source_notes.append(f"⚠️ Adzuna search failed: {e}")
     
     skip_eval = '--no-eval' in sys.argv
     
@@ -111,7 +139,8 @@ async def main():
         status_counts = {}
         print(f"Error fetching status counts: {e}")
         
-    notifier.send_email_summary(duration_str, keyword_stats, eval_stats, status_counts)
+    notifier.send_email_summary(duration_str, keyword_stats, eval_stats, status_counts,
+                                source_notes=source_notes)
     progress_tracker.clear_status()
 
 if __name__ == '__main__':

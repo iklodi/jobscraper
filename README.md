@@ -71,6 +71,15 @@ Know the trade-offs:
   it was posted.
 - `search_criteria.md` still drives Adzuna in both modes.
 
+### Application updates from LinkedIn
+
+With `IMAP_*` set, each run also reads LinkedIn's application-status emails
+from `jobs-noreply@linkedin.com`, in both modes. It only ever looks at jobs in
+Applied. A decline that names the company and the role of exactly one of them
+moves it to Rejected with a note. "Your application was viewed" adds a note.
+Anything that matches no job, or more than one, is listed in the summary email
+and left alone.
+
 ## A second source: Adzuna
 
 [Adzuna](https://developer.adzuna.com) aggregates many job boards and offers
@@ -193,6 +202,7 @@ python adzuna.py                  # run the Adzuna searches and fetch their desc
 python alerts.py --suggest        # the LinkedIn job alerts that match search_criteria.md
 python ats_feeds.py               # read the employers' feeds in companies.yaml
 python ats_feeds.py --detect URL  # the companies.yaml entry for an employer's job link
+python outcomes.py                # apply LinkedIn's application-status emails now
 ```
 
 ## Notes

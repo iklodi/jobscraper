@@ -19,6 +19,7 @@ import alerts
 import public_jobs
 import adzuna
 import ats_feeds
+import outcomes
 
 async def main():
     progress_tracker.clear_status()
@@ -108,6 +109,14 @@ async def main():
         except Exception as e:
             print(f"Employer feeds failed: {e}")
             source_notes.append(f"⚠️ Employer feeds failed: {e}")
+
+    # LinkedIn's application-status emails (#19): read-only, either mode.
+    if alerts.configured():
+        try:
+            source_notes.extend(outcomes.ingest())
+        except Exception as e:
+            print(f"Reading application updates failed: {e}")
+            source_notes.append(f"⚠️ Reading application updates failed: {e}")
 
     skip_eval = '--no-eval' in sys.argv
     

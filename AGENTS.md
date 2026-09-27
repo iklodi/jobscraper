@@ -75,6 +75,16 @@ already on the board are skipped by normalised title and company; Job-Room
 alone decides. The dashboard labels these jobs "Jobs by Adzuna" (Adzuna's
 terms). Limits: 25 calls/min, 250/day.
 
+### `outcomes.py` — LinkedIn's application-status emails
+Reads `jobs-noreply@linkedin.com` through `alerts.read_mail` (the one read-only
+IMAP path; processed mail in `outcome_emails`). The body says nothing; the
+meaning is the subject plus LinkedIn's tracking name in the links
+(`email_jobs_application_rejected` / `email_jobs_job_application_viewed`).
+Only jobs in Applied are matched; a decline needs company **and** role to match
+exactly one job, "viewed" only adds a note, and everything else goes to the
+summary untouched. Do not loosen the matching: a wrong match hides a live
+application.
+
 ### `ats_feeds.py` — employers' own job feeds, in either mode
 One adapter per ATS (Greenhouse, Lever, Ashby, Personio, SmartRecruiters,
 Recruitee), each reading the public feed documented for programs: never the

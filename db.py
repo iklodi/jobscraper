@@ -109,6 +109,18 @@ def init_db():
             processed_at TIMESTAMP
         )
     ''')
+    # LinkedIn's application-status emails already applied (outcomes.py, #19).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS outcome_emails (
+            message_id TEXT PRIMARY KEY,
+            received_at TIMESTAMP,
+            kind TEXT,
+            company TEXT,
+            role TEXT,
+            result TEXT,
+            processed_at TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
 

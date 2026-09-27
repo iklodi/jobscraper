@@ -32,6 +32,9 @@ def safe_run(tmp_path, monkeypatch):
     async def no_scrape():
         raise AssertionError('safe mode ran the LinkedIn scraper')
     monkeypatch.setattr(main, 'run_scraper', no_scrape)
+    # No real mailbox, feeds or APIs from a test.
+    monkeypatch.setattr(main.outcomes, 'ingest', lambda: ['LinkedIn: Example role - application viewed.'])
+    monkeypatch.setattr(main.ats_feeds, 'configured', lambda: False)
 
     sent = {}
     monkeypatch.setattr(notifier, 'send_email',
@@ -67,6 +70,7 @@ def test_safe_run_reads_alerts_fetches_and_reports_its_sources(safe_run):
     assert 'maximum of 6 jobs' in body
     assert '4 fetched, 1 failed, 1 closed, 2 still pending' in body
     assert 'walled the fetcher' in body
+    assert 'application viewed' in body
 
 
 def test_safe_run_without_imap_says_so(safe_run):

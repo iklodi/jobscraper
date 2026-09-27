@@ -133,11 +133,6 @@ def _decode(value):
         return value or ''
 
 
-def _already_processed(conn, message_id):
-    return conn.execute('SELECT 1 FROM alert_emails WHERE message_id = ?',
-                        (message_id,)).fetchone() is not None
-
-
 def store_jobs(alert_name, jobs):
     """Add the jobs an alert listed; returns how many were new.
 
@@ -160,18 +155,21 @@ def store_jobs(alert_name, jobs):
     return added
 
 
-def ingest_alerts(imap_factory=None):
-    """Read new alert emails and add their jobs. Returns {alert name: jobs added}.
+def read_mail(sender, table, imap_factory=None):
+    """Yield (message_id, message) for every email from `sender` not yet
+    recorded in `table`, read-only: BODY.PEEK, nothing marked or moved.
 
+    `table` has message_id and received_at columns; the search starts a day
+    before the newest email recorded there, or ALERT_LOOKBACK_DAYS back on the
+    first run. The caller records each message it has handled.
     imap_factory is for tests; by default it connects with IMAP4_SSL.
     """
-    db.init_db()
     host = os.environ.get('IMAP_HOST')
     folder = os.environ.get('IMAP_FOLDER', 'INBOX')
     lookback = int(os.environ.get('ALERT_LOOKBACK_DAYS', '14'))
 
     conn = db.get_connection()
-    newest = conn.execute('SELECT MAX(received_at) FROM alert_emails').fetchone()[0]
+    newest = conn.execute(f'SELECT MAX(received_at) FROM {table}').fetchone()[0]
     conn.close()
     if newest:
         # Start a day before the newest email already read, to be safe across
@@ -181,14 +179,12 @@ def ingest_alerts(imap_factory=None):
         since = datetime.datetime.now() - datetime.timedelta(days=lookback)
 
     imap = (imap_factory or imaplib.IMAP4_SSL)(host)
-    stats = {}
     try:
         imap.login(os.environ['IMAP_USER'], os.environ['IMAP_PASSWORD'])
         imap.select(f'"{folder}"', readonly=True)       # readonly: nothing gets marked
-        status, data = imap.search(None, 'FROM', f'"{ALERT_SENDER}"',
-                                   'SINCE', since.strftime('%d-%b-%Y'))
+        status, data = imap.search(None, 'FROM', f'"{sender}"', 'SINCE', since.strftime('%d-%b-%Y'))
         ids = data[0].split() if status == 'OK' and data and data[0] else []
-        print(f'{len(ids)} job-alert email(s) since {since:%Y-%m-%d}.')
+        print(f'{len(ids)} email(s) from {sender} since {since:%Y-%m-%d}.')
 
         for num in ids:
             status, parts = imap.fetch(num, '(BODY.PEEK[])')
@@ -197,37 +193,52 @@ def ingest_alerts(imap_factory=None):
             message = email.message_from_bytes(parts[0][1])
             message_id = (message.get('Message-ID') or '').strip() or f'no-id:{num.decode()}'
             conn = db.get_connection()
-            if _already_processed(conn, message_id):
-                conn.close()
-                continue
+            seen = conn.execute(f'SELECT 1 FROM {table} WHERE message_id = ?',
+                                (message_id,)).fetchone() is not None
             conn.close()
-
-            alert_name, jobs = parse_alert_text(message_text(message))
-            added = store_jobs(alert_name, jobs)
-            key = alert_name or _decode(message.get('Subject')) or 'job alert'
-            stats[key] = stats.get(key, 0) + added
-
-            received = email.utils.parsedate_to_datetime(message.get('Date')) \
-                if message.get('Date') else datetime.datetime.now()
-            conn = db.get_connection()
-            conn.execute(
-                'INSERT OR IGNORE INTO alert_emails '
-                '(message_id, received_at, alert, jobs_listed, jobs_added, processed_at) '
-                'VALUES (?, ?, ?, ?, ?, ?)',
-                (message_id, received.replace(tzinfo=None).isoformat(sep=' '),
-                 alert_name, len(jobs), added, datetime.datetime.now().isoformat(sep=" ", timespec="seconds")))
-            conn.commit()
-            conn.close()
-            if jobs:
-                print(f'  {key}: {len(jobs)} listed, {added} new')
-            if len(jobs) >= EMAIL_JOB_CAP:
-                print(f'  {key}: the email is at LinkedIn\'s {EMAIL_JOB_CAP}-job cap, so more may '
-                      f'match than it listed. Narrow the alert or have it sent more often.')
+            if not seen:
+                yield message_id, message
     finally:
         try:
             imap.logout()
         except Exception:
             pass
+
+
+def received_at(message):
+    """The email's Date as a naive ISO string, for the processed-mail tables."""
+    when = email.utils.parsedate_to_datetime(message.get('Date')) \
+        if message.get('Date') else datetime.datetime.now()
+    return when.replace(tzinfo=None).isoformat(sep=' ')
+
+
+def ingest_alerts(imap_factory=None):
+    """Read new alert emails and add their jobs. Returns {alert name: jobs added}.
+
+    imap_factory is for tests; by default it connects with IMAP4_SSL.
+    """
+    db.init_db()
+    stats = {}
+    for message_id, message in read_mail(ALERT_SENDER, 'alert_emails', imap_factory):
+        alert_name, jobs = parse_alert_text(message_text(message))
+        added = store_jobs(alert_name, jobs)
+        key = alert_name or _decode(message.get('Subject')) or 'job alert'
+        stats[key] = stats.get(key, 0) + added
+
+        conn = db.get_connection()
+        conn.execute(
+            'INSERT OR IGNORE INTO alert_emails '
+            '(message_id, received_at, alert, jobs_listed, jobs_added, processed_at) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (message_id, received_at(message), alert_name, len(jobs), added,
+             datetime.datetime.now().isoformat(sep=" ", timespec="seconds")))
+        conn.commit()
+        conn.close()
+        if jobs:
+            print(f'  {key}: {len(jobs)} listed, {added} new')
+        if len(jobs) >= EMAIL_JOB_CAP:
+            print(f'  {key}: the email is at LinkedIn\'s {EMAIL_JOB_CAP}-job cap, so more may '
+                  f'match than it listed. Narrow the alert or have it sent more often.')
     return stats
 
 

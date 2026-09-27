@@ -1,5 +1,6 @@
 venv/
 chrome_profile/
+employer_profile/
 __pycache__/
 jobs.db
 *.pyc

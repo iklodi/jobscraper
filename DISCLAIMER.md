@@ -28,8 +28,10 @@ For this reason the tool is gaining a **safe mode**
 account. New jobs come from the **job-alert emails LinkedIn sends you**, and
 job descriptions are read from public job pages with no session attached. See
 the [safe-mode issues](https://github.com/iklodi/jobscraper/issues?q=label%3Asafe-mode)
-for what is finished and what is still being built. Until it is complete, parts
-of the pipeline still need full mode.
+for what is finished and what is still being built. Applications are filled in
+a separate browser that is blocked from reaching LinkedIn, starting from the
+employer's own page - which, for a job that came from LinkedIn, you paste in
+yourself.
 
 LinkedIn **Easy Apply is never automated** in either mode.
 

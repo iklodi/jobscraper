@@ -41,8 +41,12 @@ generate for everything on To Do the old way.
   jobs per alert, alerts whose email hit LinkedIn's six-job limit, and whether
   a fetcher was blocked. The **+** button works too: a pasted LinkedIn link
   is stripped of its tracking and sign-in parameters and read logged out.
-  Safe mode is still being built (issues #12-#20): filling forms still needs
-  full mode, and the dashboard greys it out in safe mode.
+  **Fill Now** and **Apply Now** work from the employer's own page, in a
+  separate browser (`employer_profile`) that is blocked from reaching LinkedIn.
+  LinkedIn does not show that page to a logged-out visitor, so for a job that
+  came from LinkedIn, open the posting yourself, follow its Apply button and
+  paste where it leads into the job's **Employer application link**. Jobs from
+  other sources (Adzuna, pasted employer pages) need nothing.
 
 ## A second source: Adzuna
 

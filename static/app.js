@@ -102,6 +102,24 @@ async function loadApplyPolicy() {
 
 let allJobs = [];
 
+async function saveApplyUrl(jobId) {
+    const input = document.getElementById(`apply-url-${jobId}`);
+    const status = document.getElementById(`apply-url-status-${jobId}`);
+    try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/apply-url`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: input.value.trim()}),
+        });
+        const data = await res.json();
+        status.textContent = res.ok ? (data.apply_url ? 'Saved - applying starts from this page.' : 'Cleared.') : data.error;
+        status.style.color = res.ok ? '#34d399' : '#f87171';
+        if (res.ok) fetchJobs();
+    } catch (e) {
+        status.textContent = 'Could not save: ' + e;
+        status.style.color = '#f87171';
+    }
+}
+
 async function fetchJobs() {
     try {
         const response = await fetch('/api/jobs');
@@ -444,6 +462,30 @@ function openJobDetails(jobId) {
         `;
     }
 
+    // Where the applier starts. In safe mode it never opens LinkedIn, so a job
+    // that came in with only a LinkedIn link needs the employer's page here.
+    let applyLinkHtml = '';
+    if (['to_apply', 'generated', 'approved', 'failed', 'account_required', 'ready_to_submit'].includes(job.status)) {
+        const onlyLinkedIn = /(^|\.)linkedin\.com$/i.test((() => { try { return new URL(job.link).hostname; } catch (e) { return ''; } })());
+        const needed = window.modeInfo.mode === 'safe' && onlyLinkedIn && !job.apply_url;
+        const hint = needed
+            ? (job.apply_type === 'easy_apply'
+                ? 'This posting only takes LinkedIn Easy Apply, which is never automated.'
+                : "Needed in safe mode: open the posting on LinkedIn, follow its Apply button, and paste the employer's page here.")
+            : "Optional. Fill Now and Apply Now start from this page instead of the posting.";
+        const current = (job.apply_url || '').replace(/"/g, '&quot;');
+        applyLinkHtml = `
+            <div class="detail-section">
+                <h4>Employer application link</h4>
+                <div style="display: flex; gap: 8px;">
+                    <input type="url" id="apply-url-${job.job_id}" value="${current}" placeholder="https://careers.example.com/job/..." style="flex: 1;">
+                    <button class="btn" onclick="saveApplyUrl('${job.job_id}')">Save</button>
+                </div>
+                <p id="apply-url-status-${job.job_id}" style="font-size: 0.85rem; color: ${needed ? '#fbbf24' : 'var(--text-secondary)'}; margin-top: 6px;">${hint}</p>
+            </div>
+        `;
+    }
+
     let notesHtml = '';
     if (job.application_notes) {
         notesHtml = `
@@ -486,6 +528,8 @@ function openJobDetails(jobId) {
         <h3>${job.company} • ${job.location}${job.is_promoted ? ' • 📢 Promoted listing' : ''}${isAdzuna(job) ? ' • Jobs by Adzuna' : ''}</h3>
 
         ${actionSection}
+
+        ${applyLinkHtml}
         
         ${notesHtml}
         

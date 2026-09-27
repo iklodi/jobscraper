@@ -31,6 +31,7 @@ import notifier
 import progress_tracker
 import infomaniak
 import mode
+from mode import safe_mode
 
 # Not override=True: an explicitly exported variable must beat the .env file,
 # otherwise per-run settings passed on the command line are silently ignored.
@@ -589,6 +590,45 @@ async def is_easy_apply(page):
         except Exception:
             continue
     return False
+
+
+NEEDS_EMPLOYER_LINK = (
+    "Safe mode never opens LinkedIn, and LinkedIn does not show the employer's "
+    "application link to a logged-out visitor. Open the job on LinkedIn yourself, "
+    "follow its Apply button, and paste the employer's page into this job's "
+    "'Employer application link' on the dashboard - then Fill Now or Apply Now "
+    "starts from there.")
+
+
+def plan_start(link, apply_url, apply_type, safe):
+    """Where an application run starts: (how, url).
+
+    how is 'direct' (open url, the employer's page), 'linkedin' (full mode:
+    follow the posting's Apply button), 'easy_apply' (left to the candidate) or
+    'needs_link' (safe mode, and nothing but a LinkedIn link is known).
+    """
+    if apply_url:
+        return 'direct', apply_url
+    if not safe:
+        return 'linkedin', link
+    if link and not mode.is_linkedin(link):
+        return 'direct', link
+    if apply_type == 'easy_apply':
+        return 'easy_apply', None
+    return 'needs_link', None
+
+
+async def open_direct(page, url, trace=None):
+    """Open the employer's page itself. try_advance_to_form walks on from a job
+    description to the form, as it does after LinkedIn's Apply button."""
+    try:
+        await page.goto(url, timeout=60000)
+    except Exception:
+        return None, None
+    await pause(page, 4000)
+    if trace:
+        await trace.shot(page, 'employer_page')
+    return page, 'direct'
 
 
 async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry=False):
@@ -1872,7 +1912,17 @@ async def process_job(page, client, profile, job, auto_submit=False):
     trace = Trace(job_id, folder)
     attachments = attachment_paths(profile)
     cover_letter = cover_letter_body(folder, cl_path)
-    target, mode = await find_apply_url(page, link, job_id, trace)
+    apply_url, apply_type = db.get_apply_target(job_id)
+    how, start = plan_start(link, apply_url, apply_type, safe_mode())
+    if how == 'needs_link':
+        trace.write_manifest(job, 'needs_employer_link', False)
+        return 'approved', NEEDS_EMPLOYER_LINK + f'\nPosting: {link}\nDocuments: {folder}'
+    if how == 'direct':
+        target, mode = await open_direct(page, start, trace)
+    elif how == 'easy_apply':
+        target, mode = None, 'easy_apply'
+    else:
+        target, mode = await find_apply_url(page, link, job_id, trace)
     if mode == 'easy_apply':
         trace.write_manifest(job, 'easy_apply', False)
         return 'easy_apply', (
@@ -1889,6 +1939,8 @@ async def process_job(page, client, profile, job, auto_submit=False):
             listing_text = ''
         if CLOSED_LISTING_PATTERNS.search(listing_text):
             return 'failed', 'The listing is closed - LinkedIn shows "No longer accepting applications".'
+        if how == 'direct':
+            return 'failed', f'Could not open the employer page {start}.'
         return 'failed', (
             'Could not find an Apply button on the LinkedIn posting. See '
             f'{job_id}_apply_lookup_failure.png in the applications folder.'
@@ -2083,7 +2135,7 @@ def _process_alive_ancestor(pid):
     return None
 
 
-def release_profile_lock():
+def release_profile_lock(profile_dir=None):
     """Reclaim the Chrome profile from a browser nothing owns any more.
 
     Only orphans are killed. This used to kill every browser on the profile,
@@ -2095,7 +2147,7 @@ def release_profile_lock():
     live run is using it.
     """
     import subprocess
-    profile = os.path.abspath(CHROME_PROFILE_DIR)
+    profile = os.path.abspath(profile_dir or CHROME_PROFILE_DIR)
     try:
         out = subprocess.run(['pgrep', '-f', '--', f'--user-data-dir={profile}'],
                              capture_output=True, text=True).stdout.split()
@@ -2177,13 +2229,18 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
 
     results = []
     review_tabs = []
-    os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
-    if not release_profile_lock():
+    # Safe mode fills forms in a profile of its own that never reaches
+    # LinkedIn; full mode shares the scraper's logged-in one.
+    safe = safe_mode()
+    profile_dir = mode.EMPLOYER_PROFILE_DIR if safe else CHROME_PROFILE_DIR
+    os.makedirs(profile_dir, exist_ok=True)
+    if not release_profile_lock(profile_dir):
         release_run_lock()
         raise RuntimeError('The browser profile is in use by another run (the scraper or an '
                            'add-by-link fetch). Try again when it has finished.')
+    launch = mode.open_employer_session if safe else mode.open_linkedin_session
     async with async_playwright() as p:
-        browser = await mode.open_linkedin_session(p,
+        browser = await launch(p,
             headless=False,
             viewport={'width': 1440, 'height': 900},
         )

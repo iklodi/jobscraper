@@ -60,7 +60,7 @@ def get_jobs():
     jobs = conn.execute('''
         SELECT j.job_id, j.title, j.company, j.location, j.link, j.score, j.reasoning,
                j.status, j.created_at, j.estimated_salary, j.is_recruiter, j.is_promoted,
-               j.description, j.application_notes,
+               j.description, j.application_notes, j.apply_url, j.apply_type,
                COALESCE(
                    (SELECT MAX(h.created_at) FROM job_history h
                      WHERE h.job_id = j.job_id AND h.new_status = 'applied'),
@@ -149,7 +149,8 @@ def get_job(job_id):
     conn = get_db_connection()
     job = conn.execute('''
         SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
-               estimated_salary, is_recruiter, is_promoted, description, application_notes
+               estimated_salary, is_recruiter, is_promoted, description, application_notes,
+               apply_url, apply_type
         FROM jobs WHERE job_id = ?
     ''', (job_id,)).fetchone()
     conn.close()
@@ -287,19 +288,34 @@ def run_applier_bg(limit, job_ids, auto_submit=False):
 def get_mode():
     """The current mode, and which features need the logged-in LinkedIn session.
 
-    Adding a job by link works in both modes (#16). Until its safe-mode version
-    exists (#15), the applier still opens the logged-in profile, which safe mode
-    refuses.
+    Both work in either mode now: adding a job by link reads pages logged out
+    (#16), and the applier starts from the employer's page in a browser that
+    never reaches LinkedIn (#15). Kept so the dashboard can grey out a feature
+    again should one ever need the logged-in session.
     """
     import mode
-    safe = mode.safe_mode()
-    later = ('Not available in safe mode yet: it still needs the logged-in LinkedIn '
-             'session, which safe mode never uses. Tracked in issue {}.')
     return jsonify({
         'mode': mode.current_mode(),
-        'apply_available': not safe, 'apply_reason': later.format('#15') if safe else '',
+        'apply_available': True, 'apply_reason': '',
         'add_url_available': True, 'add_url_reason': '',
     })
+
+@app.route('/api/jobs/<job_id>/apply-url', methods=['POST'])
+def set_apply_url(job_id):
+    """The employer's own application page for a job. The applier starts there
+    instead of at the LinkedIn posting - in safe mode, the only way to fill a
+    job that came in with nothing but a LinkedIn link (#15)."""
+    import mode
+    url = ((request.json or {}).get('url') or '').strip()
+    if url and not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Enter a full link starting with http.'}), 400
+    if url and mode.is_linkedin(url):
+        return jsonify({'error': "That is a LinkedIn link. Paste the employer's page - the one "
+                                 "LinkedIn's Apply button leads to."}), 400
+    if not db.job_exists(job_id):
+        return jsonify({'error': 'No such job.'}), 404
+    db.set_apply_url(job_id, url)
+    return jsonify({'status': 'ok', 'apply_url': url or None})
 
 @app.route('/api/apply/policy', methods=['GET'])
 def apply_policy():
@@ -329,11 +345,6 @@ def trigger_apply():
     # Apply Now omits `submit` or sends true; Fill Now sends false. When it is
     # on, the pre-submit gate in applier.py still refuses anything incomplete.
     auto_submit = bool(data.get('submit', True))
-    import mode
-    if mode.safe_mode():
-        return jsonify({'status': 'blocked',
-                        'error': 'Safe mode is on: filling forms still needs the logged-in '
-                                 'LinkedIn session (issue #15).'}), 409
     import applier
     if auto_submit and applier.submit_blocked_by_profile():
         return jsonify({'status': 'blocked',

@@ -12,9 +12,16 @@ fails loudly instead of quietly using the account.
 """
 
 import os
+import re
+import urllib.parse
 
 MODES = ('full', 'safe')
 PROFILE_DIR = './chrome_profile'
+# The applier's browser in safe mode: a profile of its own that has never been
+# signed in to LinkedIn. It keeps employers' logins and cookie choices between
+# runs, which chrome_profile used to do for both.
+EMPLOYER_PROFILE_DIR = './employer_profile'
+LINKEDIN_URL = re.compile(r'^https?://([^/?#]*\.)?linkedin\.com([/?#:]|$)', re.I)
 
 
 class SafeModeViolation(RuntimeError):
@@ -38,6 +45,11 @@ def safe_mode():
     return current_mode() == 'safe'
 
 
+def is_linkedin(url):
+    host = urllib.parse.urlparse(url or '').netloc.lower().split(':')[0]
+    return host == 'linkedin.com' or host.endswith('.linkedin.com')
+
+
 async def open_linkedin_session(playwright, **options):
     """Launch Chromium on the candidate's logged-in LinkedIn profile.
 
@@ -52,3 +64,18 @@ async def open_linkedin_session(playwright, **options):
     os.makedirs(PROFILE_DIR, exist_ok=True)
     return await playwright.chromium.launch_persistent_context(
         user_data_dir=PROFILE_DIR, **options)
+
+
+async def open_employer_session(playwright, **options):
+    """Launch Chromium for employers' application forms, in safe mode.
+
+    Uses its own profile, never chrome_profile, and aborts every request to
+    linkedin.com: an employer page's "Apply with LinkedIn" button, a redirect
+    through LinkedIn, even LinkedIn's tracking pixel. Whatever the applier
+    clicks, nothing reaches LinkedIn from here.
+    """
+    os.makedirs(EMPLOYER_PROFILE_DIR, exist_ok=True)
+    context = await playwright.chromium.launch_persistent_context(
+        user_data_dir=EMPLOYER_PROFILE_DIR, **options)
+    await context.route(LINKEDIN_URL, lambda route: route.abort())
+    return context

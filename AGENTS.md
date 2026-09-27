@@ -39,8 +39,9 @@ use are in [README.md](README.md); this file is how it works and what not to bre
 is the **only** place allowed to launch the logged-in profile, and it raises
 `SafeModeViolation` in safe mode; `tests/test_mode.py` fails if any other file
 calls `launch_persistent_context`. Safe mode is being built in issues #12-#18
-(epic #20) — the applier still needs full mode (#15), and the dashboard
-disables it in safe mode with a tooltip saying so.
+(epic #20). The applier works in safe mode from the employer's own page (#15):
+see **Applier invariants**. `open_employer_session()` is the only other
+launcher of a persistent profile, and it cannot reach LinkedIn.
 
 ### `alerts.py` — safe mode's source of jobs
 Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
@@ -203,9 +204,16 @@ Do not weaken these. Each one exists because it failed once.
 - **Account creation is allowed** when `policies.allow_account_creation` is set.
   Generated passwords go to `CVS_DIR/ats_accounts.yaml` (chmod 600) *before* the
   registration is submitted.
-- **The browser profile is shared** with the scraper and the + button. The
-  applier reclaims it only from an orphaned browser; one owned by a live run is
-  left alone and the run refuses to start.
+- **The browser profile is shared** with the scraper and the + button in full
+  mode. The applier reclaims it only from an orphaned browser; one owned by a
+  live run is left alone and the run refuses to start.
+- **In safe mode the applier never reaches LinkedIn.** It runs in
+  `employer_profile` (`mode.open_employer_session`), which aborts every request
+  to linkedin.com at the browser level, and starts from the employer's page:
+  the job's `apply_url` (pasted on the dashboard) or its link when that is not
+  LinkedIn (`applier.plan_start`). A job with only a LinkedIn link stays
+  Approved with a note asking for the employer link; do not add a fallback to
+  the posting.
 - **Every job gets its own tab**, and a filled form stays open until it has been
   idle — values unchanged — for `APPLY_REVIEW_IDLE_MINUTES`. Nothing persists a
   half-filled form, so a closed tab is lost work.

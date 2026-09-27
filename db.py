@@ -91,7 +91,9 @@ def init_db():
         pass
     # Safe mode: how the public page says to apply ('offsite' / 'easy_apply'),
     # and how often a logged-out fetch of the description has failed.
-    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0'):
+    # apply_url: the employer's own application page, when known - pasted on
+    # the dashboard, or the job's link when that is not LinkedIn (#15).
+    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT'):
         try:
             cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
         except sqlite3.OperationalError:
@@ -137,6 +139,22 @@ def get_unscored_jobs():
     jobs = cursor.fetchall()
     conn.close()
     return jobs
+
+def get_apply_target(job_id):
+    """(apply_url, apply_type) for a job - either may be None."""
+    conn = get_connection()
+    row = conn.execute('SELECT apply_url, apply_type FROM jobs WHERE job_id = ?',
+                       (job_id,)).fetchone()
+    conn.close()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def set_apply_url(job_id, url):
+    conn = get_connection()
+    conn.execute('UPDATE jobs SET apply_url = ? WHERE job_id = ?', (url or None, job_id))
+    conn.commit()
+    conn.close()
+
 
 def job_exists(job_id):
     conn = get_connection()

@@ -237,6 +237,8 @@ def record_job(job_id, meta, description, url):
          meta.get('location') or '', description, url,
          meta.get('hiring_manager_name'), meta.get('jd_language'), job_id),
     )
+    # A job found by a search keeps that source; one first seen here is 'link'.
+    conn.execute("UPDATE jobs SET source = 'link' WHERE job_id = ? AND source IS NULL", (job_id,))
     conn.commit()
     conn.close()
     return added

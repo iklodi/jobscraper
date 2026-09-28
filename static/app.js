@@ -272,6 +272,20 @@ function listingSite(job) {
     return /(^|\.)linkedin\.com$/i.test(host) ? 'LinkedIn' : host.replace(/^www\./, '');
 }
 
+// Where a job came from, for every card. Adzuna's terms require its label.
+function jobSource(job) {
+    const src = job.source || '';
+    const id = String(job.job_id || '');
+    if (isAdzuna(job)) return { label: 'Jobs by Adzuna', cls: 'meta-adzuna', title: src ? `Adzuna search: ${src.replace(/^adzuna:\s*/, '')}` : 'Adzuna job-search API' };
+    if (id.startsWith('ats-')) {
+        const ats = id.split('-')[1] || '';
+        return { label: `🏢 ${ats.charAt(0).toUpperCase() + ats.slice(1)} feed`, cls: 'meta-source', title: "The employer's own job feed" };
+    }
+    if (src.startsWith('alert')) return { label: '🔔 LinkedIn alert', cls: 'meta-source', title: src.replace(/^alert:\s*/, 'Job alert: ') };
+    if (src === 'link' || id.startsWith('url-')) return { label: '🔗 Added by link', cls: 'meta-source', title: 'Added with the + button' };
+    return { label: 'LinkedIn', cls: 'meta-linkedin', title: 'LinkedIn search' };
+}
+
 // The tags a card shows. The detail view shows these too, plus the rest.
 function jobMetaTags(job, columnStatus) {
     const salaryStr = job.estimated_salary ? job.estimated_salary : 'Unknown';
@@ -283,8 +297,9 @@ function jobMetaTags(job, columnStatus) {
     if (recruiterStr) metaHtml += `<span class="meta-tag">${recruiterStr}</span>`;
     // Promoted listings are paid placements, so the evaluator marks them down.
     if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
-    // Adzuna's terms: every advert it supplies is labelled as such.
-    if (isAdzuna(job)) metaHtml += `<span class="meta-tag meta-adzuna" title="Found through the Adzuna job-search API">Jobs by Adzuna</span>`;
+    // Every card says where the job came from (Adzuna's terms require its label).
+    const origin = jobSource(job);
+    metaHtml += `<span class="meta-tag ${origin.cls}" title="${origin.title.replace(/"/g, '&quot;')}">${origin.label}</span>`;
     if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
     if (job.status === 'easy_apply') metaHtml += `<span class="meta-tag meta-easy" title="Easy Apply is never automated">✋ Easy Apply - by hand</span>`;
     // On the Applied board the date that matters is when it went out.
@@ -309,7 +324,9 @@ function jobDetailTags(job) {
     html += `<span class="meta-tag" title="Column">📋 ${esc(statusNames[job.status] || job.status)}</span>`;
     html += jobMetaTags(job, job.status === 'applied' ? 'applied' : '');
     if (job.created_at) html += `<span class="meta-tag" title="Added">🗓 Added ${formatStamp(job.created_at)}</span>`;
-    if (job.source) html += `<span class="meta-tag" title="Where it came from">🔎 ${esc(job.source)}</span>`;
+    const detail = jobSource(job).title;
+    if (detail && !['LinkedIn search', 'Added with the + button', "The employer's own job feed"].includes(detail))
+        html += `<span class="meta-tag" title="Search or alert">🔎 ${esc(detail)}</span>`;
     if (job.jd_language) html += `<span class="meta-tag" title="Advert language">🌐 ${esc(job.jd_language)}</span>`;
     if (job.hiring_manager_name) html += `<span class="meta-tag" title="Hiring manager">👤 ${esc(job.hiring_manager_name)}</span>`;
     if (job.apply_type) html += `<span class="meta-tag" title="How to apply">${job.apply_type === 'easy_apply' ? '✋ Easy Apply' : '↗️ Applies on the employer site'}</span>`;

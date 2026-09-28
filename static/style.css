@@ -617,6 +617,16 @@ h1 {
     color: #c7d2fe;
 }
 
+/* Where a job came from - shown on every card. */
+.meta-linkedin {
+    background: rgba(10, 102, 194, 0.22);
+    color: #bfdbfe;
+}
+.meta-source {
+    background: rgba(148, 163, 184, 0.16);
+    color: #e2e8f0;
+}
+
 /* Which mode the pipeline runs in - a standing reminder of the account risk. */
 .mode-badge {
     font-size: 0.8rem;

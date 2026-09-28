@@ -61,6 +61,7 @@ def get_jobs():
         SELECT j.job_id, j.title, j.company, j.location, j.link, j.score, j.reasoning,
                j.status, j.created_at, j.estimated_salary, j.is_recruiter, j.is_promoted,
                j.description, j.application_notes, j.apply_url, j.apply_type,
+               j.source, j.jd_language, j.hiring_manager_name, j.fetch_attempts,
                COALESCE(
                    (SELECT MAX(h.created_at) FROM job_history h
                      WHERE h.job_id = j.job_id AND h.new_status = 'applied'),
@@ -83,7 +84,6 @@ def get_jobs():
     
     job_list = []
     for job in jobs:
-        j_dict = dict(job)
         j_dict = dict(job)
         j_dict['files'] = get_files_for_job(j_dict['job_id'])
         

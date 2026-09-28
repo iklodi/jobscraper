@@ -12,9 +12,10 @@ are skipped when that is empty.
 
 The API cuts every description to 500 characters, too little to score. The
 full text is on the advert's Adzuna page - the redirect_url the API returns -
-which is read with a plain HTTP request, one page at a time, 5-10 seconds
-apart. Read faster, Adzuna's site starts refusing (HTTP 403); the fetch then
-stops for the run and the rest wait for the next one.
+which is read with a plain HTTP request, one page at a time, 40-70 seconds
+apart and at most ADZUNA_FETCH_MAX_PER_RUN (default 15) a run. Read faster,
+Adzuna's site refuses (HTTP 403); the fetch then stops for the run and the
+rest wait for the next one.
 
 Adzuna's terms: at most 25 calls a minute and 250 a day, and adverts shown must
 be labelled "Jobs by Adzuna" (the dashboard does). Links are kept as Adzuna's
@@ -45,6 +46,9 @@ USER_AGENT = 'Mozilla/5.0 (compatible; personal job search)'
 # Adzuna's site answers these when it thinks the pages are read too fast; the
 # fetch stops for the run instead of pressing on.
 BLOCKED_STATUS = {403, 429}
+# Seconds between advert pages. At 5-10 s Adzuna refused the reader after two
+# pages every night; at ~45 s it served every page. Slower, not disguised.
+PAGE_GAP = (40.0, 70.0)
 
 # Location names as they appear in search_criteria.md -> Adzuna country codes.
 COUNTRIES = {
@@ -210,7 +214,7 @@ def pending_jobs(limit):
     return rows
 
 
-def fetch_descriptions(max_jobs=None, pause=(5.0, 10.0), session=None, sleep=time.sleep):
+def fetch_descriptions(max_jobs=None, pause=PAGE_GAP, session=None, sleep=time.sleep):
     """Read the full advert for Adzuna jobs that have none yet.
 
     When Adzuna's site pushes back (403/429, or a redirect onto a refusal page)
@@ -219,7 +223,7 @@ def fetch_descriptions(max_jobs=None, pause=(5.0, 10.0), session=None, sleep=tim
     Returns {'fetched': n, 'failed': n, 'blocked': bool, 'pending': n}.
     """
     db.init_db()
-    jobs = pending_jobs(max_jobs or int(os.environ.get('SAFE_FETCH_MAX_PER_RUN', '60')))
+    jobs = pending_jobs(max_jobs or int(os.environ.get('ADZUNA_FETCH_MAX_PER_RUN', '15')))
     session = session or requests.Session()
     stats = {'fetched': 0, 'failed': 0, 'blocked': False, 'pending': 0}
     for index, (job_id, link) in enumerate(jobs):

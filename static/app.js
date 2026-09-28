@@ -264,12 +264,16 @@ function formatStamp(raw) {
                                          hour: '2-digit', minute: '2-digit' });
 }
 
-function createCard(job, columnStatus) {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.draggable = true;
-    card.dataset.id = job.job_id;
+// Where a job's link points, for the button that opens it.
+function listingSite(job) {
+    if (isAdzuna(job)) return 'Adzuna';
+    let host = '';
+    try { host = new URL(job.link).hostname; } catch (e) { return 'the listing'; }
+    return /(^|\.)linkedin\.com$/i.test(host) ? 'LinkedIn' : host.replace(/^www\./, '');
+}
 
+// The tags a card shows. The detail view shows these too, plus the rest.
+function jobMetaTags(job, columnStatus) {
     const salaryStr = job.estimated_salary ? job.estimated_salary : 'Unknown';
     const recruiterStr = job.is_recruiter ? '🤝 Recruiter' : (job.is_recruiter === 0 ? '🎯 Direct' : '');
 
@@ -288,6 +292,36 @@ function createCard(job, columnStatus) {
         metaHtml += `<span class="meta-tag meta-applied-at" title="Applied on">📮 ${
             formatStamp(job.applied_at || job.created_at)}</span>`;
     }
+    return metaHtml;
+}
+
+// Everything known about a job, for the detail view: the card's tags plus
+// what there is no room for on the card.
+function jobDetailTags(job) {
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    let html = `<span class="meta-tag" title="Job id">#${esc(job.job_id)}</span>`;
+    if (job.score) html += `<span class="meta-tag" title="Score">⭐ ${job.score}/10</span>`;
+    const statusNames = { new: 'New', to_apply: 'To Do', generated: 'To Do', approved: 'Approved',
+        ready_to_submit: 'Ready to Submit', easy_apply: 'Ready to Submit (Easy Apply)', applied: 'Applied',
+        interviewing: 'Interviewing', failed: 'Failed', account_required: 'Account Required',
+        rejected: 'Rejected', scored: 'Rejected (below the bar)', generating: 'Writing documents',
+        evaluating: 'Scoring', applying: 'Applying' };
+    html += `<span class="meta-tag" title="Column">📋 ${esc(statusNames[job.status] || job.status)}</span>`;
+    html += jobMetaTags(job, job.status === 'applied' ? 'applied' : '');
+    if (job.created_at) html += `<span class="meta-tag" title="Added">🗓 Added ${formatStamp(job.created_at)}</span>`;
+    if (job.source) html += `<span class="meta-tag" title="Where it came from">🔎 ${esc(job.source)}</span>`;
+    if (job.jd_language) html += `<span class="meta-tag" title="Advert language">🌐 ${esc(job.jd_language)}</span>`;
+    if (job.hiring_manager_name) html += `<span class="meta-tag" title="Hiring manager">👤 ${esc(job.hiring_manager_name)}</span>`;
+    if (job.apply_type) html += `<span class="meta-tag" title="How to apply">${job.apply_type === 'easy_apply' ? '✋ Easy Apply' : '↗️ Applies on the employer site'}</span>`;
+    return html;
+}
+
+function createCard(job, columnStatus) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.draggable = true;
+    card.dataset.id = job.job_id;
+    const metaHtml = jobMetaTags(job, columnStatus);
 
     card.innerHTML = `
         <div class="card-header">
@@ -302,6 +336,12 @@ function createCard(job, columnStatus) {
             <button class="btn btn-primary" onclick="openJobDetails('${job.job_id}')">View Details</button>
         </div>
     `;
+    // The whole card opens the details; the button stays as the obvious target.
+    // Controls inside the card keep their own behaviour.
+    card.addEventListener('click', (e) => {
+        if (e.target.closest('button, a, input, select, textarea, label')) return;
+        openJobDetails(job.job_id);
+    });
 
     return card;
 }
@@ -526,6 +566,7 @@ function openJobDetails(jobId) {
     modalBody.innerHTML = `
         <h2>${job.title}</h2>
         <h3>${job.company} • ${job.location}${job.is_promoted ? ' • 📢 Promoted listing' : ''}${isAdzuna(job) ? ' • Jobs by Adzuna' : ''}</h3>
+        <div class="card-meta" style="margin: 0.6rem 0 1.2rem;">${jobDetailTags(job)}</div>
 
         ${actionSection}
 
@@ -542,14 +583,17 @@ function openJobDetails(jobId) {
         
         <div class="detail-section">
             <h4>Original Listing</h4>
-            <a href="${job.link}" target="_blank" class="btn">View on ${isAdzuna(job) ? 'Adzuna' : 'LinkedIn'}</a>
+            <a href="${job.link}" target="_blank" class="btn">View on ${listingSite(job)}</a>
         </div>
         
         <div class="detail-section">
             <details>
                 <summary style="cursor: pointer; color: var(--text-secondary); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85rem; outline: none;">View Job Description</summary>
                 <div style="margin-top: 1rem; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); max-height: 300px; overflow-y: auto; padding-right: 10px;">
-                    ${job.description ? job.description.replace(/</g, "&lt;").replace(/>/g, "&gt;") : 'No description available.'}
+                    ${job.description ? job.description.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                      : (job.status === 'new'
+                          ? `Not fetched yet${job.fetch_attempts ? ` (${job.fetch_attempts} failed attempt${job.fetch_attempts > 1 ? 's' : ''})` : ''}: the next nightly run reads it from the listing. The job is scored once it has one.`
+                          : 'No description available.')}
                 </div>
             </details>
         </div>

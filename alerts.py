@@ -180,7 +180,7 @@ def read_mail(sender, table, imap_factory=None):
 
     imap = (imap_factory or imaplib.IMAP4_SSL)(host)
     try:
-        imap.login(os.environ['IMAP_USER'], os.environ['IMAP_PASSWORD'])
+        imap.login(os.environ['IMAP_USER'].strip(), os.environ['IMAP_PASSWORD'].strip())
         imap.select(f'"{folder}"', readonly=True)       # readonly: nothing gets marked
         status, data = imap.search(None, 'FROM', f'"{sender}"', 'SINCE', since.strftime('%d-%b-%Y'))
         ids = data[0].split() if status == 'OK' and data and data[0] else []
@@ -218,7 +218,7 @@ def ingest_alerts(imap_factory=None):
     imap_factory is for tests; by default it connects with IMAP4_SSL.
     """
     db.init_db()
-    stats = {}
+    stats, capped = {}, {}
     for message_id, message in read_mail(ALERT_SENDER, 'alert_emails', imap_factory):
         alert_name, jobs = parse_alert_text(message_text(message))
         added = store_jobs(alert_name, jobs)
@@ -237,8 +237,10 @@ def ingest_alerts(imap_factory=None):
         if jobs:
             print(f'  {key}: {len(jobs)} listed, {added} new')
         if len(jobs) >= EMAIL_JOB_CAP:
-            print(f'  {key}: the email is at LinkedIn\'s {EMAIL_JOB_CAP}-job cap, so more may '
-                  f'match than it listed. Narrow the alert or have it sent more often.')
+            capped[key] = capped.get(key, 0) + 1
+    for key, emails in capped.items():
+        print(f'  {key}: {emails} email(s) at LinkedIn\'s {EMAIL_JOB_CAP}-job cap, so more may '
+              f'match than they listed. Narrow the alert.')
     return stats
 
 

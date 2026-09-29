@@ -272,17 +272,18 @@ function listingSite(job) {
     return /(^|\.)linkedin\.com$/i.test(host) ? 'LinkedIn' : host.replace(/^www\./, '');
 }
 
-// Where a job came from, for every card. Adzuna's terms require its label.
+// Where a job came from, for every card, in one word. Adzuna asks for "Jobs by
+// Adzuna": it is in the tooltip and the detail view's heading.
 function jobSource(job) {
     const src = job.source || '';
     const id = String(job.job_id || '');
-    if (isAdzuna(job)) return { label: 'Jobs by Adzuna', cls: 'meta-adzuna', title: src ? `Adzuna search: ${src.replace(/^adzuna:\s*/, '')}` : 'Adzuna job-search API' };
+    if (isAdzuna(job)) return { label: 'Adzuna', cls: 'meta-adzuna', title: 'Jobs by Adzuna' + (src ? ` - search: ${src.replace(/^adzuna:\s*/, '')}` : '') };
     if (id.startsWith('ats-')) {
         const ats = id.split('-')[1] || '';
-        return { label: `🏢 ${ats.charAt(0).toUpperCase() + ats.slice(1)} feed`, cls: 'meta-source', title: "The employer's own job feed" };
+        return { label: ats.charAt(0).toUpperCase() + ats.slice(1), cls: 'meta-source', title: "The employer's own job feed" };
     }
-    if (src.startsWith('alert')) return { label: '🔔 LinkedIn alert', cls: 'meta-source', title: src.replace(/^alert:\s*/, 'Job alert: ') };
-    if (src === 'link' || id.startsWith('url-')) return { label: '🔗 Added by link', cls: 'meta-source', title: 'Added with the + button' };
+    if (src.startsWith('alert')) return { label: 'Alert', cls: 'meta-source', title: src.replace(/^alert:\s*/, 'Job alert: ') };
+    if (src === 'link' || id.startsWith('url-')) return { label: 'Link', cls: 'meta-source', title: 'Added with the + button' };
     return { label: 'LinkedIn', cls: 'meta-linkedin', title: 'LinkedIn search' };
 }
 

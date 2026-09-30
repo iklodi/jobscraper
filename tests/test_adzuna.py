@@ -205,3 +205,16 @@ def test_copies_of_one_advert_are_recognised(scratch_db):
     assert adzuna.already_listed('Product Manager AI Empowerment 80 - 100 %', 'Hamilton AG')
     assert adzuna.already_listed('Product Manager AI Empowerment 80 - 100 %', 'Job-Room')
     assert not adzuna.already_listed('Product Manager AI Empowerment', 'Another Employer AG')
+
+
+def test_a_failed_search_never_reports_the_api_key(scratch_db, capsys):
+    session = FakeSession([Response(status=404)])
+    adzuna.ingest(([('X', None)], ['Switzerland'], []), session=session, sleep=lambda s: None)
+    out = capsys.readouterr().out
+    assert 'HTTP 404' in out and 'key' not in out.split('failed', 1)[1]
+
+
+def test_countries_adzuna_does_not_serve_are_skipped(monkeypatch):
+    monkeypatch.setenv('ADZUNA_WIDE_COUNTRIES', 'de, lu, ch')
+    searches, _ = adzuna.plan_searches([('X', None)], ['Worldwide'])
+    assert [c for _, c, _ in searches] == ['de', 'ch']

@@ -69,6 +69,9 @@ COUNTRIES = {
     'mexico': 'mx', 'south africa': 'za',
 }
 WIDE = {'worldwide', 'europe', 'emea', 'remote', 'anywhere'}
+# The countries Adzuna's API serves; anything else answers 404.
+SUPPORTED = {'gb', 'us', 'at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'in', 'it',
+             'mx', 'nl', 'nz', 'pl', 'sg', 'za'}
 
 # LinkedIn job types -> Adzuna's one-at-a-time filters. Applied only when the
 # criteria name exactly one of them; otherwise every type is searched.
@@ -87,6 +90,11 @@ def plan_searches(keywords, locations):
     locations that could not be mapped."""
     home = os.environ.get('ADZUNA_COUNTRY', 'ch').strip().lower()
     wide = [c.strip().lower() for c in os.environ.get('ADZUNA_WIDE_COUNTRIES', '').split(',') if c.strip()]
+    unsupported = [c for c in wide if c not in SUPPORTED]
+    if unsupported:
+        print(f"Adzuna has no {', '.join(unsupported)} site; skipping. It covers: "
+              f"{', '.join(sorted(SUPPORTED))}.")
+        wide = [c for c in wide if c in SUPPORTED]
     searches, skipped = [], []
     for keyword, pinned in keywords:
         for location in pinned or locations:
@@ -133,7 +141,10 @@ def search(keyword, country, where, page, days, contract_filter, session):
         params[contract_filter] = '1'
     response = session.get(API.format(country=country, page=page), params=params,
                            headers={'Accept': 'application/json'}, timeout=30)
-    response.raise_for_status()
+    if not response.ok:
+        # Never raise_for_status(): its message is the full URL, app_key included,
+        # and it would end up in cron.log and the summary email.
+        raise RuntimeError(f'HTTP {response.status_code}')
     return response.json()
 
 

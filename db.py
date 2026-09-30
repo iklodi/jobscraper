@@ -93,7 +93,10 @@ def init_db():
     # and how often a logged-out fetch of the description has failed.
     # apply_url: the employer's own application page, when known - pasted on
     # the dashboard, or the job's link when that is not LinkedIn (#15).
-    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT'):
+    # snippet: a source's own short summary (Adzuna's 500 characters), the
+    # fallback description when the full advert cannot be read.
+    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT',
+                   'snippet TEXT'):
         try:
             cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
         except sqlite3.OperationalError:

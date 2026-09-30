@@ -85,14 +85,14 @@ async def main():
             for key, added in adzuna.ingest().items():
                 keyword_stats[key] = keyword_stats.get(key, 0) + added
             adzuna_fetch = adzuna.fetch_descriptions()
-            print(f"Adzuna descriptions: {adzuna_fetch['fetched']} fetched, "
-                  f"{adzuna_fetch['failed']} failed, {adzuna_fetch['pending']} still pending"
-                  + (" - Adzuna refused the fetcher; retrying next run." if adzuna_fetch['blocked'] else ""))
-            source_notes.append(
-                f"Adzuna descriptions: {adzuna_fetch['fetched']} fetched, {adzuna_fetch['failed']} "
-                f"failed, {adzuna_fetch['pending']} still pending"
-                + (". ⚠️ Adzuna refused the page reader; the rest wait for the next run."
-                   if adzuna_fetch['blocked'] else ""))
+            adzuna_line = (f"Adzuna descriptions: {adzuna_fetch['fetched']} read, "
+                           f"{adzuna_fetch['summary']} from Adzuna's summary only, "
+                           f"{adzuna_fetch['closed']} closed, {adzuna_fetch['failed']} failed, "
+                           f"{adzuna_fetch['pending']} still pending")
+            print(adzuna_line)
+            source_notes.append(adzuna_line + (". ⚠️ Adzuna refused several pages in a row; "
+                                               "the rest wait for the next run."
+                                               if adzuna_fetch['blocked'] else ""))
         except Exception as e:
             print(f"Adzuna search failed: {e}")
             source_notes.append(f"⚠️ Adzuna search failed: {e}")

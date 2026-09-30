@@ -33,6 +33,7 @@ class Response:
     def __init__(self, payload=None, text='', status=200):
         self.payload, self.text, self.status_code = payload, text, status
         self.ok = status < 400
+        self.url = 'https://www.adzuna.ch/details/1'
 
     def json(self):
         return self.payload
@@ -121,36 +122,82 @@ def test_advert_text_comes_from_the_page_body_only():
     assert 'Apply for this job' not in text and 'tracking' not in text
 
 
-def test_fetch_fills_descriptions_and_counts_failures(scratch_db):
-    db.add_job('adzuna-1', 'A', 'Example AG', '', '', 'https://www.adzuna.ch/details/1')
-    db.add_job('adzuna-2', 'B', 'Example AG', '', '', 'https://www.adzuna.ch/details/2')
-    db.add_job('1000000001', 'C', 'Example AG', '', '', 'https://www.linkedin.com/jobs/view/1000000001/')
-    page = (FIX / 'adzuna_details.html').read_text(encoding='utf-8')
-    session = FakeSession([Response(text=page), Response(status=404)])
-    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
-    assert stats == {'fetched': 1, 'failed': 1, 'blocked': False, 'pending': 1}
-    # LinkedIn jobs are left to public_jobs; Adzuna pages only here.
-    assert all('adzuna' in url for url, _ in session.calls)
-    conn = db.get_connection()
-    rows = dict(conn.execute("SELECT job_id, fetch_attempts FROM jobs "
-                             "WHERE job_id LIKE 'adzuna-%' AND description = ''").fetchall())
-    filled = conn.execute("SELECT job_id FROM jobs WHERE description != ''").fetchall()
-    conn.close()
-    assert len(rows) == 1 and list(rows.values()) == [1]
-    assert len(filled) == 1 and filled[0][0].startswith('adzuna-')
+def add(job_id, link, snippet=None):
+    db.add_job(job_id, 'Role ' + job_id, 'Example AG', '', '', link)
+    if snippet:
+        conn = db.get_connection()
+        conn.execute('UPDATE jobs SET snippet = ? WHERE job_id = ?', (snippet, job_id))
+        conn.commit()
+        conn.close()
 
 
-def test_fetch_stops_when_adzuna_refuses_and_keeps_the_attempts(scratch_db):
-    for n in (1, 2, 3):
-        db.add_job(f'adzuna-{n}', f'Role {n}', 'Example AG', '', '', f'https://www.adzuna.ch/details/{n}')
-    session = FakeSession([Response(status=403)])
-    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
-    assert stats['blocked'] is True and len(session.calls) == 1
-    assert stats['pending'] == 3
+def row(job_id):
     conn = db.get_connection()
-    attempts = {r[0] for r in conn.execute('SELECT COALESCE(fetch_attempts, 0) FROM jobs')}
+    r = conn.execute('SELECT description, status, fetch_attempts FROM jobs WHERE job_id = ?',
+                     (job_id,)).fetchone()
     conn.close()
-    assert attempts == {0}
+    return r
+
+
+PAGE = (FIX / 'adzuna_details.html').read_text(encoding='utf-8')
+
+
+def test_fetch_reads_pages_closes_gone_ones_and_counts_failures(scratch_db):
+    add('adzuna-1', 'https://www.adzuna.ch/details/1')
+    add('adzuna-2', 'https://www.adzuna.ch/details/2')
+    add('adzuna-3', 'https://www.adzuna.ch/details/3')
+    add('1000000001', 'https://www.linkedin.com/jobs/view/1000000001/')
+    session = FakeSession([Response(text=PAGE), Response(status=404), Response(status=500)])
+    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
+    assert (stats['fetched'], stats['closed'], stats['failed'], stats['blocked']) == (1, 1, 1, False)
+    assert all('adzuna' in url for url, _ in session.calls)      # LinkedIn is public_jobs' job
+    descriptions = {j: row(j) for j in ('adzuna-1', 'adzuna-2', 'adzuna-3')}
+    assert sum(1 for d in descriptions.values() if d[0]) == 1
+    assert sum(1 for d in descriptions.values() if d[1] == 'scored') == 1
+
+
+def test_a_redirect_only_advert_uses_the_summary_without_a_request(scratch_db):
+    add('adzuna-1', 'https://www.adzuna.com/land/ad/1?se=x', snippet='A short summary of the role.')
+    add('adzuna-2', 'https://www.adzuna.com/land/ad/2?se=x')           # no summary yet: wait
+    session = FakeSession([])
+    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
+    assert session.calls == []
+    assert stats['summary'] == 1
+    assert row('adzuna-1')[0] == adzuna.SUMMARY_NOTE + 'A short summary of the role.'
+    assert row('adzuna-2')[0] == ''
+
+
+def test_one_refusal_costs_that_job_an_attempt_and_the_run_goes_on(scratch_db):
+    add('adzuna-1', 'https://www.adzuna.ch/details/1')
+    add('adzuna-2', 'https://www.adzuna.ch/details/2')
+    session = FakeSession([Response(status=403), Response(text=PAGE)])
+    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
+    assert (stats['fetched'], stats['failed'], stats['blocked']) == (1, 1, False)
+
+
+def test_several_refusals_in_a_row_stop_the_run(scratch_db):
+    for n in range(1, 6):
+        add(f'adzuna-{n}', f'https://www.adzuna.ch/details/{n}')
+    session = FakeSession([Response(status=403)] * 5)
+    stats = adzuna.fetch_descriptions(session=session, sleep=lambda s: None)
+    assert stats['blocked'] is True
+    assert len(session.calls) == adzuna.REFUSALS_BEFORE_STOP
+
+
+def test_the_summary_is_used_after_the_last_failed_attempt(scratch_db, monkeypatch):
+    monkeypatch.setenv('SAFE_FETCH_MAX_ATTEMPTS', '2')
+    add('adzuna-1', 'https://www.adzuna.ch/details/1', snippet='Summary text.')
+    for _ in range(2):
+        adzuna.fetch_descriptions(session=FakeSession([Response(status=500)]), sleep=lambda s: None)
+    assert row('adzuna-1')[0].endswith('Summary text.')
+
+
+def test_search_results_keep_their_summary(scratch_db):
+    session = FakeSession([Response({'results': [ad(1)]})])
+    adzuna.ingest(([('Interim Manager', None)], ['Switzerland'], []), session=session, sleep=lambda s: None)
+    conn = db.get_connection()
+    assert conn.execute("SELECT snippet FROM jobs WHERE job_id = 'adzuna-1'").fetchone()[0] == 'Cut short…'
+    conn.close()
 
 
 def test_copies_of_one_advert_are_recognised(scratch_db):

@@ -67,10 +67,15 @@ Runs the `search_criteria.md` searches through Adzuna's official API
 (`title_only`: matching the whole advert brought in assistants to general
 managers). Jobs get ids `adzuna-<id>` and Adzuna's `redirect_url` as their link,
 which its terms require. The API cuts descriptions to 500 characters, so the
-full text is read from that page over plain HTTP, 40-70 s apart and at most
-`ADZUNA_FETCH_MAX_PER_RUN` (15) a run. At 5-10 s Adzuna answered 403 after two
-pages every night; at ~45 s it served every page. On a 403 the fetch stops for
-the run **without** spending the jobs' attempts. Adverts
+full text is read from the advert's Adzuna page over plain HTTP, 5-10 s apart.
+Some adverts have no Adzuna page: their link is `/land/ad/`, Adzuna's redirect
+to the advertiser, and Adzuna refuses every automated visitor there, a real
+headless browser included (tested 2026-09-30). Those are scored on the API's
+summary (kept in `snippet`, prefixed with `SUMMARY_NOTE`); no request is made.
+Getting past that refusal would mean disguising the client - do not. A 403 on
+an ordinary page costs that job an attempt; three in a row stop the run. A
+404/410 closes the job. (An earlier theory that Adzuna rate-limits at 5-10 s
+was wrong: the 403s were these redirect-only adverts.) Adverts
 already on the board are skipped by normalised title and company; Job-Room
 (the Swiss public portal) re-lists employers' adverts, so for it the title
 alone decides. The dashboard labels these jobs "Jobs by Adzuna" (Adzuna's

@@ -92,10 +92,10 @@ runs in both modes. Details:
   inside `ADZUNA_COUNTRY`. "Worldwide", "Europe" and "Remote" use
   `ADZUNA_WIDE_COUNTRIES`, and are skipped when that is empty.
 - **Descriptions.** The API returns only the first 500 characters. The full
-  text is read from each advert's Adzuna page, 40-70 seconds apart and at most
-  15 a run (`ADZUNA_FETCH_MAX_PER_RUN`). If Adzuna
-  refuses the page reader (HTTP 403, which happens when too many pages are read
-  in a short time), the run stops and the rest wait for the next run.
+  text is read from each advert's Adzuna page, 5-10 seconds apart. Some adverts
+  have no Adzuna page: Adzuna forwards visitors to the advertiser and refuses
+  automated ones. Those are scored on Adzuna's 500-character summary, marked as
+  such in the description.
 - **Duplicates.** An advert already on the board, from LinkedIn or from Adzuna
   under another listing, is not added twice.
 - **Labels.** Adzuna's terms ask for its adverts to be labelled, so they show

@@ -12,10 +12,11 @@ are skipped when that is empty.
 
 The API cuts every description to 500 characters, too little to score. The
 full text is on the advert's Adzuna page - the redirect_url the API returns -
-which is read with a plain HTTP request, one page at a time, 40-70 seconds
-apart and at most ADZUNA_FETCH_MAX_PER_RUN (default 15) a run. Read faster,
-Adzuna's site refuses (HTTP 403); the fetch then stops for the run and the
-rest wait for the next one.
+which is read with a plain HTTP request, one page at a time, 5-10 seconds
+apart and at most ADZUNA_FETCH_MAX_PER_RUN (default 60) a run. Some adverts
+have no Adzuna page: Adzuna sends visitors straight to the advertiser and
+refuses automated ones, browsers included. Those are scored on the API's
+500-character summary, marked as such - see fetch_descriptions.
 
 Adzuna's terms: at most 25 calls a minute and 250 a day, and adverts shown must
 be labelled "Jobs by Adzuna" (the dashboard does). Links are kept as Adzuna's
@@ -43,12 +44,19 @@ CALL_GAP = 3.0                    # seconds between API calls: 25 a minute at mo
 FIRST_RUN_DAYS = 14
 ID_PREFIX = 'adzuna-'
 USER_AGENT = 'Mozilla/5.0 (compatible; personal job search)'
-# Adzuna's site answers these when it thinks the pages are read too fast; the
-# fetch stops for the run instead of pressing on.
-BLOCKED_STATUS = {403, 429}
-# Seconds between advert pages. At 5-10 s Adzuna refused the reader after two
-# pages every night; at ~45 s it served every page. Slower, not disguised.
-PAGE_GAP = (40.0, 70.0)
+# Adzuna refuses (403) any automated visit to an advert it has no page for:
+# those it sends straight on to the advertiser through /land/ad/, and refuses
+# even a real browser there. That is per advert, not a block of the reader, so
+# one refusal only costs that job an attempt; several in a row mean Adzuna is
+# refusing everything, and the run stops.
+REFUSED_STATUS = {403, 429}
+REFUSALS_BEFORE_STOP = 3
+GONE_STATUS = {404, 410}                 # the advert has been taken down
+PAGE_GAP = (5.0, 10.0)                  # seconds between advert pages
+LAND_ONLY = re.compile(r'/land/ad/')
+# Marks a description that is only Adzuna's summary, for the scorer and the reader.
+SUMMARY_NOTE = ("[Adzuna's summary - the full advert is only on the employer's site, "
+                "which Adzuna does not let automated readers through to.]\n\n")
 
 # Location names as they appear in search_criteria.md -> Adzuna country codes.
 COUNTRIES = {
@@ -140,13 +148,28 @@ def store(result, keyword):
     if not db.add_job(job_id, title, company, location, '', result.get('redirect_url') or '', False):
         return False
     conn = db.get_connection()
-    conn.execute('UPDATE jobs SET source = ? WHERE job_id = ?', (f'adzuna: {keyword}', job_id))
+    conn.execute('UPDATE jobs SET source = ?, snippet = ? WHERE job_id = ?',
+                 (f'adzuna: {keyword}', (result.get('description') or '').strip() or None, job_id))
     conn.commit()
     conn.close()
     return True
 
 
-def ingest(criteria=None, session=None, sleep=time.sleep):
+def keep_snippet(result):
+    """Store the summary for a job already known without one (jobs added
+    before summaries were kept). True if one was stored."""
+    snippet = (result.get('description') or '').strip()
+    if not snippet:
+        return False
+    conn = db.get_connection()
+    changed = conn.execute('UPDATE jobs SET snippet = ? WHERE job_id = ? AND snippet IS NULL',
+                           (snippet, ID_PREFIX + str(result['id']))).rowcount
+    conn.commit()
+    conn.close()
+    return bool(changed)
+
+
+def ingest(criteria=None, session=None, sleep=time.sleep, days=None):
     """Run every search and add what is new. Returns {'<keyword> (Adzuna)': added}."""
     db.init_db()
     if criteria is None:
@@ -158,7 +181,7 @@ def ingest(criteria=None, session=None, sleep=time.sleep):
         print(f"Adzuna: skipping {', '.join(skipped)} - set ADZUNA_WIDE_COUNTRIES "
               f"(e.g. ch,de,fr,gb) to search them.")
     contract_filter = type_filter(job_types)
-    days = _max_days_old()
+    days = days or _max_days_old()
     max_pages = int(os.environ.get('ADZUNA_MAX_PAGES', '2'))
     budget = int(os.environ.get('ADZUNA_MAX_CALLS_PER_RUN', '40'))
     session = session or requests.Session()
@@ -180,6 +203,8 @@ def ingest(criteria=None, session=None, sleep=time.sleep):
                 print(f"Adzuna: '{keyword}' in {where or country} failed ({e}).")
                 break
             results = data.get('results') or []
+            for r in results:
+                keep_snippet(r)
             added = sum(store(r, keyword) for r in results)
             stats[key] += added
             print(f"Adzuna: '{keyword}' in {where or country.upper()} page {page}: "
@@ -204,53 +229,98 @@ def page_text(markup):
 
 
 def pending_jobs(limit):
+    """Adzuna jobs still without a description: readable pages first, then the
+    ones Adzuna only redirects (they need no request - see fetch_descriptions)."""
     conn = db.get_connection()
     rows = conn.execute(
-        "SELECT job_id, link FROM jobs WHERE job_id LIKE ? AND status = 'new' "
+        "SELECT job_id, link, snippet FROM jobs WHERE job_id LIKE ? AND status = 'new' "
         "AND COALESCE(TRIM(description), '') = '' AND COALESCE(fetch_attempts, 0) < ? "
-        "ORDER BY created_at DESC LIMIT ?",
-        (ID_PREFIX + '%', int(os.environ.get('SAFE_FETCH_MAX_ATTEMPTS', '3')), limit)).fetchall()
+        "ORDER BY link LIKE '%/land/ad/%', created_at DESC LIMIT ?",
+        (ID_PREFIX + '%', max_attempts(), limit)).fetchall()
     conn.close()
     return rows
 
 
-def fetch_descriptions(max_jobs=None, pause=PAGE_GAP, session=None, sleep=time.sleep):
-    """Read the full advert for Adzuna jobs that have none yet.
+def max_attempts():
+    return int(os.environ.get('SAFE_FETCH_MAX_ATTEMPTS', '3'))
 
-    When Adzuna's site pushes back (403/429, or a redirect onto a refusal page)
-    the run stops and the rest stay pending, without spending their attempts -
-    the same rule as the LinkedIn fetcher: no retrying in a loop, no disguise.
-    Returns {'fetched': n, 'failed': n, 'blocked': bool, 'pending': n}.
+
+def _save(job_id, **columns):
+    conn = db.get_connection()
+    sets = ', '.join(f'{k} = ?' for k in columns)
+    conn.execute(f'UPDATE jobs SET {sets} WHERE job_id = ?', (*columns.values(), job_id))
+    conn.commit()
+    conn.close()
+
+
+def _failed(job_id, snippet):
+    """One more failed attempt; on the last, fall back to Adzuna's summary."""
+    conn = db.get_connection()
+    conn.execute('UPDATE jobs SET fetch_attempts = COALESCE(fetch_attempts, 0) + 1 WHERE job_id = ?',
+                 (job_id,))
+    attempts = conn.execute('SELECT fetch_attempts FROM jobs WHERE job_id = ?', (job_id,)).fetchone()[0]
+    conn.commit()
+    conn.close()
+    if attempts >= max_attempts() and snippet:
+        _save(job_id, description=SUMMARY_NOTE + snippet)
+        return True
+    return False
+
+
+def fetch_descriptions(max_jobs=None, pause=PAGE_GAP, session=None, sleep=time.sleep):
+    """Give Adzuna jobs a description.
+
+    - A job whose link is Adzuna's advert page: read the page.
+    - A job Adzuna only redirects to the advertiser (/land/ad/): Adzuna refuses
+      every automated visitor there, browsers included, so no request is made;
+      its summary from the API becomes the description, marked as such.
+    - An advert that is gone (404/410): closed, like a closed LinkedIn listing.
+    - A refused page (403) costs that job an attempt; after its last attempt
+      the summary is used. Several refusals in a row mean Adzuna is refusing
+      everything: the run stops and the rest wait. No retries, no disguise.
+
+    Returns {'fetched', 'summary', 'closed', 'failed', 'blocked', 'pending'}.
     """
     db.init_db()
-    jobs = pending_jobs(max_jobs or int(os.environ.get('ADZUNA_FETCH_MAX_PER_RUN', '15')))
+    jobs = pending_jobs(max_jobs or int(os.environ.get('ADZUNA_FETCH_MAX_PER_RUN', '60')))
     session = session or requests.Session()
-    stats = {'fetched': 0, 'failed': 0, 'blocked': False, 'pending': 0}
-    for index, (job_id, link) in enumerate(jobs):
-        if index:
+    stats = {'fetched': 0, 'summary': 0, 'closed': 0, 'failed': 0, 'blocked': False, 'pending': 0}
+    refusals, requested = 0, False
+    for job_id, link, snippet in jobs:
+        if LAND_ONLY.search(link or ''):
+            if snippet:
+                _save(job_id, description=SUMMARY_NOTE + snippet)
+                stats['summary'] += 1
+            continue                         # no summary yet: the next search may bring it
+        if requested:
             sleep(random.uniform(*pause))
-        text = ''
+        requested = True
+        text, status = '', None
         try:
             response = session.get(link, headers={'User-Agent': USER_AGENT}, timeout=30)
-            if response.status_code in BLOCKED_STATUS:
-                print(f'  -> Adzuna refused the page fetcher (HTTP {response.status_code}). '
-                      f'Stopping for this run; the rest stay pending.')
-                stats['blocked'] = True
-                break
-            if response.ok:
+            status = response.status_code
+            if response.ok and not LAND_ONLY.search(response.url):
                 text = page_text(response.text)
         except Exception as e:
             print(f'  -> {job_id}: could not load ({type(e).__name__})')
-        conn = db.get_connection()
+
         if len(text) >= 200:
-            conn.execute('UPDATE jobs SET description = ? WHERE job_id = ?', (text, job_id))
+            _save(job_id, description=text)
             stats['fetched'] += 1
+            refusals = 0
+        elif status in GONE_STATUS:
+            _save(job_id, status='scored', score=0,
+                  reasoning='Listing closed - the advert is no longer on Adzuna.')
+            stats['closed'] += 1
+            refusals = 0
         else:
-            conn.execute('UPDATE jobs SET fetch_attempts = COALESCE(fetch_attempts, 0) + 1 '
-                         'WHERE job_id = ?', (job_id,))
-            stats['failed'] += 1
-        conn.commit()
-        conn.close()
+            stats['summary' if _failed(job_id, snippet) else 'failed'] += 1
+            refusals = refusals + 1 if status in REFUSED_STATUS else 0
+            if refusals >= REFUSALS_BEFORE_STOP:
+                print(f'  -> Adzuna refused {refusals} pages in a row. Stopping for this run; '
+                      f'the rest stay pending.')
+                stats['blocked'] = True
+                break
     stats['pending'] = len(pending_jobs(10_000))
     return stats
 
@@ -260,5 +330,11 @@ if __name__ == '__main__':
     load_dotenv()
     if not configured():
         raise SystemExit('Set ADZUNA_APP_ID and ADZUNA_APP_KEY in .env first.')
-    print(ingest())
+    import sys
+    if '--backfill-summaries' in sys.argv:
+        # Summaries were not kept before 2026-09-30: search a month back once so
+        # jobs Adzuna only redirects get theirs (and a description).
+        print(ingest(days=30))
+    else:
+        print(ingest())
     print(fetch_descriptions())

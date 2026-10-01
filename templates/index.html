@@ -69,7 +69,15 @@
             </div>
             <div class="kanban-column" id="col-backlog" data-status="to_apply">
                 <h2>To Do (Backlog)</h2>
-                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="column-filters">
+                    <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                    <select class="column-filter score-filter" title="Minimum score" onchange="filterColumn(this)">
+                        <option value="">Any score</option>
+                        <option value="8">8+</option>
+                        <option value="9">9+</option>
+                        <option value="10">10</option>
+                    </select>
+                </div>
                 <div class="kanban-cards"></div>
             </div>
             <div class="kanban-column" id="col-failed" data-status="failed">

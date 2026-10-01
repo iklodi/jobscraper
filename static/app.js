@@ -21,19 +21,39 @@ window.closeModal = function() {
     }
 }
 
-window.filterColumn = function(input) {
-    const filterText = input.value.toLowerCase();
-    const column = input.closest('.kanban-column');
-    const cards = column.querySelectorAll('.card');
-    cards.forEach(card => {
-        const textContent = card.textContent.toLowerCase();
-        if (textContent.includes(filterText)) {
-            card.style.display = 'block';
-        } else {
-            card.style.display = 'none';
-        }
+// A column's filters - the text box, and on To Do a minimum score - apply together.
+window.filterColumn = function(control) {
+    const column = control.closest('.kanban-column');
+    const text = (column.querySelector('input.column-filter')?.value || '').toLowerCase();
+    const scoreSelect = column.querySelector('.score-filter');
+    const minScore = scoreSelect && scoreSelect.value ? Number(scoreSelect.value) : null;
+    if (scoreSelect) {
+        try { localStorage.setItem('minScore:' + column.id, scoreSelect.value); } catch (e) {}
+    }
+    column.querySelectorAll('.card').forEach(card => {
+        const textOk = !text || card.textContent.toLowerCase().includes(text);
+        const scoreOk = minScore === null || Number(card.dataset.score || 0) >= minScore;
+        card.style.display = textOk && scoreOk ? 'block' : 'none';
     });
 }
+
+// Re-apply every active filter, e.g. after the board is redrawn.
+function reapplyFilters() {
+    document.querySelectorAll('.kanban-column').forEach(column => {
+        const active = [...column.querySelectorAll('.column-filter')].some(c => c.value);
+        if (active) window.filterColumn(column.querySelector('.column-filter'));
+    });
+}
+
+// Restore a remembered minimum score once the page has loaded.
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.score-filter').forEach(select => {
+        try {
+            const saved = localStorage.getItem('minScore:' + select.closest('.kanban-column').id);
+            if (saved !== null) select.value = saved;
+        } catch (e) {}
+    });
+});
 
 
 // Jobs from Adzuna's API carry its prefix in their id.
@@ -251,6 +271,7 @@ function renderBoard() {
     });
 
     setupDragAndDrop();
+    reapplyFilters();          // a redraw must not drop the user's filters
 }
 
 
@@ -339,6 +360,7 @@ function createCard(job, columnStatus) {
     card.className = 'card';
     card.draggable = true;
     card.dataset.id = job.job_id;
+    card.dataset.score = job.score || 0;
     const metaHtml = jobMetaTags(job, columnStatus);
 
     card.innerHTML = `
@@ -674,10 +696,7 @@ window.manualRefresh = async function(btn) {
     btn.disabled = true;
     await fetchJobs();
     
-    // Re-apply filters if any are active
-    document.querySelectorAll('.column-filter').forEach(input => {
-        if (input.value) window.filterColumn(input);
-    });
+    reapplyFilters();
 
     setTimeout(() => {
         btn.innerText = originalText;
@@ -712,11 +731,7 @@ setInterval(() => {
     const isFilterFocused = document.activeElement && document.activeElement.classList.contains('column-filter');
     
     if (!isDragging && !isModalOpen && !isFilterFocused) {
-        fetchJobs().then(() => {
-            document.querySelectorAll('.column-filter').forEach(input => {
-                if (input.value) window.filterColumn(input);
-            });
-        });
+        fetchJobs().then(reapplyFilters);
     }
 }, 30000);
 

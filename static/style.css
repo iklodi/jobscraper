@@ -642,3 +642,8 @@ h1 {
 
 /* The whole card opens the job's details. */
 .card { cursor: pointer; }
+
+/* To Do's text filter and minimum-score selector, side by side. */
+.column-filters { display: flex; gap: 6px; }
+.column-filters input.column-filter { flex: 1; min-width: 0; }
+.column-filters .score-filter { width: auto; flex: 0 0 auto; cursor: pointer; }

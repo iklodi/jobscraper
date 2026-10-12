@@ -129,8 +129,9 @@ Scores each `new` job 1-10 against the career dossier and `CVS_DIR/rules.md`.
 At or above the pass mark it becomes `to_apply`, below it `scored`. The pass
 mark comes from one place, `db.min_pass_score()`, read live, and is injected
 into the prompt as `{min_score}` — so the board threshold and the score from
-which the model is asked for salary, recruiter flag, hiring manager and
-language cannot drift apart.
+which the model is asked for the recruiter flag, hiring manager and language
+cannot drift apart. The salary estimate is asked for every job, whatever it
+scores: a job added by link lands on To Do even at 2/10, and should show one.
 
 When a job clears the bar and another unapproved job from the same company is
 already on To Do, the model picks one and the other is rejected. That is

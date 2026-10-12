@@ -14,7 +14,8 @@ CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 
 def min_pass_score():
     """The score at or above which a job goes to To Do - and from which the
-    prompt asks for salary, recruiter, hiring manager and language."""
+    prompt asks for recruiter, hiring manager and language. The salary
+    estimate is asked for every job."""
     return db.min_pass_score()
 
 DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')

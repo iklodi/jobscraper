@@ -84,3 +84,25 @@ def test_safe_run_without_imap_says_so(safe_run):
 
     asyncio.run(main.main())
     assert 'IMAP is not configured' in sent['body']
+
+
+def test_full_mode_reads_alert_emails_too(safe_run):
+    monkeypatch, sent = safe_run
+    monkeypatch.setenv('JOBSCRAPER_MODE', 'full')
+
+    async def scrape():
+        return {'Example keyword': 2}
+    monkeypatch.setattr(main, 'run_scraper', scrape)
+    monkeypatch.setattr(alerts, 'configured', lambda: True)
+    monkeypatch.setattr(alerts, 'ingest_alerts', lambda: {'Example in Switzerland': 3})
+
+    async def fetch():
+        return {'fetched': 3, 'failed': 0, 'closed': 0, 'blocked': False, 'pending': 0}
+    monkeypatch.setattr(main.public_jobs, 'fetch_descriptions', fetch)
+    monkeypatch.setattr(main.adzuna, 'configured', lambda: False)
+
+    asyncio.run(main.main())
+    body = sent['body']
+    assert '*Example keyword*: 2' in body
+    assert 'LinkedIn alert: Example in Switzerland*: 3' in body
+    assert 'LinkedIn descriptions (logged out): 3 fetched' in body

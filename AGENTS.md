@@ -43,7 +43,7 @@ calls `launch_persistent_context`. Safe mode is being built in issues #12-#18
 see **Applier invariants**. `open_employer_session()` is the only other
 launcher of a persistent profile, and it cannot reach LinkedIn.
 
-### `alerts.py` — safe mode's source of jobs
+### `alerts.py` — LinkedIn's job-alert emails, in either mode
 Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
 or moved), parses each job's title, company, location and id, and adds it as
 `new`. Only the numeric id is kept: alert links carry sign-in tokens, so links
@@ -51,8 +51,9 @@ are rebuilt bare. Messages already read are recorded in `alert_emails`, which al
 settings dialog's alert table (`recent_alerts`) and the summary's cap warning.
 `suggested_alerts` / `python alerts.py --suggest` turn `search_criteria.md`
 into the alerts to create. A job
-without a description is never scored — in safe mode the description comes
-from a logged-out fetch (#14).
+without a description is never scored — its description comes from the
+logged-out fetch (`public_jobs.py`, #14), in both modes. In full mode the alerts
+add the jobs the scraper's searches miss (about three in four, measured).
 
 ### `public_jobs.py` — safe mode's descriptions
 Opens `https://www.linkedin.com/jobs/view/<id>/` in a fresh `chromium.launch()`
@@ -107,10 +108,10 @@ call. A broken feed is reported in the summary, never fatal.
 uses before inserting (normalised title, company, and Job-Room as a re-lister).
 
 ### `main.py` — the nightly controller
-Full mode: scrapes, scores, emails the summary. Safe mode: reads job-alert
-emails and fetches descriptions logged out instead of scraping, then scores.
-Both run the Adzuna searches and the employer feeds when configured;
-`--no-scrape` skips them.
+Full mode scrapes LinkedIn; safe mode does not. Both then read the job-alert
+emails (when IMAP is configured) and fetch their descriptions logged out, run
+the Adzuna searches and the employer feeds, score, and email the summary.
+`--no-scrape` skips every source.
 **It does not generate documents**: that waits for an explicit Approve on the
 dashboard, so nothing is written for a job that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.

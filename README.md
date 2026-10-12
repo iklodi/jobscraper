@@ -32,7 +32,9 @@ generate for everything on To Do the old way.
 `JOBSCRAPER_MODE` in `.env` chooses how new jobs are found:
 
 - **full** (the default) scrapes LinkedIn through a browser signed in to your
-  account. See [DISCLAIMER.md](DISCLAIMER.md) for why that is risky.
+  account. See [DISCLAIMER.md](DISCLAIMER.md) for why that is risky. With
+  `IMAP_*` set it also reads your LinkedIn job-alert emails, as safe mode does:
+  they bring jobs the scraper's searches miss.
 - **safe** never automates your logged-in account. It reads the **job-alert
   emails** LinkedIn sends you over IMAP, read-only. Set up LinkedIn job alerts
   for your searches (daily, by email), then fill in the `IMAP_*` settings.

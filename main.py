@@ -37,37 +37,9 @@ async def main():
     print(f"=== Mode: {mode.current_mode()} ===")
 
     if mode.safe_mode():
-        # Safe mode never browses LinkedIn on the candidate's account. New jobs
-        # arrive through job-alert emails instead.
-        print("=== Step 1: Safe mode - reading LinkedIn job-alert emails ===")
-        if alerts.configured():
-            try:
-                keyword_stats = {f'LinkedIn alert: {name}': added
-                                 for name, added in alerts.ingest_alerts().items()}
-            except Exception as e:
-                print(f"Reading job-alert emails failed: {e}")
-                source_notes.append(f"⚠️ Reading job-alert emails failed: {e}")
-            for name, emails in alerts.capped_since(run_started).items():
-                source_notes.append(f"⚠️ *{name}*: {emails} email(s) listed LinkedIn's maximum of "
-                                    f"{alerts.EMAIL_JOB_CAP} jobs, so some matches were probably left "
-                                    f"out. Narrow the alert.")
-        else:
-            print("Note: IMAP is not configured, so no new jobs were read. "
-                  "Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.")
-            source_notes.append("⚠️ IMAP is not configured, so no job-alert emails were read.")
-        # Alert emails carry no description; read it from the public posting,
-        # logged out. Jobs still without one are left out of scoring.
-        print("=== Step 1b: Safe mode - fetching descriptions, logged out ===")
-        fetch_stats = await public_jobs.fetch_descriptions()
-        print(f"Descriptions: {fetch_stats['fetched']} fetched, {fetch_stats['failed']} failed, "
-              f"{fetch_stats['closed']} closed, {fetch_stats['pending']} still pending"
-              + (" - LinkedIn walled the fetcher; retrying next run." if fetch_stats['blocked'] else ""))
-        source_notes.append(
-            f"LinkedIn descriptions (logged out): {fetch_stats['fetched']} fetched, "
-            f"{fetch_stats['failed']} failed, {fetch_stats['closed']} closed, "
-            f"{fetch_stats['pending']} still pending"
-            + (". ⚠️ LinkedIn walled the fetcher; the rest wait for the next run."
-               if fetch_stats['blocked'] else ""))
+        # Safe mode never browses LinkedIn on the candidate's account: its
+        # LinkedIn jobs come only from the job-alert emails below.
+        print("=== Step 1: Safe mode - no LinkedIn search ===")
     elif not skip_scrape:
         print("=== Step 1: Scraping LinkedIn Jobs ===")
         keyword_stats = await run_scraper()
@@ -78,9 +50,45 @@ async def main():
     else:
         print("=== Step 1: Scraping Skipped (--no-scrape flag used) ===")
 
+    # LinkedIn's job-alert emails, in either mode: reading mail touches no
+    # LinkedIn account, and in full mode they bring jobs the scraper's searches
+    # miss (about three in four, measured 2026-09-28).
+    if not skip_scrape:
+        print("\n=== Step 1b: LinkedIn job-alert emails ===")
+        if alerts.configured():
+            try:
+                for name, added in alerts.ingest_alerts().items():
+                    key = f'LinkedIn alert: {name}'
+                    keyword_stats[key] = keyword_stats.get(key, 0) + added
+            except Exception as e:
+                print(f"Reading job-alert emails failed: {e}")
+                source_notes.append(f"⚠️ Reading job-alert emails failed: {e}")
+            for name, emails in alerts.capped_since(run_started).items():
+                source_notes.append(f"⚠️ *{name}*: {emails} email(s) listed LinkedIn's maximum of "
+                                    f"{alerts.EMAIL_JOB_CAP} jobs, so some matches were probably left "
+                                    f"out. Narrow the alert.")
+        else:
+            print("Note: IMAP is not configured, so no job-alert emails were read. "
+                  "Set IMAP_HOST, IMAP_USER and IMAP_PASSWORD in .env.")
+            source_notes.append("⚠️ IMAP is not configured, so no job-alert emails were read.")
+        # Alert emails carry no description; read it from the public posting,
+        # logged out, in both modes. Jobs still without one are not scored.
+        print("=== Step 1c: LinkedIn descriptions, logged out ===")
+        fetch_stats = await public_jobs.fetch_descriptions()
+        print(f"Descriptions: {fetch_stats['fetched']} fetched, {fetch_stats['failed']} failed, "
+              f"{fetch_stats['closed']} closed, {fetch_stats['pending']} still pending"
+              + (" - LinkedIn walled the fetcher; retrying next run." if fetch_stats['blocked'] else ""))
+        if any(fetch_stats[k] for k in ('fetched', 'failed', 'closed', 'pending')) or fetch_stats['blocked']:
+            source_notes.append(
+                f"LinkedIn descriptions (logged out): {fetch_stats['fetched']} fetched, "
+                f"{fetch_stats['failed']} failed, {fetch_stats['closed']} closed, "
+                f"{fetch_stats['pending']} still pending"
+                + (". ⚠️ LinkedIn walled the fetcher; the rest wait for the next run."
+                   if fetch_stats['blocked'] else ""))
+
     # Adzuna's API never touches LinkedIn, so it runs in either mode.
     if adzuna.configured() and not skip_scrape:
-        print("\n=== Step 1c: Adzuna job search ===")
+        print("\n=== Step 1d: Adzuna job search ===")
         try:
             for key, added in adzuna.ingest().items():
                 keyword_stats[key] = keyword_stats.get(key, 0) + added
@@ -99,7 +107,7 @@ async def main():
     
     # Employers' own ATS feeds (#22): public APIs, no LinkedIn, either mode.
     if ats_feeds.configured() and not skip_scrape:
-        print("\n=== Step 1d: Employers' job feeds ===")
+        print("\n=== Step 1e: Employers' job feeds ===")
         try:
             ats_stats, problems = ats_feeds.ingest()
             keyword_stats.update(ats_stats)

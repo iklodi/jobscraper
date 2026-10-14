@@ -134,6 +134,15 @@ which the model is asked for the recruiter flag, hiring manager and language
 cannot drift apart. The salary estimate is asked for every job, whatever it
 scores: a job added by link lands on To Do even at 2/10, and should show one.
 
+**Hard location rules are applied in code** (`location_gate`), not left to the
+model. It reports facts - work arrangement, country, Swiss canton - which it
+gets right, and `ONSITE_CANTONS` / `HYBRID_COUNTRIES` in `.env` cap a job
+that breaks them at 2. Asked to apply such a rule itself, gemma called an
+on-site Geneva role compliant and scored it 9. The "already applied" list
+holds only real applications (Applied, Interviewing, Offer, or Rejected after
+Applied) at the job's own company: the full list, with every hand-rejected
+job in it, was 40,000+ characters that buried the rules.
+
 When a job clears the bar and another unapproved job from the same company is
 already on To Do, the model picks one and the other is rejected. That is
 skipped for recruiters and aggregators, which post for many unrelated clients

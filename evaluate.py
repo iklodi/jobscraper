@@ -49,8 +49,12 @@ EVAL_SCHEMA = {
         'is_recruiter': {'type': ['boolean', 'null']},
         'hiring_manager_name': {'type': ['string', 'null']},
         'jd_language': {'type': ['string', 'null']},
+        # Facts, not judgements: location_gate() applies the rules to them.
+        'work_arrangement': {'type': 'string', 'enum': ['on-site', 'hybrid', 'remote', 'unknown']},
+        'country': {'type': ['string', 'null']},
+        'canton': {'type': ['string', 'null']},
     },
-    'required': ['score', 'reasoning'],
+    'required': ['work_arrangement', 'country', 'canton', 'score', 'reasoning'],
 }
 
 COMPARE_SCHEMA = {
@@ -113,12 +117,52 @@ def compare_jobs(groq_client, gemini_client, comp_prompt):
 
 
 def get_previous_applications():
+    """(company, title) of every application actually sent: Applied,
+    Interviewing or Offer, or Rejected after having been Applied (a decline).
+    Plain 'rejected' also covers jobs turned down by hand or by the
+    same-company comparison - never applied to - and listing those told the
+    model they were applications."""
     conn = db.get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT company, title FROM jobs WHERE status IN ("applied", "interviewing", "offer", "rejected")')
-    rows = cursor.fetchall()
+    rows = conn.execute('''
+        SELECT company, title FROM jobs j
+        WHERE status IN ('applied', 'interviewing', 'offer')
+           OR (status = 'rejected' AND EXISTS (SELECT 1 FROM job_history h
+                WHERE h.job_id = j.job_id AND h.new_status = 'applied'))''').fetchall()
     conn.close()
-    return [f"{company} - {title}" for company, title in rows]
+    return [(company or '', title or '') for company, title in rows]
+
+
+def applications_at(company, previous_applications):
+    """The past applications that could be duplicates of a job at `company` -
+    only that company's. The whole list was 40,000+ characters that buried
+    the rules."""
+    from dedupe import _norm
+    key = _norm(company)
+    same = [f'{c} - {t}' for c, t in previous_applications
+            if key and (_norm(c) == key or key in _norm(c) or _norm(c) in key)]
+    return same or ['(none at this company)']
+
+
+def _allowed(setting):
+    return {v.strip().lower() for v in os.environ.get(setting, '').split(',') if v.strip()}
+
+
+def location_gate(result):
+    """The hard location rules, applied in code to the facts the model reports.
+    The model knows a town's canton, but it does not reliably apply a rule
+    such as "on-site only in VD, VS or FR": asked directly, it called an
+    on-site Geneva role compliant. Settings (.env, empty = no rule):
+    ONSITE_CANTONS (two-letter codes), HYBRID_COUNTRIES. Returns the reason
+    when a rule is broken, else None."""
+    arrangement = (result.get('work_arrangement') or '').lower()
+    country = (result.get('country') or '').strip()
+    canton = (result.get('canton') or '').strip()
+    cantons, countries = _allowed('ONSITE_CANTONS'), _allowed('HYBRID_COUNTRIES')
+    if arrangement == 'on-site' and cantons and canton.lower() not in cantons:
+        return f"Location mismatch: on-site in {canton or country or 'an unknown place'}"
+    if arrangement == 'hybrid' and countries and country.lower() not in countries:
+        return f"Location mismatch: hybrid in {country or 'an unknown country'}"
+    return None
 
 def get_evaluation_rules():
     rules_path = os.path.join(CVS_DIR, 'rules.md')
@@ -147,6 +191,20 @@ def get_gemini_client():
     return genai.Client(api_key=api_key)
 
 def evaluate_job(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted, custom_instructions=None):
+    """Score one job: the model's verdict, then the hard location rules on top."""
+    if previous_applications and isinstance(previous_applications[0], tuple):
+        previous_applications = applications_at(job_company, previous_applications)
+    result = _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_location, job_desc,
+                            cv_text, previous_applications, rules_text, is_promoted, custom_instructions)
+    if result:
+        broken = location_gate(result)
+        if broken and (result.get('score') or 0) > 2:
+            result['score'] = 2
+            result['reasoning'] = f"{broken}. {result.get('reasoning') or ''}".strip()
+    return result
+
+
+def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted, custom_instructions=None):
     prompt_template = load_prompt('eval_prompt.txt')
     prompt = prompt_template.replace('{cv_text}', cv_text) \
                             .replace('{job_title}', job_title) \

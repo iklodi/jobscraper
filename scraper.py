@@ -110,7 +110,7 @@ async def run_scraper():
                 "machine running the scraper (over VNC if it runs headless).\n\n"
                 "This run waits **5 minutes** for the login, then aborts; scraping resumes "
                 "on the next scheduled run once you are logged in.\n\n"
-                f"Dashboard: {notifier.dashboard_url()}"
+                f"Dashboard: {notifier.dashboard_links()}"
             )
             try:
                 await page.wait_for_url('**/feed/**', timeout=300000)

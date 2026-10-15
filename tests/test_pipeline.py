@@ -134,3 +134,12 @@ def test_summary_emails_carry_date_and_message_id(monkeypatch):
     monkeypatch.setattr(notifier.smtplib, 'SMTP', FakeSMTP)
     notifier.send_email('Subject', 'Body')
     assert sent['msg']['Date'] and sent['msg']['Message-ID'].endswith('@example.com>')
+
+
+def test_emails_link_the_local_and_the_remote_dashboard(monkeypatch):
+    monkeypatch.setenv('DASHBOARD_URL', 'http://local.example:5050/')
+    monkeypatch.setenv('DASHBOARD_REMOTE_URL', 'http://100.64.0.1:5050')
+    assert notifier.dashboard_links('?job_id=7', 'View Details') == \
+        '[View Details](http://local.example:5050/?job_id=7) | [remote](http://100.64.0.1:5050/?job_id=7)'
+    monkeypatch.setenv('DASHBOARD_REMOTE_URL', '')
+    assert notifier.dashboard_links() == '[Open the dashboard](http://local.example:5050/)'

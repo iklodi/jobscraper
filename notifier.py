@@ -12,6 +12,21 @@ def dashboard_url():
     return os.environ.get('DASHBOARD_URL', 'http://localhost:5050').rstrip('/')
 
 
+def remote_dashboard_url():
+    """A second address for the dashboard - e.g. over Tailscale - for when the
+    local one does not resolve (away from home). Empty when not configured."""
+    return os.environ.get('DASHBOARD_REMOTE_URL', '').strip().rstrip('/')
+
+
+def dashboard_links(path='', label='Open the dashboard'):
+    """Markdown link(s) to a dashboard page: the local address, plus the remote
+    one when DASHBOARD_REMOTE_URL is set."""
+    links = [f"[{label}]({dashboard_url()}/{path})"]
+    if remote_dashboard_url():
+        links.append(f"[remote]({remote_dashboard_url()}/{path})")
+    return " | ".join(links)
+
+
 def _job_links(job_id):
     """The ' - [View Details] | [Site]' suffix for a job line.
 
@@ -21,8 +36,7 @@ def _job_links(job_id):
     """
     if not job_id:
         return ""
-    base = dashboard_url()
-    links = [f"[View Details]({base}/?job_id={job_id})"]
+    links = [dashboard_links(f'?job_id={job_id}', 'View Details')]
     try:
         link = db.get_job_links(job_id).get('linkedin') or ''
         host = urllib.parse.urlparse(link).netloc.lower()
@@ -93,7 +107,7 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts, source_no
     else:
         lines.append("- No status counts available.")
 
-    lines.append(f"\n---\n[Open the dashboard]({dashboard_url()})")
+    lines.append(f"\n---\n{dashboard_links()}")
 
     return "\n".join(lines)
 

@@ -2447,7 +2447,6 @@ def _notify(results, single=False):
     instead - see run_applications."""
     if not results:
         return
-    base = notifier.dashboard_url()
     summary = run_summary(results, single=single)
 
     # One job per line. A link on its own indented line inside a list item
@@ -2456,7 +2455,7 @@ def _notify(results, single=False):
     lines = [f'## {summary["headline"]}', '']
     for j in summary['jobs']:
         lines.append(f'- **{j["company"]}** - {j["word"]} '
-                     f'([open]({base}/?job_id={j["job_id"]}))')
+                     f'({notifier.dashboard_links("?job_id=" + str(j["job_id"]), "open")})')
     lines.append('')
 
     # Questions the profile could not answer, grouped so one missing answer
@@ -2480,7 +2479,7 @@ def _notify(results, single=False):
                      'Check them, submit the ones you want, then press "Close forms" on '
                      'the dashboard.')
         lines.append('')
-    lines.append(f'[Open the dashboard]({base})')
+    lines.append(notifier.dashboard_links())
     notifier.send_email('AI Job Scraper - Applications processed', '\n'.join(lines))
 
 

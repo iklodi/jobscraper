@@ -1,4 +1,6 @@
 import os
+import email.utils
+import re
 import smtplib
 from email.message import EmailMessage
 import markdown
@@ -11,15 +13,22 @@ def dashboard_url():
 
 
 def _job_links(job_id):
-    """The ' - [View Details] | [LinkedIn]' suffix for a job line."""
+    """The ' - [View Details] | [Site]' suffix for a job line.
+
+    No Adzuna links: its tracking redirects (/land/ad/) got whole summaries
+    silently dropped on the way to Gmail - the same email arrived once they
+    were removed. The dashboard link reaches every job anyway.
+    """
     if not job_id:
         return ""
     base = dashboard_url()
     links = [f"[View Details]({base}/?job_id={job_id})"]
     try:
-        job_links = db.get_job_links(job_id)
-        if job_links.get('linkedin'):
-            links.append(f"[LinkedIn]({job_links['linkedin']})")
+        link = db.get_job_links(job_id).get('linkedin') or ''
+        host = urllib.parse.urlparse(link).netloc.lower()
+        if host and not re.search(r'(^|\.)adzuna\.', host):
+            label = 'LinkedIn' if host.endswith('linkedin.com') else host.removeprefix('www.')
+            links.append(f"[{label}]({link})")
     except Exception:
         pass
     return " - " + " | ".join(links)
@@ -110,6 +119,10 @@ def send_email(subject, md_body):
         msg['Subject'] = subject
         msg['From'] = smtp_from
         msg['To'] = smtp_to
+        # A message with no Date or Message-ID looks like spam to receiving
+        # servers; two nightly summaries accepted by SMTP never reached Gmail.
+        msg['Date'] = email.utils.formatdate(localtime=True)
+        msg['Message-ID'] = email.utils.make_msgid(domain=(smtp_from.rsplit('@', 1)[-1] or None))
 
         msg.set_content(md_body)
         msg.add_alternative(markdown.markdown(md_body), subtype='html')

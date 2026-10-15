@@ -106,3 +106,31 @@ def test_full_mode_reads_alert_emails_too(safe_run):
     assert '*Example keyword*: 2' in body
     assert 'LinkedIn alert: Example in Switzerland*: 3' in body
     assert 'LinkedIn descriptions (logged out): 3 fetched' in body
+
+
+def test_summary_links_skip_adzuna_and_name_the_site(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'DB_FILE', str(tmp_path / 'jobs.db'))
+    db.init_db()
+    db.add_job('adzuna-1', 'A', 'X', '', 't', 'https://www.adzuna.ch/land/ad/1?se=x&utm_source=y')
+    db.add_job('1000000001', 'B', 'X', '', 't', 'https://www.linkedin.com/jobs/view/1000000001/')
+    db.add_job('ats-lever-x-1', 'C', 'X', '', 't', 'https://jobs.lever.co/example/1')
+    assert 'adzuna.ch' not in notifier._job_links('adzuna-1')
+    assert '[LinkedIn](https://www.linkedin.com/jobs/view/1000000001/)' in notifier._job_links('1000000001')
+    assert '[jobs.lever.co](https://jobs.lever.co/example/1)' in notifier._job_links('ats-lever-x-1')
+
+
+def test_summary_emails_carry_date_and_message_id(monkeypatch):
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a): pass
+        def starttls(self): pass
+        def login(self, *a): pass
+        def send_message(self, msg): sent['msg'] = msg
+        def quit(self): pass
+    for k, v in {'SMTP_HOST': 'smtp.example.com', 'SMTP_PORT': '587', 'SMTP_USER': 'u@example.com',
+                 'SMTP_PASS': 'p', 'SMTP_FROM': 'u@example.com', 'SMTP_TO': 'v@example.com'}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(notifier.smtplib, 'SMTP', FakeSMTP)
+    notifier.send_email('Subject', 'Body')
+    assert sent['msg']['Date'] and sent['msg']['Message-ID'].endswith('@example.com>')

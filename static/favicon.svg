@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <!-- handle -->
+  <path d="M24 19v-3a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v3" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- case -->
+  <rect x="10" y="19" width="44" height="33" rx="6" fill="#fff"/>
+  <!-- lid seam and clasp -->
+  <rect x="10" y="30.5" width="44" height="3" fill="url(#bg)"/>
+  <rect x="28" y="28.5" width="8" height="7" rx="2" fill="url(#bg)"/>
+</svg>

@@ -483,6 +483,12 @@ def save_settings():
 
     return jsonify({'saved': saved, 'parsed': summary})
 
+@app.route('/favicon.ico')
+def favicon():
+    # Browsers and bookmark tools ask for /favicon.ico regardless of <link> tags.
+    return send_from_directory(os.path.join(app.root_path, 'static'), 'favicon.ico',
+                               mimetype='image/x-icon')
+
 @app.route('/download/<path:subpath>')
 def download_file(subpath):
     apps_dir = os.path.join(CVS_DIR, 'applications')

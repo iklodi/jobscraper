@@ -93,6 +93,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     prompt = prompt_template.replace('{custom_instructions}', custom_block) \
                             .replace('{title}', title) \
                             .replace('{company}', company) \
+                            .replace('{location}', location or '') \
                             .replace('{description}', description) \
                             .replace('{cv_text}', cv_text) \
                             .replace('{dossier_text}', dossier_text) \
@@ -440,7 +441,17 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         print(f"Job {job_id} not found.")
         conn.close()
         return False
-        
+
+    # No addressee yet? A LinkedIn posting often names its poster in the
+    # "Meet the hiring team" card, which the description does not include.
+    # One logged-out look at the public page, in either mode.
+    if not job[13] and str(job_id).isdigit():
+        import public_jobs
+        poster = await public_jobs.fetch_poster(job_id)
+        if poster:
+            print(f"  -> Job poster: {poster}")
+            job = tuple(job[:13]) + (poster,) + tuple(job[14:])
+
     groq_client = get_groq_client()
     gemini_client = get_gemini_client()
     

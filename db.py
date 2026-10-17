@@ -180,6 +180,8 @@ def job_exists(job_id):
     return exists
 
 def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None, hiring_manager_name=None, jd_language=None):
+    # A name the model finds in the advert wins; no name keeps the one already
+    # recorded (e.g. LinkedIn's job poster, read by public_jobs.py).
     conn = get_connection()
     cursor = conn.cursor()
     status = 'scored'
@@ -187,7 +189,8 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
         status = 'to_apply'
     cursor.execute('''
         UPDATE jobs 
-        SET score = ?, reasoning = ?, status = ?, estimated_salary = ?, is_recruiter = ?, hiring_manager_name = ?, jd_language = ?
+        SET score = ?, reasoning = ?, status = ?, estimated_salary = ?, is_recruiter = ?,
+            hiring_manager_name = COALESCE(?, hiring_manager_name), jd_language = ?
         WHERE job_id = ?
     ''', (score, reasoning, status, estimated_salary, is_recruiter, hiring_manager_name, jd_language, job_id))
     conn.commit()

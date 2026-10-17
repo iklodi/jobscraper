@@ -44,7 +44,11 @@ READ_PAGE_JS = """
     if (tracked.some(t => /apply-link-offsite|offsite-apply/i.test(t))) applyType = 'offsite';
     else if (tracked.some(t => /apply-link-(simple|onsite)|easy-?apply/i.test(t))) applyType = 'easy_apply';
     const closed = /no longer accepting applications/i.test(document.body.innerText);
-    return {description, applyType, closed,
+    // LinkedIn's "Meet the hiring team" / "message the job poster" card.
+    const card = document.querySelector('.message-the-recruiter');
+    const posterEl = card && card.querySelector('.base-main-card__title');
+    const poster = posterEl ? posterEl.innerText.trim() : null;
+    return {description, applyType, closed, poster,
             head: document.body.innerText.slice(0, 600)};
 }
 """
@@ -72,8 +76,13 @@ def pending_jobs(limit):
     return rows
 
 
-def record(job_id, description=None, apply_type=None, closed=False):
+def record(job_id, description=None, apply_type=None, closed=False, poster=None):
     conn = db.get_connection()
+    if poster:
+        # The job poster from LinkedIn's hiring-team card: the cover letter's
+        # addressee, unless the advert itself names someone (that wins later).
+        conn.execute('UPDATE jobs SET hiring_manager_name = ? WHERE job_id = ? '
+                     "AND COALESCE(hiring_manager_name, '') = ''", (poster, job_id))
     if description:
         conn.execute('UPDATE jobs SET description = ?, apply_type = COALESCE(?, apply_type) '
                      'WHERE job_id = ?', (description, apply_type, job_id))
@@ -133,7 +142,7 @@ async def fetch_descriptions(max_jobs=None, pause=(4.0, 9.0)):
                     record(job_id, closed=True)
                     stats['closed'] += 1
                 elif len(info['description']) >= 200:
-                    record(job_id, info['description'], info['applyType'])
+                    record(job_id, info['description'], info['applyType'], poster=info.get('poster'))
                     stats['fetched'] += 1
                 else:
                     record(job_id)
@@ -143,6 +152,37 @@ async def fetch_descriptions(max_jobs=None, pause=(4.0, 9.0)):
 
     stats['pending'] = len(pending_jobs(10_000))
     return stats
+
+
+async def fetch_poster(job_id):
+    """The job poster's name from a LinkedIn posting's public page, stored as
+    the hiring manager when none is recorded yet. Returns the name, or None.
+    One logged-out page view, the same way descriptions are read."""
+    if not str(job_id).isdigit():
+        return None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            try:
+                page = await (await browser.new_context(locale='en-US')).new_page()
+                response = await page.goto(public_url((job_id, None)), timeout=45000,
+                                           wait_until='domcontentloaded')
+                if (response and response.status in BLOCKED_STATUS) or WALL_URL.search(page.url):
+                    return None
+                await page.wait_for_timeout(1500)
+                info = await page.evaluate(READ_PAGE_JS, list(DESCRIPTION_SELECTORS))
+            finally:
+                await browser.close()
+    except Exception as e:
+        print(f'  -> {job_id}: could not read the job poster ({type(e).__name__})')
+        return None
+    if info.get('poster'):
+        record_poster = db.get_connection()
+        record_poster.execute("UPDATE jobs SET hiring_manager_name = ? WHERE job_id = ? "
+                              "AND COALESCE(hiring_manager_name, '') = ''", (info['poster'], job_id))
+        record_poster.commit()
+        record_poster.close()
+    return info.get('poster')
 
 
 if __name__ == '__main__':

@@ -19,6 +19,9 @@ PAGES = {
     '/closed': ('<html><body><p>No longer accepting applications</p></body></html>', 200),
     '/short': ('<html><body><div class="description__text">too short</div></body></html>', 200),
     '/wall': ('<html><body>Request denied</body></html>', 999),
+    '/poster': ('<html><body><div class="show-more-less-html__markup">' + DESCRIPTION + '</div>'
+                '<div class="message-the-recruiter"><h3 class="base-main-card__title">Jane Example</h3>'
+                '<h4 class="base-main-card__subtitle">Talent Partner</h4></div></body></html>', 200),
 }
 
 
@@ -93,3 +96,15 @@ def test_a_job_that_keeps_failing_stops_being_retried(server, scratch_db, monkey
     for _ in range(3):
         asyncio.run(public_jobs.fetch_descriptions(pause=(0, 0)))
     assert row('short')[3] == 2
+
+
+def test_the_job_poster_becomes_the_addressee_and_survives_a_new_score(server, scratch_db):
+    add('local-poster', server + '/poster', '2026-01-01')
+    asyncio.run(public_jobs.fetch_descriptions(pause=(0, 0)))
+    name = lambda: db.get_connection().execute(
+        "SELECT hiring_manager_name FROM jobs WHERE job_id = 'local-poster'").fetchone()[0]
+    assert name() == 'Jane Example'
+    db.update_job_score('local-poster', 8, 'Good fit.', hiring_manager_name=None)
+    assert name() == 'Jane Example'                      # a score without a name keeps it
+    db.update_job_score('local-poster', 8, 'Good fit.', hiring_manager_name='Max Named')
+    assert name() == 'Max Named'                         # a name in the advert wins

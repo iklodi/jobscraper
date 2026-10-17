@@ -61,7 +61,13 @@ context — no profile, no cookies — and reads the description every visitor
 sees. Also records `apply_type` (`offsite` / `easy_apply`) from the apply
 control's tracking name; the employer's own URL is **not** exposed logged out.
 On HTTP 999, a sign-in wall or a challenge it stops for the run and leaves the
-rest pending. No proxies or evasion — that is a rule, not a gap.
+rest pending. No proxies or evasion — that is a rule, not a gap. It also reads
+the job poster from the public page's hiring-team card
+(`.message-the-recruiter`) into `hiring_manager_name`, and `fetch_poster()`
+does the same on demand: the generator calls it before writing a letter for a
+LinkedIn job with no addressee (scraped jobs never had the card read). A name
+the scorer finds in the advert itself wins; a score without one never erases
+a name already recorded.
 
 ### `adzuna.py` — a second source, in either mode
 Runs the `search_criteria.md` searches through Adzuna's official API
@@ -151,7 +157,10 @@ under one name, and it never rejects an approved job.
 ### `generator.py`
 Writes the tailored CV and cover letter with `python-docx` and converts them
 with headless LibreOffice. CV content is always English; the cover letter
-follows the advert's language. Also saves the advert itself as a PDF.
+follows the advert's language. Also saves the advert itself as a PDF. The
+letter is addressed to the office hiring for the role - the job's location -
+and to the company's headquarters only for remote or regional roles (a Swiss
+role at a US agency was addressed to Tampa).
 
 ### `applier.py`
 Walks from the LinkedIn posting to the employer's form, fills it from

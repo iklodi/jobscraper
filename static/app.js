@@ -1,5 +1,28 @@
+// Deep links: '#job=<id>' opens that job. Read once on load and on a hash
+// change - never on the periodic refresh, which used to reopen the linked job
+// every 30 seconds. Older emails link '?job_id=<id>'; that becomes the hash.
+function linkedJobId() {
+    const m = window.location.hash.match(/^#job=(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+}
+
+function openLinkedJob() {
+    const id = linkedJobId();
+    if (id && allJobs.some(j => j.job_id === id)) openJobDetails(id);
+}
+
+// Show which job is open in the address bar, replacing - not adding to - the
+// history, so Back still leaves the dashboard rather than stepping through jobs.
+function setJobHash(jobId) {
+    const url = window.location.pathname + (jobId ? '#job=' + encodeURIComponent(jobId) : '');
+    if (url !== window.location.pathname + window.location.hash) history.replaceState(null, '', url);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    loadApplyPolicy().then(fetchJobs);
+    const legacy = new URLSearchParams(window.location.search).get('job_id');
+    if (legacy) history.replaceState(null, '', window.location.pathname + '#job=' + encodeURIComponent(legacy));
+    window.addEventListener('hashchange', openLinkedJob);
+    loadApplyPolicy().then(fetchJobs).then(openLinkedJob);
     pollScraperStatus();
 
     const modal = document.getElementById('job-modal');
@@ -16,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.closeModal = function() {
     document.getElementById('job-modal').classList.remove('active');
+    setJobHash(null);
     if (window.currentPollInterval) {
         clearInterval(window.currentPollInterval);
     }
@@ -146,16 +170,6 @@ async function fetchJobs() {
         allJobs = await response.json();
         renderBoard();
         renderStats();
-        
-        // Handle deep linking
-        const urlParams = new URLSearchParams(window.location.search);
-        const jobIdParam = urlParams.get('job_id');
-        if (jobIdParam) {
-            const job = allJobs.find(j => j.job_id === jobIdParam);
-            if (job) {
-                openJobDetails(job.job_id);
-            }
-        }
     } catch (error) {
         console.error('Error fetching jobs:', error);
     }
@@ -640,6 +654,7 @@ function openJobDetails(jobId) {
     `;
 
     document.getElementById('job-modal').classList.add('active');
+    setJobHash(job.job_id);
     
     // Polling logic
     if (window.currentPollInterval) clearInterval(window.currentPollInterval);

@@ -2455,7 +2455,7 @@ def _notify(results, single=False):
     lines = [f'## {summary["headline"]}', '']
     for j in summary['jobs']:
         lines.append(f'- **{j["company"]}** - {j["word"]} '
-                     f'({notifier.dashboard_links("?job_id=" + str(j["job_id"]), "open")})')
+                     f'({notifier.dashboard_links("#job=" + str(j["job_id"]), "open")})')
     lines.append('')
 
     # Questions the profile could not answer, grouped so one missing answer

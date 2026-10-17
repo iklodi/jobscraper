@@ -36,7 +36,7 @@ def _job_links(job_id):
     """
     if not job_id:
         return ""
-    links = [dashboard_links(f'?job_id={job_id}', 'View Details')]
+    links = [dashboard_links(f'#job={job_id}', 'View Details')]
     try:
         link = db.get_job_links(job_id).get('linkedin') or ''
         host = urllib.parse.urlparse(link).netloc.lower()

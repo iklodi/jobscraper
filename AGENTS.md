@@ -160,7 +160,7 @@ with headless LibreOffice. CV content is always English; the cover letter
 follows the advert's language. Also saves the advert itself as a PDF. The
 letter is addressed to the office hiring for the role - the job's location -
 and to the company's headquarters only for remote or regional roles (a Swiss
-role at a US agency was addressed to Tampa).
+role at a US agency was addressed to its US headquarters).
 Regenerate on the dashboard can pick a language for each document. The CV is
 written in English as usual and then translated stretch by stretch of
 formatting (`translate_docx`); a letter not in English gets its header -

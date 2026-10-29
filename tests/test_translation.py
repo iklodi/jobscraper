@@ -132,5 +132,5 @@ def test_swiss_german_has_no_eszett(tmp_path):
 
 
 def test_swiss_places():
-    assert generator.is_swiss('Zollikofen, Switzerland') and generator.is_swiss('', 'Bern, Schweiz')
+    assert generator.is_swiss('Zurich, Switzerland') and generator.is_swiss('', 'Bern, Schweiz')
     assert not generator.is_swiss('Berlin, Germany', None)

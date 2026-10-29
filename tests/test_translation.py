@@ -117,3 +117,20 @@ def test_regenerate_passes_the_dropdowns(tmp_path, monkeypatch):
     client.post('/api/jobs/1/regenerate', json={'instructions': ''})
     assert calls[0][1]['cv_language'] == 'German' and calls[0][1]['cl_language'] is None
     assert calls[1][1]['cv_language'] is None and calls[1][1]['cl_language'] is None
+
+
+def test_swiss_german_has_no_eszett(tmp_path):
+    path = tmp_path / 'letter.docx'
+    doc = Document()
+    p = doc.add_paragraph()
+    p.add_run('Mit großem Interesse').bold = True
+    p.add_run(' und freundlichen Grüßen')
+    doc.save(path)
+    generator.swiss_spelling(str(path))
+    runs = Document(path).paragraphs[0].runs
+    assert [(r.text, r.bold) for r in runs] == [('Mit grossem Interesse', True), (' und freundlichen Grüssen', None)]
+
+
+def test_swiss_places():
+    assert generator.is_swiss('Zollikofen, Switzerland') and generator.is_swiss('', 'Bern, Schweiz')
+    assert not generator.is_swiss('Berlin, Germany', None)

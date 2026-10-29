@@ -167,7 +167,8 @@ formatting (`translate_docx`); a letter not in English gets its header -
 "Hiring Team", country names, the sender band's text box - translated on the
 template, before the company's name is filled in. An English greeting or
 closing left in a French, German or Italian letter is replaced in code. A
-failed CV translation leaves it in English with a note in the job's history.
+failed CV translation leaves it in English with a note in the job's history. German
+documents for a Swiss job use Swiss spelling (ss, never ß).
 
 ### `applier.py`
 Walks from the LinkedIn posting to the employer's form, fills it from

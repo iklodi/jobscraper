@@ -387,6 +387,26 @@ def translate_paragraphs(paragraphs, language, extra=()):
     return translated[len(targets):]
 
 
+SWISS_MARKERS = ('switzerland', 'schweiz', 'suisse', 'svizzera', 'swiss')
+
+
+def is_swiss(*places):
+    return any(m in (p or '').lower() for p in places for m in SWISS_MARKERS)
+
+
+def swiss_spelling(path):
+    """Swiss German has no ß: "grossem", not "großem"."""
+    doc = Document(path)
+    changed = False
+    for p in all_paragraphs(doc):
+        for run in p.runs:
+            if 'ß' in run.text or 'ẞ' in run.text:
+                run.text = run.text.replace('ß', 'ss').replace('ẞ', 'SS')
+                changed = True
+    if changed:
+        doc.save(path)
+
+
 def translate_docx(path, language):
     """Translate a finished document into `language`, formatting kept."""
     doc = Document(path)
@@ -766,6 +786,10 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         company_hq = texts['company_hq']
         display_company = texts['display_company']
         adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, letter_lang)
+        if is_swiss(location, company_hq):
+            for path, lang in ((new_cv_docx, cv_language), (new_cl_docx, letter_lang)):
+                if 'german' in (lang or '').lower():
+                    swiss_spelling(path)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

@@ -750,6 +750,22 @@ setInterval(() => {
     }
 }, 30000);
 
+// Empty the To Do column: every job in it moves to Rejected, each with its
+// history entry, after a confirmation that says how many.
+window.clearBacklog = async function() {
+    const count = allJobs.filter(j => ['to_apply', 'generated'].includes(j.status)).length;
+    if (!count) { alert('To Do is already empty.'); return; }
+    if (!confirm(`Move all ${count} jobs in To Do to Rejected?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    try {
+        const res = await fetch('/api/backlog/clear', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        await fetchJobs();
+    } catch (e) {
+        alert('Could not clear the backlog: ' + e.message);
+    }
+}
+
 window.changeJobStatus = async function(jobId, newStatus) {
     try {
         const res = await fetch(`/api/jobs/${jobId}/status`, {

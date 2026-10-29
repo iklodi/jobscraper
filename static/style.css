@@ -647,3 +647,24 @@ h1 {
 .column-filters { display: flex; gap: 6px; }
 .column-filters input.column-filter { flex: 1; min-width: 0; }
 .column-filters .score-filter { width: auto; flex: 0 0 auto; cursor: pointer; }
+
+/* A column title with an action beside it (To Do's Clear). The title is
+   rewritten with its count on every refresh, so the button sits outside it. */
+.column-header {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 0.5rem;
+    padding-right: 0.75rem;
+}
+.column-header h2 { flex: 1; border-bottom: none; margin-bottom: 0; }
+.btn-clear-column {
+    background: transparent;
+    border: 1px solid rgba(248, 113, 113, 0.5);
+    color: #fca5a5;
+    border-radius: 6px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+.btn-clear-column:hover { background: rgba(248, 113, 113, 0.15); }

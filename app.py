@@ -181,12 +181,21 @@ def get_job(job_id):
     j_dict['files'] = get_files_for_job(job_id)
     return jsonify(j_dict)
 
-def bg_generate(job_id, instructions, final_status='generated'):
+def bg_generate(job_id, instructions, final_status='generated', cv_language=None, cl_language=None):
     import asyncio
     import importlib
     import generator
     importlib.reload(generator)          # same reason as run_applier_bg
-    asyncio.run(generator.generate_for_job(job_id, instructions, final_status=final_status))
+    asyncio.run(generator.generate_for_job(job_id, instructions, final_status=final_status,
+                                           cv_language=cv_language, cl_language=cl_language))
+
+
+def language_choice(value):
+    """A language name from the dashboard's dropdown, or None for the default."""
+    import re
+    value = (value or '').strip()
+    # Letters, spaces and brackets only: the name goes into a prompt.
+    return value if re.fullmatch(r"[^\W\d_]+(?:[ ()'-]+[^\W\d_]*)*", value) and len(value) <= 40 else None
 
 @app.route('/api/jobs/<job_id>/regenerate', methods=['POST'])
 def regenerate_job(job_id):
@@ -204,7 +213,9 @@ def regenerate_job(job_id):
     instructions = data.get('instructions')
     import threading
     t = threading.Thread(target=bg_generate, args=(job_id, instructions),
-                         kwargs={'final_status': final_status})
+                         kwargs={'final_status': final_status,
+                                 'cv_language': language_choice(data.get('cv_language')),
+                                 'cl_language': language_choice(data.get('cl_language'))})
     t.start()
     return jsonify({'success': True})
 

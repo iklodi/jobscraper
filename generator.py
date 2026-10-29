@@ -79,11 +79,14 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
-def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None):
+def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None, cl_language=None):
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
-    language_instruction = f"- Language Instruction: The job description is in {jd_language}. Unless the user's custom instructions ask for another language, YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}, the greeting and the closing formula included (never \"Dear\" or \"Sincerely\" in a letter that is not in English)." if jd_language else ""
+    if cl_language:
+        language_instruction = f"- Language Instruction: The user asked for the cover letter in {cl_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {cl_language}, the greeting and the closing formula included, whatever language the job description is in."
+    else:
+        language_instruction = f"- Language Instruction: The job description is in {jd_language}. Unless the user's custom instructions ask for another language, YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}, the greeting and the closing formula included (never \"Dear\" or \"Sincerely\" in a letter that is not in English)." if jd_language else ""
     
     candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
@@ -248,7 +251,150 @@ def replace_text_in_paragraph(paragraph, old_text, new_text):
         if font_size:
             run.font.size = font_size
 
-def sanitize_generated_texts(texts, company, location, jd_language):
+TRANSLATE_SCHEMA = {
+    'type': 'object',
+    'properties': {'translations': {'type': 'array', 'items': {'type': 'string'}}},
+    'required': ['translations'],
+}
+TRANSLATE_BATCH = 40
+
+
+def is_english(language):
+    return not language or language.strip().lower() in ('english', 'en')
+
+
+def ask_json(prompt, schema):
+    """One JSON answer from the first provider that gives one; None if none does."""
+    result = infomaniak.chat_json(prompt, schema)
+    if result:
+        return result
+    gemini_client = get_gemini_client()
+    for model_name in (GEMINI_MODELS if gemini_client else []):
+        try:
+            response = gemini_client.models.generate_content(
+                model=model_name, contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json"))
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Gemini {model_name}: {e}")
+    groq_client = get_groq_client()
+    for model_name in (GROQ_MODELS if groq_client else []):
+        try:
+            response = groq_client.chat.completions.create(
+                model=model_name, messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}, temperature=0.1)
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"Groq {model_name}: {e}")
+    return None
+
+
+def translate_texts(items, language):
+    """Translate each string into `language`; the list comes back the same length.
+
+    Raises when a batch cannot be translated, so a half-translated document is
+    never passed off as a translated one.
+    """
+    out = []
+    for start in range(0, len(items), TRANSLATE_BATCH):
+        batch = items[start:start + TRANSLATE_BATCH]
+        prompt = (
+            f"Translate each string in this JSON list into {language}. These are fragments of a CV "
+            "or a cover letter, in order; a fragment may be a heading, a label or part of a sentence.\n"
+            "- Return exactly one translation per input string, in the same order, as "
+            '{"translations": [...]}.\n'
+            "- Keep unchanged: personal names, company and organisation names, product and technology "
+            "names, e-mail addresses, phone numbers, URLs, dates and numbers, and anything in square "
+            "brackets such as [COMPANY].\n"
+            "- Translate place names and country names into their usual form in the target language.\n"
+            "- Use the vocabulary of a professional CV in that language. Keep punctuation, a trailing "
+            "colon and capitalisation style. A string that needs no translation comes back as it is.\n\n"
+            + json.dumps(batch, ensure_ascii=False))
+        result = ask_json(prompt, TRANSLATE_SCHEMA)
+        translated = (result or {}).get('translations')
+        if not isinstance(translated, list) or len(translated) != len(batch):
+            raise RuntimeError(f"Translation into {language} failed")
+        out.extend(str(t) for t in translated)
+    return out
+
+
+def _run_format(run):
+    f = run.font
+    return (run.bold, run.italic, run.underline, f.size, f.name,
+            str(f.color.rgb) if f.color is not None and f.color.type is not None else None)
+
+
+def _segments(paragraph):
+    """A paragraph's runs, grouped into stretches of the same formatting."""
+    from docx.oxml.ns import qn
+    embedded = {qn('w:drawing'), qn('w:pict'), qn('w:object'),
+                '{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent'}
+    groups = []
+    for run in paragraph.runs:
+        # A run holding a picture or a text box is left alone: setting its
+        # text would delete what it holds. The box's own paragraphs are
+        # translated separately.
+        if any(child.tag in embedded for child in run._r):
+            groups.append(None)
+            continue
+        if groups and groups[-1] is not None and _run_format(run) == _run_format(groups[-1][-1]):
+            groups[-1].append(run)
+        else:
+            groups.append([run])
+    return [g for g in groups if g]
+
+
+def all_paragraphs(doc):
+    """Body, text-box, header and footer paragraphs: everything a reader sees."""
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph
+    paragraphs = list(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                paragraphs.extend(cell.paragraphs)
+    # Text boxes (the letter's sender band is one); Word keeps a fallback copy too.
+    for box in doc.element.body.iter(qn('w:txbxContent')):
+        paragraphs.extend(Paragraph(p, doc) for p in box.iter(qn('w:p')))
+    for section in doc.sections:
+        for part in (section.header, section.footer):
+            paragraphs.extend(part.paragraphs)
+    return paragraphs
+
+
+def translate_paragraphs(paragraphs, language, extra=()):
+    """Translate paragraphs in place, keeping each stretch of formatting where it was.
+
+    `extra` strings ride along in the same request; their translations are returned.
+    """
+    import re
+    targets = []
+    for p in paragraphs:
+        for group in _segments(p):
+            text = ''.join(r.text for r in group)
+            if re.search(r'[^\W\d_]{2,}', text):
+                targets.append((group, text))
+    extra = list(extra)
+    if not targets and not extra:
+        return []
+    translated = translate_texts([t.strip() for _, t in targets] + extra, language)
+    for (group, text), new in zip(targets, translated):
+        lead = text[:len(text) - len(text.lstrip())]
+        trail = text[len(text.rstrip()):]
+        group[0].text = lead + new.strip() + trail
+        for r in group[1:]:
+            r.text = ''
+    return translated[len(targets):]
+
+
+def translate_docx(path, language):
+    """Translate a finished document into `language`, formatting kept."""
+    doc = Document(path)
+    translate_paragraphs(all_paragraphs(doc), language)
+    doc.save(path)
+
+
+def sanitize_generated_texts(texts, company, location, jd_language, requested=None):
     """Deterministic guards for AI output fields that end up verbatim in the documents."""
     import re
 
@@ -266,7 +412,8 @@ def sanitize_generated_texts(texts, company, location, jd_language):
 
     # The letter's own language decides, not the advert's: the user may have
     # asked for another one in the custom instructions.
-    jd_language = letter_language(texts.get('cover_letter_body') or '') or jd_language
+    # A language picked on the dashboard is certain; otherwise read it off the letter.
+    jd_language = requested or letter_language(texts.get('cover_letter_body') or '') or jd_language
 
     # Greeting: the first line must be a well-formed salutation, never a bare name
     lines = (texts.get('cover_letter_body') or '').split('\n')
@@ -285,7 +432,7 @@ def sanitize_generated_texts(texts, company, location, jd_language):
             lines[i] = f"{prefix} {first.rstrip(',')},"
         break
     texts['cover_letter_body'] = localise_letter_formulas('\n'.join(lines), jd_language)
-    return texts
+    return jd_language
 
 
 # The model sometimes writes a French or German letter and still opens it with
@@ -356,7 +503,22 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
             
     if start_idx != -1:
         import re
-        company_location_clean = re.sub(r'\s*\([^)]*\)', '', location).strip()
+        company_location_clean = re.sub(r'\s*\([^)]*\)', '', location or '').strip()
+
+        # A letter in another language gets its header in that language too:
+        # "Hiring Team", the country names, the sender's own address. Done on
+        # the template, so the company's name never goes through a translator.
+        if not is_english(jd_language):
+            from docx.oxml.ns import qn
+            header = doc.paragraphs[:start_idx]
+            boxes = [p for p in all_paragraphs(doc) if p._p.getparent().tag == qn('w:txbxContent')]
+            try:
+                extra = [company_location_clean] if company_location_clean else []
+                done = translate_paragraphs(header + boxes, jd_language, extra)
+                if extra:
+                    company_location_clean = done[0]
+            except Exception as e:
+                print(f"Letter header left in English: {e}")
         
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
         today_str = datetime.datetime.now().strftime("%d.%m.%Y")
@@ -487,7 +649,14 @@ def convert_to_pdf_libreoffice(docx_path):
               f"LibreOffice cannot see the template's fonts on this machine.")
     return pdf_path
 
-async def generate_for_job(job_id, custom_instructions=None, final_status='generated'):
+async def generate_for_job(job_id, custom_instructions=None, final_status='generated',
+                           cv_language=None, cl_language=None):
+    """Write the job's CV and cover letter.
+
+    By default the CV is in English and the letter in the advert's language;
+    `cv_language` / `cl_language` ask for another one (the dashboard's
+    Regenerate dropdowns).
+    """
     import db
     conn = db.get_connection()
     cursor = conn.cursor()
@@ -545,7 +714,8 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
-            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions)
+            texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text,
+                                            custom_instructions, cl_language)
             if not texts:
                 print(f"AI returned empty result for job {job_id}")
                 cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (failure_status, job_id))
@@ -581,10 +751,21 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
-        sanitize_generated_texts(texts, company, location, jd_language)
+        if not is_english(cv_language):
+            print(f"Translating the CV into {cv_language}...")
+            try:
+                translate_docx(new_cv_docx, cv_language)
+            except Exception as e:
+                print(f"CV left in English: {e}")
+                cursor.execute("""INSERT INTO job_history (job_id, event_type, note, created_at)
+                                  VALUES (?, 'note_added', ?, ?)""",
+                               (job_id, f"The CV could not be translated into {cv_language}; it is in English.",
+                                datetime.datetime.now()))
+                conn.commit()
+        letter_lang = sanitize_generated_texts(texts, company, location, jd_language, cl_language)
         company_hq = texts['company_hq']
         display_company = texts['display_company']
-        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, jd_language)
+        adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, letter_lang)
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

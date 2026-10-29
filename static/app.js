@@ -548,6 +548,14 @@ function openJobDetails(jobId) {
                     <button class="btn" onclick="showRegenOptions('${job.job_id}', 'reevaluate')">Re-evaluate Job</button>
                 </div>
                 <div id="regen-options-${job.job_id}" style="display: none; margin-top: 15px;">
+                    <div class="regen-languages" id="regen-languages-${job.job_id}">
+                        <label>CV language
+                            <select id="regen-cv-lang-${job.job_id}">${languageOptions('Default (English)')}</select>
+                        </label>
+                        <label>Cover letter language
+                            <select id="regen-cl-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`)}</select>
+                        </label>
+                    </div>
                     <textarea id="regen-instructions-${job.job_id}" placeholder="Optional custom instructions for the AI (e.g. 'Emphasize my cloud architecture skills more')..." style="width: 100%; height: 80px; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; margin-bottom: 10px; font-family: inherit; resize: vertical;"></textarea>
                     <button class="btn btn-primary" onclick="submitRegen('${job.job_id}')" id="regen-submit-btn-${job.job_id}">Start</button>
                     <input type="hidden" id="regen-mode-${job.job_id}" value="">
@@ -676,8 +684,30 @@ function openJobDetails(jobId) {
     }
 }
 
+// Regenerate's language dropdowns: the languages most applications here are
+// written in first, then every language alphabetically (those again included).
+const MAIN_LANGUAGES = ['English', 'German', 'French', 'Italian'];
+const ALL_LANGUAGES = [
+    'Arabic', 'Bulgarian', 'Catalan', 'Chinese (Simplified)', 'Croatian', 'Czech', 'Danish',
+    'Dutch', 'English', 'Estonian', 'Finnish', 'French', 'German', 'Greek', 'Hebrew', 'Hindi',
+    'Hungarian', 'Icelandic', 'Indonesian', 'Italian', 'Japanese', 'Korean', 'Latvian',
+    'Lithuanian', 'Luxembourgish', 'Norwegian', 'Polish', 'Portuguese', 'Romanian', 'Romansh',
+    'Russian', 'Serbian', 'Slovak', 'Slovenian', 'Spanish', 'Swedish', 'Thai', 'Turkish',
+    'Ukrainian', 'Vietnamese'
+];
+
+function languageOptions(defaultLabel) {
+    const opts = names => names.map(n => `<option value="${n}">${n}</option>`).join('');
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return `<option value="">${esc(defaultLabel)}</option>`
+        + `<optgroup label="Main languages">${opts(MAIN_LANGUAGES)}</optgroup>`
+        + `<optgroup label="All languages">${opts(ALL_LANGUAGES)}</optgroup>`;
+}
+
 window.showRegenOptions = function(jobId, mode) {
     document.getElementById(`regen-options-${jobId}`).style.display = 'block';
+    // Languages only mean something when documents are written.
+    document.getElementById(`regen-languages-${jobId}`).style.display = mode === 'regenerate' ? '' : 'none';
     document.getElementById(`regen-mode-${jobId}`).value = mode;
     document.getElementById(`regen-submit-btn-${jobId}`).innerText = mode === 'regenerate' ? 'Start Regeneration' : 'Start Re-evaluation';
 }
@@ -685,12 +715,17 @@ window.showRegenOptions = function(jobId, mode) {
 window.submitRegen = async function(jobId) {
     const mode = document.getElementById(`regen-mode-${jobId}`).value;
     const instructions = document.getElementById(`regen-instructions-${jobId}`).value;
+    const body = { instructions };
+    if (mode === 'regenerate') {
+        body.cv_language = document.getElementById(`regen-cv-lang-${jobId}`).value;
+        body.cl_language = document.getElementById(`regen-cl-lang-${jobId}`).value;
+    }
     
     try {
         await fetch(`/api/jobs/${jobId}/${mode}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instructions })
+            body: JSON.stringify(body)
         });
         
         // Update local status to trigger loading UI immediately

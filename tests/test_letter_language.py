@@ -32,3 +32,27 @@ def test_sanitize_applies_it():
     texts = {'cover_letter_body': BODY, 'display_company': 'Example AG', 'company_hq': 'Bern, Switzerland'}
     sanitize_generated_texts(texts, 'Example AG', 'Bern', 'French')
     assert texts['cover_letter_body'].startswith('Bonjour Oliver,')
+
+
+ENGLISH_ON_FRENCH_AD = ("Dear Oliver,\n\nI am writing to apply for the role of product manager with your team. "
+                        "My experience in enterprise architecture and the work I have done with clients "
+                        "is a good match for the position, and I would welcome the chance to discuss it.\n\n"
+                        "Sincerely,\nJane Doe")
+
+
+def test_english_letter_asked_for_on_a_french_advert_stays_english():
+    texts = {'cover_letter_body': ENGLISH_ON_FRENCH_AD, 'display_company': 'Example AG', 'company_hq': 'Bern'}
+    sanitize_generated_texts(texts, 'Example AG', 'Bern', 'French')
+    assert texts['cover_letter_body'] == ENGLISH_ON_FRENCH_AD
+
+
+def test_french_letter_detected():
+    from generator import letter_language
+    body = ("Dear Oliver,\n\nJe souhaite postuler au poste de chef de produit. Mon parcours combine une expertise "
+            "technique et une vision stratégique, et je suis convaincu que mes compétences sont un atout pour votre "
+            "équipe dans le cadre de vos projets.\n\nSincerely,\nJane Doe")
+    assert letter_language(body) == 'French'
+    texts = {'cover_letter_body': body, 'display_company': 'Example AG', 'company_hq': 'Bern'}
+    sanitize_generated_texts(texts, 'Example AG', 'Bern', 'English')
+    assert texts['cover_letter_body'].startswith('Bonjour Oliver,')
+    assert 'Meilleures salutations,' in texts['cover_letter_body']

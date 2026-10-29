@@ -83,7 +83,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
-    language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}, the greeting and the closing formula included (never \"Dear\" or \"Sincerely\" in a letter that is not in English)." if jd_language else ""
+    language_instruction = f"- Language Instruction: The job description is in {jd_language}. Unless the user's custom instructions ask for another language, YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}, the greeting and the closing formula included (never \"Dear\" or \"Sincerely\" in a letter that is not in English)." if jd_language else ""
     
     candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
@@ -264,6 +264,10 @@ def sanitize_generated_texts(texts, company, location, jd_language):
              if p.strip() and p.strip().lower() not in ('unknown', 'n/a', 'none')]
     texts['company_hq'] = ', '.join(parts) if parts else re.sub(r'\s*\([^)]*\)', '', location or '').strip()
 
+    # The letter's own language decides, not the advert's: the user may have
+    # asked for another one in the custom instructions.
+    jd_language = letter_language(texts.get('cover_letter_body') or '') or jd_language
+
     # Greeting: the first line must be a well-formed salutation, never a bare name
     lines = (texts.get('cover_letter_body') or '').split('\n')
     starters = ('dear', 'hi', 'hello', 'greetings', 'bonjour', 'cher', 'chère',
@@ -295,6 +299,25 @@ ENGLISH_CLOSINGS = ('sincerely', 'yours sincerely', 'sincerely yours', 'yours fa
                     'best regards', 'kind regards', 'warm regards', 'warmest regards',
                     'regards', 'best', 'with best regards', 'with kind regards',
                     'best wishes', 'respectfully', 'thank you')
+
+
+LANGUAGE_MARKERS = {
+    'english': {'the', 'and', 'of', 'to', 'in', 'my', 'with', 'your', 'have', 'for', 'is', 'that'},
+    'french': {'le', 'la', 'les', 'et', 'de', 'des', 'je', 'mon', 'ma', 'mes', 'vos', 'votre', 'pour', 'une', 'est', 'dans'},
+    'german': {'der', 'die', 'das', 'und', 'ich', 'mit', 'für', 'ihre', 'ihr', 'meine', 'ist', 'eine', 'nicht', 'bei'},
+    'italian': {'il', 'gli', 'e', 'di', 'della', 'che', 'mia', 'mio', 'per', 'con', 'sono', 'una', 'nel', 'vostra'},
+}
+
+
+def letter_language(body):
+    """The language a letter is written in, from its common words; None when unclear."""
+    import re
+    words = re.findall(r"[a-zà-ÿß]+", body.lower())
+    if len(words) < 20:
+        return None
+    counts = {lang: sum(w in marks for w in words) for lang, marks in LANGUAGE_MARKERS.items()}
+    lang, best = max(counts.items(), key=lambda kv: kv[1])
+    return lang.capitalize() if best >= 5 else None
 
 
 def localise_letter_formulas(body, jd_language):

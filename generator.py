@@ -83,7 +83,7 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
-    language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}." if jd_language else ""
+    language_instruction = f"- Language Instruction: The job description is in {jd_language}. YOU MUST WRITE THE COVER LETTER ENTIRELY IN {jd_language}, the greeting and the closing formula included (never \"Dear\" or \"Sincerely\" in a letter that is not in English)." if jd_language else ""
     
     candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
@@ -280,8 +280,47 @@ def sanitize_generated_texts(texts, company, location, jd_language):
             prefix = 'Bonjour' if 'french' in jl else 'Guten Tag' if 'german' in jl else 'Dear'
             lines[i] = f"{prefix} {first.rstrip(',')},"
         break
-    texts['cover_letter_body'] = '\n'.join(lines)
+    texts['cover_letter_body'] = localise_letter_formulas('\n'.join(lines), jd_language)
     return texts
+
+
+# The model sometimes writes a French or German letter and still opens it with
+# "Dear" and signs off "Sincerely". Swiss usage for the closings.
+LETTER_FORMULAS = {
+    'french': {'dear': 'Bonjour', 'team': 'Madame, Monsieur,', 'closing': 'Meilleures salutations,'},
+    'german': {'dear': 'Guten Tag', 'team': 'Sehr geehrte Damen und Herren,', 'closing': 'Freundliche Grüsse,'},
+    'italian': {'dear': 'Gentile', 'team': 'Gentili Signore e Signori,', 'closing': 'Cordiali saluti,'},
+}
+ENGLISH_CLOSINGS = ('sincerely', 'yours sincerely', 'sincerely yours', 'yours faithfully',
+                    'best regards', 'kind regards', 'warm regards', 'warmest regards',
+                    'regards', 'best', 'with best regards', 'with kind regards',
+                    'best wishes', 'respectfully', 'thank you')
+
+
+def localise_letter_formulas(body, jd_language):
+    """Translate an English greeting and closing in a letter written in another language."""
+    import re
+    jl = (jd_language or '').lower()
+    forms = next((f for lang, f in LETTER_FORMULAS.items() if lang in jl), None)
+    if not forms:
+        return body
+    lines = body.split('\n')
+    for i, line in enumerate(lines):
+        first = line.strip()
+        if not first:
+            continue
+        m = re.match(r'(?i)dear\s+(.+?)[,:]?$', first)
+        if m:
+            name = m.group(1).strip()
+            generic = re.search(r'(?i)\b(hiring|team|manager|sir|madam|recruit|whom)', name)
+            lines[i] = forms['team'] if generic else f"{forms['dear']} {name},"
+        break
+    for i in range(len(lines) - 1, max(len(lines) - 5, -1), -1):
+        last = lines[i].strip().rstrip(',').strip().lower()
+        if last in ENGLISH_CLOSINGS:
+            lines[i] = forms['closing']
+            break
+    return '\n'.join(lines)
 
 def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, location, hiring_manager_name, jd_language):
     doc = Document(base_cl_path)

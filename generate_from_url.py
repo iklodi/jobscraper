@@ -365,7 +365,7 @@ async def main():
         description='Generate a tailored CV and cover letter from a job URL.')
     parser.add_argument('url', help='LinkedIn job URL, or any employer job page')
     parser.add_argument('-i', '--instructions',
-                        help='Extra instructions for the AI, e.g. "the company is Hone"')
+                        help='Extra instructions for the AI, e.g. "the company is Microsoft"')
     parser.add_argument('--headed', action='store_true',
                         help='Show the browser (use once to log in to LinkedIn)')
     parser.add_argument('--generate', action='store_true',

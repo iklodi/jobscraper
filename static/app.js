@@ -348,16 +348,17 @@ function jobMetaTags(job, columnStatus) {
 
 // Everything known about a job, for the detail view: the card's tags plus
 // what there is no room for on the card.
+const STATUS_NAMES = { new: 'New', to_apply: 'To Do', generated: 'To Do', approved: 'Approved',
+    ready_to_submit: 'Ready to Submit', easy_apply: 'Ready to Submit (Easy Apply)', applied: 'Applied',
+    interviewing: 'Interviewing', failed: 'Failed', account_required: 'Account Required',
+    rejected: 'Rejected', scored: 'Rejected (below the bar)', generating: 'Writing documents',
+    evaluating: 'Scoring', applying: 'Applying' };
+
 function jobDetailTags(job) {
     const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
     let html = `<span class="meta-tag" title="Job id">#${esc(job.job_id)}</span>`;
     if (job.score) html += `<span class="meta-tag" title="Score">⭐ ${job.score}/10</span>`;
-    const statusNames = { new: 'New', to_apply: 'To Do', generated: 'To Do', approved: 'Approved',
-        ready_to_submit: 'Ready to Submit', easy_apply: 'Ready to Submit (Easy Apply)', applied: 'Applied',
-        interviewing: 'Interviewing', failed: 'Failed', account_required: 'Account Required',
-        rejected: 'Rejected', scored: 'Rejected (below the bar)', generating: 'Writing documents',
-        evaluating: 'Scoring', applying: 'Applying' };
-    html += `<span class="meta-tag" title="Column">📋 ${esc(statusNames[job.status] || job.status)}</span>`;
+    html += `<span class="meta-tag" title="Column">📋 ${esc(STATUS_NAMES[job.status] || job.status)}</span>`;
     html += jobMetaTags(job, job.status === 'applied' ? 'applied' : '');
     if (job.created_at) html += `<span class="meta-tag" title="Added">🗓 Added ${formatStamp(job.created_at)}</span>`;
     const detail = jobSource(job).title;
@@ -1197,7 +1198,7 @@ function addJobStatus(html, colour) {
     el.innerHTML = html;
 }
 
-window.submitAddJob = async function() {
+window.submitAddJob = async function(confirmed = false) {
     const url = document.getElementById('add-job-url').value.trim();
     const instructions = document.getElementById('add-job-instructions').value.trim();
     if (!url) { addJobStatus('Paste a job URL first.', '#f87171'); return; }
@@ -1211,9 +1212,25 @@ window.submitAddJob = async function() {
         const res = await fetch('/api/jobs/from-url', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: url, instructions: instructions })
+            body: JSON.stringify({ url: url, instructions: instructions, confirm: confirmed })
         });
         const data = await res.json();
+        if (data.status === 'exists') {
+            // Already on file: re-read and re-score it only if asked to.
+            const j = data.job;
+            const column = STATUS_NAMES[j.status] || j.status;
+            const after = j.protected ? `It stays in ${column}.` : 'It will be put on To Do.';
+            const again = confirm(`This job is already in the database:\n\n${j.title || 'Role'} at `
+                + `${j.company || 'Unknown'} (#${j.job_id}, ${column}).\n\n`
+                + `Fetch its description again and re-evaluate it? ${after}`);
+            if (again) return submitAddJob(true);
+            const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+            addJobStatus(`Cancelled - ${esc(j.title || 'the job')} at ${esc(j.company || 'Unknown')} `
+                + `is already in ${esc(column)}.<br><br><button class="btn" `
+                + `onclick="closeAddJob(); openJobDetails('${esc(j.job_id)}')">Open the job</button>`, '#fbbf24');
+            submit.disabled = false; submit.innerText = 'Fetch & score';
+            return;
+        }
         if (data.status === 'already_running') {
             addJobStatus('Another job is being added right now - try again in a moment.', '#fbbf24');
             submit.disabled = false; submit.innerText = 'Fetch & score';

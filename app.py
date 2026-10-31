@@ -417,6 +417,16 @@ def add_job_from_url():
     if not url.startswith(('http://', 'https://')):
         return jsonify({'status': 'error', 'error': 'Enter a full job URL starting with http.'}), 400
 
+    # A link for a job already on file is only re-read when the person says so.
+    import generate_from_url
+    known = generate_from_url.existing_job(url)
+    if known and known['status'] in ('generating', 'evaluating', 'applying'):
+        return jsonify({'status': 'error', 'error': 'That job is busy (being written, scored or '
+                        'applied to) - try again when it has finished.'}), 409
+    if known and not data.get('confirm'):
+        known['protected'] = known['status'] in db.PROTECTED_STATUSES
+        return jsonify({'status': 'exists', 'job': known})
+
     add_url_result = None
     add_url_thread = threading.Thread(
         target=run_add_url_bg, args=(url, (data.get('instructions') or '').strip() or None))

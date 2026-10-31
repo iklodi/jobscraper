@@ -133,6 +133,21 @@ def job_id_for(url):
     return 'url-' + hashlib.sha1(url.encode()).hexdigest()[:12]
 
 
+def existing_job(url):
+    """The job a pasted link is for, if it is already in the database; else None.
+
+    Matched on the id the link would get, or on the stored link itself (a job
+    found by another source keeps that source's id).
+    """
+    url = canonical_url(url)
+    conn = db.get_connection()
+    row = conn.execute('SELECT job_id, title, company, status FROM jobs WHERE job_id = ? OR link = ? '
+                       'ORDER BY job_id = ? DESC LIMIT 1',
+                       (job_id_for(url), url, job_id_for(url))).fetchone()
+    conn.close()
+    return dict(zip(('job_id', 'title', 'company', 'status'), row)) if row else None
+
+
 async def _read_page(page, url):
     """Load a job page and pull the advert out of it."""
     response = await page.goto(url, timeout=60000)

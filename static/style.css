@@ -677,3 +677,6 @@ h1 {
     background: rgba(0,0,0,0.2); color: white; font-family: inherit; cursor: pointer;
 }
 .regen-languages option, .regen-languages optgroup { background: #1e1e2e; color: white; }
+
+/* The + dialog's choice for a link already on file. */
+.add-job-choices { display: flex; gap: 8px; flex-wrap: wrap; }

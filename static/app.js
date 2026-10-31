@@ -1191,11 +1191,25 @@ window.closeAddJob = function() {
     document.getElementById('add-job-modal').classList.remove('active');
 }
 
+// The dialog's own buttons step aside while it asks about a job already on file.
+function showAddJobActions(show) {
+    const actions = document.getElementById('add-job-actions');
+    if (actions) actions.style.display = show ? 'flex' : 'none';
+}
+
 function addJobStatus(html, colour) {
+    showAddJobActions(true);
     const el = document.getElementById('add-job-status');
     el.style.display = 'block';
     el.style.color = colour || 'var(--text-secondary)';
     el.innerHTML = html;
+}
+
+window.cancelAddJobChoice = function() {
+    const el = document.getElementById('add-job-status');
+    el.style.display = 'none';
+    el.innerHTML = '';
+    showAddJobActions(true);
 }
 
 window.submitAddJob = async function(confirmed = false) {
@@ -1218,16 +1232,19 @@ window.submitAddJob = async function(confirmed = false) {
         if (data.status === 'exists') {
             // Already on file: re-read and re-score it only if asked to.
             const j = data.job;
+            const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
             const column = STATUS_NAMES[j.status] || j.status;
-            const after = j.protected ? `It stays in ${column}.` : 'It will be put on To Do.';
-            const again = confirm(`This job is already in the database:\n\n${j.title || 'Role'} at `
-                + `${j.company || 'Unknown'} (#${j.job_id}, ${column}).\n\n`
-                + `Fetch its description again and re-evaluate it? ${after}`);
-            if (again) return submitAddJob(true);
-            const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-            addJobStatus(`Cancelled - ${esc(j.title || 'the job')} at ${esc(j.company || 'Unknown')} `
-                + `is already in ${esc(column)}.<br><br><button class="btn" `
-                + `onclick="closeAddJob(); openJobDetails('${esc(j.job_id)}')">Open the job</button>`, '#fbbf24');
+            const after = j.protected ? `It stays in ${esc(column)}.` : 'It will be put on To Do.';
+            addJobStatus(
+                `<strong>This job is already in the database:</strong><br>${esc(j.title || 'Role')} at `
+                + `${esc(j.company || 'Unknown')} (#${esc(j.job_id)}, ${esc(column)}).<br><br>`
+                + `Fetch its description again and re-evaluate it? ${after}<br><br>`
+                + '<div class="add-job-choices">'
+                + '<button class="btn btn-primary" onclick="submitAddJob(true)">Fetch again &amp; re-evaluate</button>'
+                + `<button class="btn" onclick="closeAddJob(); openJobDetails('${esc(j.job_id)}')">Open the existing job</button>`
+                + '<button class="btn" onclick="cancelAddJobChoice()">Cancel</button>'
+                + '</div>', '#fbbf24');
+            showAddJobActions(false);
             submit.disabled = false; submit.innerText = 'Fetch & score';
             return;
         }

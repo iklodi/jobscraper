@@ -322,7 +322,11 @@ Read the field's "label" and "context" together - an upload widget's own text
 is "Choose file" and a list of accepted formats, so the question is usually in
 "label" or "name". Match on meaning, not wording: "Diplomas & Certificates",
 "Diplomes", "Zeugnisse" and "Qualifications" all want the diplomas document,
-while "Reference" or "Recommendation" wants the reference letter. Use "none"
+while "Reference" or "Recommendation" wants the reference letter. A generic slot -
+"Additional files", "Other documents", "Supporting documents", "Upload document" -
+wants the diplomas document: it is the complete bundle and already contains the
+reference letter. Choose the reference letter only for a field that names a
+reference or recommendation. Use "none"
 when no available document fits - never send a document the field did not ask
 for.
 - Skip any field whose label tells you not to fill it, or that is clearly a bot trap;
@@ -1468,12 +1472,14 @@ async def try_advance_to_form(page):
 # slot than the standalone reference letter, which it already contains.
 # Only a field that names a reference or recommendation gets that letter on
 # its own.
+REFERENCE_FIELD = r'reference|recommendation|referenz|empfehlung|référence|recommandation'
+
 ATTACHMENT_RULES = [
     ('cover_letter', r'cover|motivation|lettre de motivation|anschreiben'),
     ('cv', r'\bcv\b|resume|resum|lebenslauf|curriculum'),
     ('diplomas', r'diplom|degree|certificat|zeugnis|qualification|transcript|'
                  r'attestation|education document'),
-    ('reference_letter', r'reference|recommendation|referenz|empfehlung'),
+    ('reference_letter', REFERENCE_FIELD),
     ('diplomas', r'additional|other document|supporting|attachment|annexe'),
 ]
 
@@ -1504,7 +1510,8 @@ def attachment_paths(profile):
 DOCUMENT_BLURBS = {
     'cv': 'the tailored CV / resume for this job',
     'cover_letter': 'the tailored cover letter for this job',
-    'diplomas': 'university diplomas and work certificates, in one PDF',
+    'diplomas': 'all supporting documents in one PDF: university diplomas and work certificates '
+                '(the reference letter included) - the answer to any generic upload slot',
     'reference_letter': 'a written reference letter from a former employer',
 }
 
@@ -1545,6 +1552,12 @@ async def upload_documents(page, fields, cv_path, cl_path, attachments=None, tra
         chosen = routing.get(field['idx'])
         if chosen == 'none':
             continue
+        if (chosen == 'reference_letter' and attachments.get('diplomas')
+                and not re.search(REFERENCE_FIELD, haystack)):
+            # The bundle already holds the letter; the letter alone is only
+            # for a field that asks for a reference. The model kept sending it
+            # to "Additional files".
+            chosen = 'diplomas'
         if chosen:
             target = attachments.get(chosen)
             if not target:

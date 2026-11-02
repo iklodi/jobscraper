@@ -136,10 +136,10 @@ def applications_at(company, previous_applications):
     """The past applications that could be duplicates of a job at `company` -
     only that company's. The whole list was 40,000+ characters that buried
     the rules."""
-    from dedupe import _norm
-    key = _norm(company)
+    from dedupe import company_key
+    key = company_key(company)
     same = [f'{c} - {t}' for c, t in previous_applications
-            if key and (_norm(c) == key or key in _norm(c) or _norm(c) in key)]
+            if key and (company_key(c) == key or key in company_key(c) or company_key(c) in key)]
     return same or ['(none at this company)']
 
 

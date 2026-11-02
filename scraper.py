@@ -1,6 +1,7 @@
 import asyncio
 from playwright.async_api import async_playwright
 import db
+import dedupe
 import urllib.parse
 import os
 import difflib
@@ -202,6 +203,10 @@ async def run_scraper():
                             
                             job_id = await card.get_attribute('data-job-id')
                             link = f"https://www.linkedin.com/jobs/view/{job_id}/" if job_id else ""
+                            # The same advert from Adzuna, an employer feed or an alert.
+                            if dedupe.already_listed(title.strip(), company.strip()):
+                                print(f"Skipping duplicate job ({job_id}): {title} at {company}")
+                                continue
                             
                             desc_elem = await page.query_selector('#job-details')
                             description = await desc_elem.inner_text() if desc_elem else ""

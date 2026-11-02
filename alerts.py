@@ -27,6 +27,7 @@ import re
 from email.header import decode_header, make_header
 
 import db
+from dedupe import already_listed
 
 ALERT_SENDER = 'jobalerts-noreply@linkedin.com'
 
@@ -144,6 +145,9 @@ def store_jobs(alert_name, jobs):
     source = f'alert: {alert_name}' if alert_name else 'alert'
     for job in jobs:
         if db.job_exists(job['job_id']):
+            continue
+        # Already on the board from another source, or as another LinkedIn id.
+        if already_listed(job['title'], job['company']):
             continue
         if db.add_job(job['job_id'], job['title'] or 'Unknown role', job['company'] or 'Unknown',
                       job['location'] or '', '', job['link'], False):

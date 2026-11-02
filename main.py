@@ -19,6 +19,7 @@ import alerts
 import public_jobs
 import adzuna
 import ats_feeds
+import dedupe
 import outcomes
 
 async def main():
@@ -117,6 +118,16 @@ async def main():
         except Exception as e:
             print(f"Employer feeds failed: {e}")
             source_notes.append(f"⚠️ Employer feeds failed: {e}")
+
+    # The same advert from several sources: keep the copy furthest along.
+    try:
+        retired = dedupe.sweep()
+        if retired:
+            print(f"Duplicates: {len(retired)} extra copies moved to Rejected.")
+            source_notes.append(f"Duplicates: {len(retired)} copies of adverts already on the "
+                                f"board moved to Rejected")
+    except Exception as e:
+        print(f"Duplicate sweep failed: {e}")
 
     # LinkedIn's application-status emails (#19): read-only, either mode.
     if alerts.configured():

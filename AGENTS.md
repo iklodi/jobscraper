@@ -111,7 +111,14 @@ call. A broken feed is reported in the summary, never fatal.
 
 ### `dedupe.py`
 `already_listed(title, company)`: the cross-source duplicate check every source
-uses before inserting (normalised title, company, and Job-Room as a re-lister).
+uses before inserting - Adzuna, the employer feeds, the alerts and the
+scraper. Titles match once punctuation, gender markers and workload are gone;
+companies once legal forms and country names are ("Example Switzerland" is
+"Example"; `COMPANY_ALIASES` in `.env` adds firms known by two names), with
+Job-Room as a re-lister. `sweep()` runs nightly after the
+sources: in each group of copies the one furthest along is kept, and a copy
+still waiting, or approved when the advert was already applied to through
+another copy, moves to Rejected with "Duplicate of #id".
 
 ### `main.py` — the nightly controller
 Full mode scrapes LinkedIn; safe mode does not. Both then read the job-alert

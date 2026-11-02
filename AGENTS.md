@@ -156,13 +156,15 @@ under one name, and it never rejects an approved job.
 
 ### `generator.py`
 Writes the tailored CV and cover letter with `python-docx` and converts them
-with headless LibreOffice. CV content is always English; the cover letter
-follows the advert's language. Also saves the advert itself as a PDF. The
+with headless LibreOffice. The model writes the CV in English; it is
+translated afterwards when the advert is in another language, and the cover
+letter is written in the advert's language. Also saves the advert itself as a PDF. The
 letter is addressed to the office hiring for the role - the job's location -
 and to the company's headquarters only for remote or regional roles (a Swiss
 role at a US agency was addressed to its US headquarters).
-Regenerate on the dashboard can pick a language for each document. The CV is
-written in English as usual and then translated stretch by stretch of
+Both documents follow the advert's language by default, and Regenerate on
+the dashboard can pick another for each. The CV is written in English and
+then translated stretch by stretch of
 formatting (`translate_docx`); a letter not in English gets its header -
 "Hiring Team", country names, the sender band's text box - translated on the
 template, before the company's name is filled in. An English greeting or

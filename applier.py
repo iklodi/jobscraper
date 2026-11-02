@@ -2181,6 +2181,30 @@ def release_profile_lock(profile_dir=None):
     return True
 
 
+REVIEW_OUTCOMES = (('ready_to_submit', 'form(s) left open for review'),
+                   ('easy_apply', 'Easy Apply left for you'),
+                   ('applied', 'submitted'),
+                   ('account_required', 'need an account'),
+                   ('failed', 'failed'))
+
+
+def review_summary(results):
+    """What a batch left behind, by outcome: "2 form(s) left open for review, 22 Easy Apply...".
+
+    Only the first figure is open in the browser; counting every job processed
+    there once said 27 forms were open when 2 were.
+    """
+    counts = {}
+    for r in results:
+        counts[r.get('status')] = counts.get(r.get('status'), 0) + 1
+    labels = dict(REVIEW_OUTCOMES)
+    parts = [f'{counts[k]} {label}' for k, label in REVIEW_OUTCOMES if counts.get(k)]
+    other = sum(n for k, n in counts.items() if k not in labels)
+    if other:
+        parts.append(f'{other} other')
+    return ', '.join(parts)
+
+
 async def run_applications(limit=None, job_ids=None, auto_submit=False, include_blocked=False):
     """Fill applications for approved jobs. Returns a per-job result list.
 
@@ -2344,7 +2368,7 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
                     print(f'No activity for {idle_minutes} min; closing the review tabs.')
                     break
                 progress_tracker.set_status(
-                    f'Done - {len(results)} form(s) filled and left open. Check them, then '
+                    f'Done - {review_summary(results)}. Check the open forms, then '
                     f'press "Close forms". Closing after {idle_minutes} min idle '
                     f'({int((idle_minutes * 60 - idle) // 60)} min left).',
                     len(results), len(results), awaiting_review=True

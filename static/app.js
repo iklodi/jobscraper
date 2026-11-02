@@ -551,7 +551,7 @@ function openJobDetails(jobId) {
                 <div id="regen-options-${job.job_id}" style="display: none; margin-top: 15px;">
                     <div class="regen-languages" id="regen-languages-${job.job_id}">
                         <label>CV language
-                            <select id="regen-cv-lang-${job.job_id}">${languageOptions('Default (English)')}</select>
+                            <select id="regen-cv-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`)}</select>
                         </label>
                         <label>Cover letter language
                             <select id="regen-cl-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`)}</select>

@@ -673,9 +673,10 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
                            cv_language=None, cl_language=None):
     """Write the job's CV and cover letter.
 
-    By default the CV is in English and the letter in the advert's language;
-    `cv_language` / `cl_language` ask for another one (the dashboard's
-    Regenerate dropdowns).
+    By default both follow the advert's language: the CV is written in English
+    and translated when the advert is in another language. `cv_language` /
+    `cl_language` ask for a specific one (the dashboard's Regenerate dropdowns;
+    "English" there keeps an English CV for a French advert).
     """
     import db
     conn = db.get_connection()
@@ -771,6 +772,7 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
+        cv_language = cv_language or jd_language
         if not is_english(cv_language):
             print(f"Translating the CV into {cv_language}...")
             try:

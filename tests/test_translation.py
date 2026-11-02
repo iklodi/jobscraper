@@ -134,3 +134,11 @@ def test_swiss_german_has_no_eszett(tmp_path):
 def test_swiss_places():
     assert generator.is_swiss('Zurich, Switzerland') and generator.is_swiss('', 'Bern, Schweiz')
     assert not generator.is_swiss('Berlin, Germany', None)
+
+
+def test_review_summary_counts_open_forms_apart():
+    import applier
+    results = ([{'status': 'ready_to_submit'}] * 2 + [{'status': 'easy_apply'}] * 22
+               + [{'status': 'applied'}] * 1 + [{'status': 'failed'}] * 2)
+    assert applier.review_summary(results) == ('2 form(s) left open for review, 22 Easy Apply '
+                                               'left for you, 1 submitted, 2 failed')

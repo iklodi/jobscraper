@@ -572,6 +572,10 @@ class Trace:
             print(f'  -> Could not write the run manifest: {e}')
 
 EASY_APPLY_LABEL = re.compile(r'\beasy apply\b', re.I)
+# The posting's own apply control: its name starts with "Apply" or "Easy Apply"
+# ("Apply to <role> on company website", "Easy Apply to <role>").
+APPLY_CONTROL = re.compile(r'^\W*(?:easy\s+)?apply\b', re.I)
+EASY_APPLY_CONTROL = re.compile(r'^\W*easy\s+apply\b', re.I)
 
 
 async def is_easy_apply(page):
@@ -581,15 +585,35 @@ async def is_easy_apply(page):
     automated at all: it runs inside LinkedIn on the candidate's own session,
     which is the riskiest thing this tool could do with that account, to save
     about three clicks.
+
+    Only the posting's own control counts: the topmost visible button or link
+    whose name starts with Apply / Easy Apply. Matching "Easy Apply" anywhere
+    on the page took similar-job cards and search filters further down for the
+    posting's button, and left offsite jobs for the candidate as Easy Apply.
     """
+    try:
+        await page.get_by_role('button', name=APPLY_CONTROL).or_(
+            page.get_by_role('link', name=APPLY_CONTROL)).first.wait_for(state='visible', timeout=4000)
+    except Exception:
+        pass
+    found = []
     for role in ('button', 'link'):
-        control = page.get_by_role(role, name=EASY_APPLY_LABEL).first
-        try:
-            await control.wait_for(state='visible', timeout=4000)
-            return True
-        except Exception:
-            continue
-    return False
+        controls = page.get_by_role(role, name=APPLY_CONTROL)
+        for i in range(min(await controls.count(), 10)):
+            control = controls.nth(i)
+            try:
+                if not await control.is_visible():
+                    continue
+                box = await control.bounding_box()
+                name = (await control.get_attribute('aria-label')
+                        or await control.inner_text() or '')
+            except Exception:
+                continue
+            if box:
+                found.append((box['y'], box['x'], name))
+    if not found:
+        return False
+    return bool(EASY_APPLY_CONTROL.search(min(found)[2].strip()))
 
 
 NEEDS_EMPLOYER_LINK = (

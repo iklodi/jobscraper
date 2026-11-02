@@ -47,3 +47,36 @@ def test_easy_apply_posting():
 
 def test_no_apply_control():
     assert check('<main><h1>Closed</h1></main>') is False
+
+
+CLOSED = '''
+<div style="display:flex">
+  <main style="width:800px">
+    <p>Example AG</p>
+    <h1>Lead Solutions Architect</h1>
+    <p>Geneva, Switzerland</p>
+    <p>No longer accepting applications</p>
+    <section style="margin-top: 600px"><h2>Similar jobs</h2>
+      <button aria-label="Easy Apply to Architect at Other AG">Easy Apply</button></section>
+  </main>
+  <aside><h2>Jobs for you</h2><button>Easy Apply</button></aside>
+</div>'''
+
+
+def test_easy_apply_buttons_beside_or_below_the_posting_do_not_count():
+    # The side panel's button sits higher than the title; the similar job's far below.
+    assert check(CLOSED) is False
+
+
+def test_a_closed_posting_is_reported_closed():
+    async def run():
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            page = await browser.new_page()
+            await page.set_content(CLOSED)
+            page.goto = lambda *a, **k: asyncio.sleep(0)
+            try:
+                return await applier.find_apply_url(page, 'https://example.invalid/jobs/view/1/')
+            finally:
+                await browser.close()
+    assert asyncio.run(run()) == (None, 'closed')

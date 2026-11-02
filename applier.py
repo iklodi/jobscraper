@@ -580,6 +580,9 @@ EASY_APPLY_LABEL = re.compile(r'\beasy apply\b', re.I)
 # ("Apply to <role> on company website", "Easy Apply to <role>").
 APPLY_CONTROL = re.compile(r'^\W*(?:easy\s+)?apply\b', re.I)
 EASY_APPLY_CONTROL = re.compile(r'^\W*easy\s+apply\b', re.I)
+# How far below the job title the posting's apply control can sit (px): the
+# top card holds the company, location, badges and the button.
+TOP_CARD_DEPTH = 350
 
 
 async def is_easy_apply(page):
@@ -590,11 +593,19 @@ async def is_easy_apply(page):
     which is the riskiest thing this tool could do with that account, to save
     about three clicks.
 
-    Only the posting's own control counts: the topmost visible button or link
-    whose name starts with Apply / Easy Apply. Matching "Easy Apply" anywhere
-    on the page took similar-job cards and search filters further down for the
-    posting's button, and left offsite jobs for the candidate as Easy Apply.
+    Only the posting's own control counts: a visible button or link whose
+    name starts with Apply / Easy Apply, in the top card just under the job
+    title. Matching "Easy Apply" anywhere on the page took similar-job cards
+    further down for the posting's button - offsite jobs, and closed ones with
+    no button at all, were left for the candidate as Easy Apply.
     """
+    top_card = None
+    try:
+        heading = page.locator('h1').first
+        if await heading.is_visible():
+            top_card = await heading.bounding_box()
+    except Exception:
+        pass
     try:
         await page.get_by_role('button', name=APPLY_CONTROL).or_(
             page.get_by_role('link', name=APPLY_CONTROL)).first.wait_for(state='visible', timeout=4000)
@@ -613,8 +624,12 @@ async def is_easy_apply(page):
                         or await control.inner_text() or '')
             except Exception:
                 continue
-            if box:
-                found.append((box['y'], box['x'], name))
+            if not box:
+                continue
+            if top_card and not (top_card['y'] - 20 <= box['y'] <= top_card['y'] + TOP_CARD_DEPTH
+                                 and top_card['x'] - 40 <= box['x'] < top_card['x'] + top_card['width']):
+                continue    # below the top card, or in the side column beside it
+            found.append((box['y'], box['x'], name))
     if not found:
         return False
     return bool(EASY_APPLY_CONTROL.search(min(found)[2].strip()))
@@ -669,6 +684,15 @@ async def find_apply_url(page, linkedin_url, job_id='unknown', trace=None, retry
     await pause(page, 5000)
     if trace:
         await trace.shot(page, 'linkedin_posting')
+
+    # A closed posting has no apply control; anything found would belong to
+    # another job on the page.
+    try:
+        top = await page.evaluate('() => document.body.innerText.slice(0, 4000)')
+    except Exception:
+        top = ''
+    if CLOSED_LISTING_PATTERNS.search(top):
+        return None, 'closed'
 
     if await is_easy_apply(page):
         return None, 'easy_apply'
@@ -1960,6 +1984,9 @@ async def process_job(page, client, profile, job, auto_submit=False):
         target, mode = None, 'easy_apply'
     else:
         target, mode = await find_apply_url(page, link, job_id, trace)
+    if mode == 'closed':
+        trace.write_manifest(job, 'closed', False)
+        return 'failed', 'The listing is closed - LinkedIn shows "No longer accepting applications".'
     if mode == 'easy_apply':
         trace.write_manifest(job, 'easy_apply', False)
         return 'easy_apply', (

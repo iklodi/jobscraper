@@ -204,7 +204,11 @@ sign-in wall is reported, not worked around.
 ### `app.py` / `static/app.js` / `templates/index.html`
 Flask dashboard. Columns: New, To Do, Approved, Ready to Submit, Applied,
 Interviewing, Failed, Account Required, Rejected — every one ordered by last
-modification, newest first. `/api/settings` edits `search_criteria.md` and
+modification, newest first. Every card has a checkbox; "Select all" takes the
+cards on screen (not those a filter hides or behind Load More), and while any
+are selected the column offers its moves in a menu (`BULK_ACTIONS` in
+`app.js`). `/api/jobs/bulk` makes the moves, skips jobs a background run
+holds, and writes documents for jobs approved together one after another. `/api/settings` edits `search_criteria.md` and
 `rules.md` in place, keeping a `.bak`, refusing empty content, and reporting
 what the next run will search for.
 

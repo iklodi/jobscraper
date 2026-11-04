@@ -125,6 +125,82 @@ def clear_failed():
     """Move every job in Failed to Rejected."""
     return jsonify({'status': 'ok', 'moved': move_column_to_rejected(('failed',), 'Failed cleared')})
 
+# Where a bulk action on the board may move jobs: the columns a person
+# decides on. The transient statuses belong to a background run.
+BULK_STATUSES = ('to_apply', 'approved', 'failed', 'account_required', 'applied',
+                 'interviewing', 'rejected')
+BUSY_STATUSES = ('generating', 'evaluating', 'applying')
+
+def bg_bulk_generate(job_ids):
+    """Write the documents for jobs approved together, one after another -
+    a thread each would run every generation at once."""
+    for job_id in job_ids:
+        try:
+            bg_generate(job_id, None, final_status='approved')
+        except Exception as e:
+            print(f"Generation failed for {job_id}: {e}")
+
+def bg_bulk_reevaluate(jobs):
+    for job_id, prior_status in jobs:
+        try:
+            bg_reevaluate(job_id, None, prior_status)
+        except Exception as e:
+            print(f"Re-evaluation failed for {job_id}: {e}")
+
+@app.route('/api/jobs/bulk', methods=['POST'])
+def bulk_action():
+    """The board's selection menu: move the selected jobs to one status, or
+    re-evaluate them. Jobs a background run holds are skipped and counted."""
+    import datetime
+    data = request.json or {}
+    job_ids = [str(j) for j in data.get('job_ids') or []]
+    action = data.get('action')
+    new_status = data.get('status')
+    if not job_ids:
+        return jsonify({'error': 'No jobs selected'}), 400
+    if action not in ('status', 'reevaluate'):
+        return jsonify({'error': f'Unknown action: {action}'}), 400
+    if action == 'status' and new_status not in BULK_STATUSES:
+        return jsonify({'error': f'Cannot move jobs to {new_status}'}), 400
+
+    conn = get_db_connection()
+    marks = ','.join('?' * len(job_ids))
+    rows = conn.execute(f'SELECT job_id, status FROM jobs WHERE job_id IN ({marks})',
+                        job_ids).fetchall()
+    ready = [(r['job_id'], r['status']) for r in rows if r['status'] not in BUSY_STATUSES]
+    skipped = len(job_ids) - len(ready)
+
+    if action == 'reevaluate':
+        for job_id, _ in ready:
+            conn.execute('UPDATE jobs SET status = "evaluating" WHERE job_id = ?', (job_id,))
+        conn.commit()
+        conn.close()
+        if ready:
+            threading.Thread(target=bg_bulk_reevaluate, args=(ready,)).start()
+        return jsonify({'status': 'ok', 'moved': len(ready), 'skipped': skipped})
+
+    now = datetime.datetime.now()
+    to_generate = []
+    moved = 0
+    for job_id, old_status in ready:
+        if old_status == new_status:
+            continue
+        moved += 1
+        conn.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (new_status, job_id))
+        conn.execute('''
+            INSERT INTO job_history (job_id, event_type, old_status, new_status, note, created_at)
+            VALUES (?, 'status_change', ?, ?, 'Bulk action', ?)
+        ''', (job_id, old_status, new_status, now))
+        # Approving commissions the documents, as it does one job at a time.
+        if new_status == 'approved' and not get_files_for_job(job_id):
+            to_generate.append(job_id)
+    conn.commit()
+    conn.close()
+    if to_generate:
+        threading.Thread(target=bg_bulk_generate, args=(to_generate,)).start()
+    return jsonify({'status': 'ok', 'moved': moved, 'skipped': skipped,
+                    'generating': to_generate})
+
 @app.route('/api/jobs/<job_id>/status', methods=['POST'])
 def update_status(job_id):
     data = request.json

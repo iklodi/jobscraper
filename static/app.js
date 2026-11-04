@@ -58,7 +58,10 @@ window.filterColumn = function(control) {
         const textOk = !text || card.textContent.toLowerCase().includes(text);
         const scoreOk = minScore === null || Number(card.dataset.score || 0) >= minScore;
         card.style.display = textOk && scoreOk ? 'block' : 'none';
+        // An action applies to what you can see: hiding a card deselects it.
+        if (card.style.display === 'none') selectionFor(column.dataset.status).delete(card.dataset.id);
     });
+    syncSelection(column.dataset.status);
 }
 
 // Re-apply every active filter, e.g. after the board is redrawn.
@@ -286,6 +289,11 @@ function renderBoard() {
 
     setupDragAndDrop();
     reapplyFilters();          // a redraw must not drop the user's filters
+    Object.keys(columns).forEach(status => {
+        const ids = new Set((groupedJobs[status] || []).map(j => j.job_id));
+        selectionFor(status).forEach(id => { if (!ids.has(id)) selectionFor(status).delete(id); });
+        renderSelectionBar(status);
+    });
 }
 
 
@@ -380,6 +388,9 @@ function createCard(job, columnStatus) {
 
     card.innerHTML = `
         <div class="card-header">
+            <input type="checkbox" class="card-select" title="Select for a bulk action"
+                   ${isSelected(columnStatus, job.job_id) ? 'checked' : ''}
+                   onchange="toggleCardSelection('${columnStatus}', '${job.job_id}', this.checked)">
             <span class="card-company">${job.company} <span style="font-size: 0.7em; color: rgba(255,255,255,0.5); font-weight: normal;">#${job.job_id}</span></span>
             ${job.score ? `<span class="card-score">${job.score}/10</span>` : ''}
         </div>
@@ -817,6 +828,163 @@ window.clearFailed = async function() {
     }
 }
 
+// Selecting cards for a bulk action. Each column keeps its own selection,
+// by job id, so it survives the board being redrawn every 30 seconds.
+const selections = {};
+function selectionFor(status) {
+    return selections[status] || (selections[status] = new Set());
+}
+function isSelected(status, jobId) {
+    return selectionFor(status).has(jobId);
+}
+
+// What the menu offers for the cards selected in each column - the same moves
+// the detail view offers there. `status` moves them; `run` starts something.
+const FILL = { label: '📝 Fill Now', run: 'fill' };
+const APPLY = { label: '📤 Apply Now', run: 'apply' };
+const REEVALUATE = { label: 'Re-evaluate', run: 'reevaluate' };
+const REJECT = { label: '✗ Reject', status: 'rejected' };
+const BULK_ACTIONS = {
+    new: [REEVALUATE, REJECT],
+    to_apply: [{ label: '✓ Approve', status: 'approved' }, FILL, APPLY, REEVALUATE, REJECT],
+    failed: [{ label: 'Return to Approved', status: 'approved' }, FILL, APPLY,
+             { label: 'Move to Account Required', status: 'account_required' }, REJECT],
+    account_required: [{ label: 'Return to Approved', status: 'approved' }, FILL, APPLY,
+                       { label: 'Mark as Applied', status: 'applied' }, REJECT],
+    approved: [FILL, APPLY, { label: 'Mark as Applied', status: 'applied' },
+               { label: 'Mark as Failed', status: 'failed' },
+               { label: 'Mark as Account Required', status: 'account_required' }, REJECT],
+    ready_to_submit: [{ label: 'Mark as Applied', status: 'applied' }, FILL,
+                      { label: 'Mark as Failed', status: 'failed' }],
+    applied: [{ label: 'Mark as Interviewing', status: 'interviewing' }, { label: 'Mark as Rejected', status: 'rejected' }],
+    interviewing: [{ label: 'Back to Applied', status: 'applied' }, { label: 'Mark as Rejected', status: 'rejected' }],
+    rejected: [{ label: 'Return to To Do', status: 'to_apply' }, REEVALUATE],
+};
+
+function columnFor(status) {
+    return document.querySelector(`.kanban-column[data-status="${status}"]`);
+}
+
+// The checkbox and menu above a column's cards, created the first time.
+function selectionBar(status) {
+    const column = columnFor(status);
+    if (!column) return null;
+    let bar = column.querySelector('.selection-bar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.className = 'selection-bar';
+        bar.innerHTML = `
+            <label class="select-all"><input type="checkbox" onchange="selectAllVisible('${status}', this.checked)"> Select all</label>
+            <select class="bulk-actions" onchange="runBulkAction('${status}', this)"></select>`;
+        column.insertBefore(bar, column.querySelector('.kanban-cards'));
+    }
+    return bar;
+}
+
+function visibleCards(status) {
+    const column = columnFor(status);
+    return column ? [...column.querySelectorAll('.kanban-cards .card')].filter(c => c.style.display !== 'none') : [];
+}
+
+// Bring the bar in line with the selection: the "Select all" box's state, and
+// the menu, which shows only while something is selected.
+function renderSelectionBar(status) {
+    const bar = selectionBar(status);
+    if (!bar) return;
+    const selected = selectionFor(status);
+    const visible = visibleCards(status);
+    const all = bar.querySelector('.select-all input');
+    all.checked = visible.length > 0 && visible.every(c => selected.has(c.dataset.id));
+    all.indeterminate = !all.checked && selected.size > 0;
+    all.disabled = visible.length === 0;
+    const menu = bar.querySelector('.bulk-actions');
+    menu.style.display = selected.size ? '' : 'none';
+    if (!selected.size) return;
+    const actions = (BULK_ACTIONS[status] || []).map((action, i) => {
+        let blocked = '';
+        if (action.run === 'apply' && !window.applyPolicy.submit_allowed) blocked = window.applyPolicy.reason;
+        if (action.run === 'fill' && window.applyPolicy.fill_allowed === false) blocked = window.applyPolicy.reason;
+        return `<option value="${i}" ${blocked ? 'disabled' : ''} title="${(blocked || '').replace(/"/g, '&quot;')}">${action.label}</option>`;
+    });
+    menu.innerHTML = `<option value="">${selected.size} selected - choose an action…</option>` + actions.join('')
+        + `<option value="clear">Clear selection</option>`;
+}
+
+// Tick the card boxes to match the selection, then redraw the bar.
+function syncSelection(status) {
+    const column = columnFor(status);
+    if (!column) return;
+    const selected = selectionFor(status);
+    column.querySelectorAll('.card').forEach(card => {
+        const box = card.querySelector('.card-select');
+        if (box) box.checked = selected.has(card.dataset.id);
+        card.classList.toggle('selected', selected.has(card.dataset.id));
+    });
+    renderSelectionBar(status);
+}
+
+window.toggleCardSelection = function(status, jobId, checked) {
+    if (checked) selectionFor(status).add(jobId); else selectionFor(status).delete(jobId);
+    syncSelection(status);
+}
+
+// "Select all" takes only the cards on screen: not those a filter hides, nor
+// those behind Load More.
+window.selectAllVisible = function(status, checked) {
+    const selected = selectionFor(status);
+    if (checked) visibleCards(status).forEach(c => selected.add(c.dataset.id));
+    else selected.clear();
+    syncSelection(status);
+}
+
+window.runBulkAction = async function(status, menu) {
+    const choice = menu.value;
+    menu.value = '';
+    if (!choice) return;
+    const selected = selectionFor(status);
+    if (choice === 'clear') { selected.clear(); syncSelection(status); return; }
+    const action = (BULK_ACTIONS[status] || [])[Number(choice)];
+    const ids = [...selected];
+    if (!action || !ids.length) return;
+    const n = ids.length === 1 ? '1 job' : `${ids.length} jobs`;
+
+    if (action.run === 'fill' || action.run === 'apply') {
+        // triggerApply asks for its own confirmation.
+        if (await triggerApply(ids, action.run === 'apply')) { selected.clear(); syncSelection(status); }
+        return;
+    }
+    const question = action.run === 'reevaluate'
+        ? `Re-evaluate ${n}? They are scored again one after another; jobs you approved or applied to stay where they are.`
+        : `${action.label.replace(/^[^A-Za-z]+/, '')}: ${n}?`
+          + (action.status === 'approved' ? '\n\nDocuments are written for each one that has none, one after another.' : '');
+    if (!confirm(question)) return;
+    try {
+        const res = await fetch('/api/jobs/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action.run === 'reevaluate'
+                ? { job_ids: ids, action: 'reevaluate' }
+                : { job_ids: ids, action: 'status', status: action.status })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        selected.clear();
+        await fetchJobs();
+        if (data.skipped) alert(`${data.skipped} of them were skipped: a background run is working on them.`);
+        (data.generating || []).forEach(id => {
+            const job = allJobs.find(j => j.job_id === id);
+            if (job) job.writing_assets = true;
+        });
+        if ((data.generating || []).length) {
+            renderBoard();
+            // Written one after another, so the later ones get longer to wait.
+            data.generating.forEach((id, i) => waitForAssets(id, 60 * (i + 1)));
+        }
+    } catch (e) {
+        alert('Could not run the action: ' + e.message);
+    }
+}
+
 window.changeJobStatus = async function(jobId, newStatus) {
     try {
         const res = await fetch(`/api/jobs/${jobId}/status`, {
@@ -950,7 +1118,9 @@ window.triggerFill = function(jobId = null) {
 }
 
 window.triggerApply = async function(jobId = null, submit = true) {
-    const what = jobId ? "this job" : "every approved job";
+    const jobIds = jobId === null ? null : [].concat(jobId);
+    const what = !jobIds ? "every approved job"
+        : jobIds.length === 1 ? "this job" : `these ${jobIds.length} jobs`;
     const scope = submit ? `Apply for ${what} now?` : `Fill in the form for ${what}, without sending?`;
     const detail = submit
         ? "A browser will open the employer's form, fill it from your profile and SUBMIT it."
@@ -967,7 +1137,7 @@ window.triggerApply = async function(jobId = null, submit = true) {
     if (hoverBox) hoverBox.classList.add('active');
 
     try {
-        const body = jobId ? { job_ids: [jobId], submit } : { submit };
+        const body = jobIds ? { job_ids: jobIds, submit } : { submit };
         const res = await fetch('/api/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -978,14 +1148,15 @@ window.triggerApply = async function(jobId = null, submit = true) {
             alert(data.error);
             if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;
             if (hoverBox) hoverBox.classList.remove('active');
-            return;
+            return false;
         }
         if (data.status === 'already_running') {
             alert("An application run is already in progress.");
-            return;
+            return false;
         }
-        if (jobId) closeModal();
+        if (jobIds) closeModal();
         pollScraperStatus();
+        return true;
     } catch (e) {
         alert("Failed to start applications: " + e);
         if (btnApply) btnApply.disabled = !window.applyPolicy.submit_allowed;

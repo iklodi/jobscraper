@@ -648,7 +648,7 @@ h1 {
 .column-filters input.column-filter { flex: 1; min-width: 0; }
 .column-filters .score-filter { width: auto; flex: 0 0 auto; cursor: pointer; }
 
-/* A column title with an action beside it (To Do's Clear). The title is
+/* A column title with an action beside it (Clear on To Do and Failed). The title is
    rewritten with its count on every refresh, so the button sits outside it. */
 .column-header {
     display: flex;

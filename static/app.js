@@ -802,6 +802,21 @@ window.clearBacklog = async function() {
     }
 }
 
+// Empty the Failed column the same way.
+window.clearFailed = async function() {
+    const count = allJobs.filter(j => j.status === 'failed').length;
+    if (!count) { alert('Failed is already empty.'); return; }
+    if (!confirm(`Move all ${count} jobs in Failed to Rejected?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    try {
+        const res = await fetch('/api/failed/clear', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        await fetchJobs();
+    } catch (e) {
+        alert('Could not clear Failed: ' + e.message);
+    }
+}
+
 window.changeJobStatus = async function(jobId, newStatus) {
     try {
         const res = await fetch(`/api/jobs/${jobId}/status`, {

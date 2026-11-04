@@ -96,24 +96,34 @@ def get_jobs():
     conn.close()
     return jsonify(job_list)
 
-@app.route('/api/backlog/clear', methods=['POST'])
-def clear_backlog():
-    """Move every job in To Do (to_apply, generated) to Rejected, recording
-    each move in its history. Returns how many moved."""
+def move_column_to_rejected(statuses, note):
+    """Move every job in the given statuses to Rejected, recording each move
+    in its history with the note. Returns how many moved."""
     import datetime
     conn = get_db_connection()
+    marks = ','.join('?' * len(statuses))
     rows = conn.execute(
-        "SELECT job_id, status FROM jobs WHERE status IN ('to_apply', 'generated')").fetchall()
+        f"SELECT job_id, status FROM jobs WHERE status IN ({marks})", statuses).fetchall()
     now = datetime.datetime.now()
     for row in rows:
         conn.execute("UPDATE jobs SET status = 'rejected' WHERE job_id = ?", (row['job_id'],))
         conn.execute('''
             INSERT INTO job_history (job_id, event_type, old_status, new_status, note, created_at)
-            VALUES (?, 'status_change', ?, 'rejected', 'Backlog cleared', ?)
-        ''', (row['job_id'], row['status'], now))
+            VALUES (?, 'status_change', ?, 'rejected', ?, ?)
+        ''', (row['job_id'], row['status'], note, now))
     conn.commit()
     conn.close()
-    return jsonify({'status': 'ok', 'moved': len(rows)})
+    return len(rows)
+
+@app.route('/api/backlog/clear', methods=['POST'])
+def clear_backlog():
+    """Move every job in To Do (to_apply, generated) to Rejected."""
+    return jsonify({'status': 'ok', 'moved': move_column_to_rejected(('to_apply', 'generated'), 'Backlog cleared')})
+
+@app.route('/api/failed/clear', methods=['POST'])
+def clear_failed():
+    """Move every job in Failed to Rejected."""
+    return jsonify({'status': 'ok', 'moved': move_column_to_rejected(('failed',), 'Failed cleared')})
 
 @app.route('/api/jobs/<job_id>/status', methods=['POST'])
 def update_status(job_id):

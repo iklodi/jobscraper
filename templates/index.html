@@ -88,7 +88,11 @@
                 <div class="kanban-cards"></div>
             </div>
             <div class="kanban-column" id="col-failed" data-status="failed">
-                <h2>Failed</h2>
+                <div class="column-header">
+                    <h2>Failed</h2>
+                    <button class="btn-clear-column" onclick="clearFailed()"
+                            title="Move every job in Failed to Rejected">Clear</button>
+                </div>
                 <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                 <div class="kanban-cards"></div>
             </div>

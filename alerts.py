@@ -9,12 +9,14 @@ Two rules hold throughout:
 * Only the numeric job id is taken from each "View job" link. The links carry
   sign-in parameters (otpToken, midToken), so following or storing one would
   tie later requests back to the account. Links are rebuilt bare, from the id.
-* Mail is read with BODY.PEEK and never flagged, moved or deleted: the inbox is
-  left exactly as the candidate had it. Processed messages are remembered in
-  the alert_emails table instead.
+* Mail is read with BODY.PEEK and never moved or deleted. It is left unread
+  unless IMAP_MARK_READ is true, when each alert email is marked read once
+  its jobs are stored. Processed messages are remembered in the alert_emails
+  table either way.
 
 Configuration (.env): IMAP_HOST, IMAP_USER, IMAP_PASSWORD (an app password),
-IMAP_FOLDER (default INBOX), ALERT_LOOKBACK_DAYS (default 14, first run only).
+IMAP_FOLDER (default INBOX), ALERT_LOOKBACK_DAYS (default 14, first run only),
+IMAP_MARK_READ (default false).
 """
 
 import datetime
@@ -159,9 +161,15 @@ def store_jobs(alert_name, jobs):
     return added
 
 
-def read_mail(sender, table, imap_factory=None):
+def mark_read_enabled():
+    return os.environ.get('IMAP_MARK_READ', '').strip().lower() in ('1', 'true', 'yes')
+
+
+def read_mail(sender, table, imap_factory=None, mark_read=False):
     """Yield (message_id, message) for every email from `sender` not yet
-    recorded in `table`, read-only: BODY.PEEK, nothing marked or moved.
+    recorded in `table`. Read with BODY.PEEK, nothing moved; with `mark_read`
+    each message is flagged as read once the caller has handled it (the loop
+    asked for the next one), and one already recorded is flagged too.
 
     `table` has message_id and received_at columns; the search starts a day
     before the newest email recorded there, or ALERT_LOOKBACK_DAYS back on the
@@ -185,7 +193,7 @@ def read_mail(sender, table, imap_factory=None):
     imap = (imap_factory or imaplib.IMAP4_SSL)(host)
     try:
         imap.login(os.environ['IMAP_USER'].strip(), os.environ['IMAP_PASSWORD'].strip())
-        imap.select(f'"{folder}"', readonly=True)       # readonly: nothing gets marked
+        imap.select(f'"{folder}"', readonly=not mark_read)   # readonly: nothing gets marked
         status, data = imap.search(None, 'FROM', f'"{sender}"', 'SINCE', since.strftime('%d-%b-%Y'))
         ids = data[0].split() if status == 'OK' and data and data[0] else []
         print(f'{len(ids)} email(s) from {sender} since {since:%Y-%m-%d}.')
@@ -202,6 +210,10 @@ def read_mail(sender, table, imap_factory=None):
             conn.close()
             if not seen:
                 yield message_id, message
+            # Reached only when the caller's loop body finished without an
+            # error, so a message that failed stays unread.
+            if mark_read:
+                imap.store(num, '+FLAGS', '\\Seen')
     finally:
         try:
             imap.logout()
@@ -223,7 +235,8 @@ def ingest_alerts(imap_factory=None):
     """
     db.init_db()
     stats, capped = {}, {}
-    for message_id, message in read_mail(ALERT_SENDER, 'alert_emails', imap_factory):
+    for message_id, message in read_mail(ALERT_SENDER, 'alert_emails', imap_factory,
+                                         mark_read=mark_read_enabled()):
         alert_name, jobs = parse_alert_text(message_text(message))
         added = store_jobs(alert_name, jobs)
         key = alert_name or _decode(message.get('Subject')) or 'job alert'

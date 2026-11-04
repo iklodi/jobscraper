@@ -68,6 +68,7 @@ class FakeIMAP:
 
     def __init__(self, messages):
         self.messages = messages
+        self.stored = []
 
     def __call__(self, host):
         return self
@@ -85,6 +86,10 @@ class FakeIMAP:
     def fetch(self, num, what):
         assert 'PEEK' in what, 'must not mark mail as read'
         return 'OK', [(b'1', self.messages[int(num) - 1])]
+
+    def store(self, num, command, flags):
+        self.stored.append((num, command, flags))
+        return 'OK', [b'']
 
     def logout(self):
         pass
@@ -105,6 +110,7 @@ def scratch_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db, 'DB_FILE', str(tmp_path / 'jobs.db'))
     for k, v in {'IMAP_HOST': 'imap.example.com', 'IMAP_USER': 'u', 'IMAP_PASSWORD': 'p'}.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.delenv('IMAP_MARK_READ', raising=False)    # the real .env may set it
     db.init_db()
 
 
@@ -186,3 +192,28 @@ def test_settings_show_alerts_in_safe_mode(scratch_db, tmp_path, monkeypatch):
 
     monkeypatch.setenv('JOBSCRAPER_MODE', 'full')
     assert 'alerts' not in client.get('/api/settings').get_json()
+
+
+def test_mark_read_flags_each_email_once_its_jobs_are_stored(scratch_db, monkeypatch):
+    monkeypatch.setenv('IMAP_MARK_READ', 'true')
+    mailbox = FakeIMAP([make_mail(read('alert_digest.txt'), '<a@example.com>'),
+                        make_mail(read('alert_single_inline_badge.txt'), '<b@example.com>')])
+    alerts.ingest_alerts(imap_factory=mailbox)
+    assert FakeIMAP.selected_readonly is False
+    assert mailbox.stored == [(b'1', '+FLAGS', '\\Seen'), (b'2', '+FLAGS', '\\Seen')]
+
+
+def test_an_email_that_fails_stays_unread(scratch_db, monkeypatch):
+    monkeypatch.setenv('IMAP_MARK_READ', 'true')
+    mailbox = FakeIMAP([make_mail(read('alert_digest.txt'), '<a@example.com>')])
+    monkeypatch.setattr(alerts, 'store_jobs', lambda *a: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        alerts.ingest_alerts(imap_factory=mailbox)
+    assert mailbox.stored == []
+
+
+def test_without_the_setting_nothing_is_flagged(scratch_db, monkeypatch):
+    monkeypatch.delenv('IMAP_MARK_READ', raising=False)
+    mailbox = FakeIMAP([make_mail(read('alert_digest.txt'), '<a@example.com>')])
+    alerts.ingest_alerts(imap_factory=mailbox)
+    assert mailbox.stored == [] and FakeIMAP.selected_readonly is True

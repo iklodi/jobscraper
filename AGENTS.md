@@ -44,8 +44,8 @@ see **Applier invariants**. `open_employer_session()` is the only other
 launcher of a persistent profile, and it cannot reach LinkedIn.
 
 ### `alerts.py` — LinkedIn's job-alert emails, in either mode
-Reads LinkedIn job-alert emails over IMAP (read-only, `BODY.PEEK`, never marked
-or moved), parses each job's title, company, location and id, and adds it as
+Reads LinkedIn job-alert emails over IMAP (`BODY.PEEK`, never moved; marked
+read only with `IMAP_MARK_READ`, and only once the email's jobs are stored), parses each job's title, company, location and id, and adds it as
 `new`. Only the numeric id is kept: alert links carry sign-in tokens, so links
 are rebuilt bare. Messages already read are recorded in `alert_emails`, which also feeds the
 settings dialog's alert table (`recent_alerts`) and the summary's cap warning.
@@ -89,8 +89,8 @@ alone decides. The dashboard labels these jobs "Jobs by Adzuna" (Adzuna's
 terms). Limits: 25 calls/min, 250/day.
 
 ### `outcomes.py` — LinkedIn's application-status emails
-Reads `jobs-noreply@linkedin.com` through `alerts.read_mail` (the one read-only
-IMAP path; processed mail in `outcome_emails`). The body says nothing; the
+Reads `jobs-noreply@linkedin.com` through `alerts.read_mail` (the one IMAP path;
+these stay unread whatever `IMAP_MARK_READ` says; processed mail in `outcome_emails`). The body says nothing; the
 meaning is the subject plus LinkedIn's tracking name in the links
 (`email_jobs_application_rejected` / `email_jobs_job_application_viewed`).
 Only jobs in Applied are matched; a decline needs company **and** role to match

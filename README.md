@@ -36,7 +36,8 @@ generate for everything on To Do the old way.
   `IMAP_*` set it also reads your LinkedIn job-alert emails, as safe mode does:
   they bring jobs the scraper's searches miss.
 - **safe** never automates your logged-in account. It reads the **job-alert
-  emails** LinkedIn sends you over IMAP, read-only. Set up LinkedIn job alerts
+  emails** LinkedIn sends you over IMAP, leaving them unread unless you set
+  `IMAP_MARK_READ=true`. Set up LinkedIn job alerts
   for your searches (daily, by email), then fill in the `IMAP_*` settings.
   Descriptions are then read from the public job pages, logged out, and the
   jobs are scored as usual. The nightly email opens with a **Sources** section:

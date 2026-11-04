@@ -61,7 +61,10 @@ context — no profile, no cookies — and reads the description every visitor
 sees. Also records `apply_type` (`offsite` / `easy_apply`) from the apply
 control's tracking name; the employer's own URL is **not** exposed logged out.
 On HTTP 999, a sign-in wall or a challenge it stops for the run and leaves the
-rest pending. No proxies or evasion — that is a rule, not a gap. It also reads
+rest pending. No proxies or evasion — that is a rule, not a gap. Newest jobs
+are fetched first, so one still without a description after
+`SAFE_FETCH_MAX_AGE_DAYS` (14) goes to Rejected unscored (`expire_stale`): a
+backlog of old alerts otherwise never moved. It also reads
 the job poster from the public page's hiring-team card
 (`.message-the-recruiter`) into `hiring_manager_name`, and `fetch_poster()`
 does the same on demand: the generator calls it before writing a letter for a

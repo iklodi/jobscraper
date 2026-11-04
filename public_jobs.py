@@ -11,7 +11,8 @@ sign-in wall or a challenge, the run stops, the remaining jobs stay pending,
 and the next run tries again. No proxies, no retries in a loop, no disguise.
 
 Settings (.env): SAFE_FETCH_MAX_PER_RUN (default 60), SAFE_FETCH_MAX_ATTEMPTS
-(default 3) before a job is reported as unfetchable.
+(default 3) before a job is reported as unfetchable, SAFE_FETCH_MAX_AGE_DAYS
+(default 14) before a job still without a description is given up on.
 """
 
 import asyncio
@@ -74,6 +75,29 @@ def pending_jobs(limit):
         (int(os.environ.get('SAFE_FETCH_MAX_ATTEMPTS', '3')), limit)).fetchall()
     conn.close()
     return rows
+
+
+def expire_stale(days=None):
+    """Give up on jobs that have waited too long for a description: move them
+    to Rejected with a note. Newest jobs are fetched first, so on a busy board
+    old ones would otherwise wait for good - and an advert weeks old is
+    likely closed. Returns how many were moved."""
+    import datetime
+    days = days or int(os.environ.get('SAFE_FETCH_MAX_AGE_DAYS', '14'))
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat(sep=' ')
+    conn = db.get_connection()
+    rows = conn.execute(
+        "SELECT job_id FROM jobs WHERE status = 'new' AND job_id NOT LIKE 'adzuna-%' "
+        "AND COALESCE(TRIM(description), '') = '' AND created_at < ?", (cutoff,)).fetchall()
+    now = datetime.datetime.now()
+    for (job_id,) in rows:
+        conn.execute("UPDATE jobs SET status = 'rejected' WHERE job_id = ?", (job_id,))
+        conn.execute("INSERT INTO job_history (job_id, event_type, old_status, new_status, note, created_at) "
+                     "VALUES (?, 'status_change', 'new', 'rejected', ?, ?)",
+                     (job_id, f'No description after {days} days - not scored', now))
+    conn.commit()
+    conn.close()
+    return len(rows)
 
 
 def record(job_id, description=None, apply_type=None, closed=False, poster=None):

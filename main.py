@@ -75,6 +75,13 @@ async def main():
         # Alert emails carry no description; read it from the public posting,
         # logged out, in both modes. Jobs still without one are not scored.
         print("=== Step 1c: LinkedIn descriptions, logged out ===")
+        expired = public_jobs.expire_stale()
+        if expired:
+            print(f"Gave up on {expired} job(s) still without a description after "
+                  f"{os.environ.get('SAFE_FETCH_MAX_AGE_DAYS', '14')} days.")
+            source_notes.append(f"LinkedIn descriptions: gave up on {expired} job(s) that waited "
+                                f"over {os.environ.get('SAFE_FETCH_MAX_AGE_DAYS', '14')} days; "
+                                f"moved to Rejected unscored")
         fetch_stats = await public_jobs.fetch_descriptions()
         print(f"Descriptions: {fetch_stats['fetched']} fetched, {fetch_stats['failed']} failed, "
               f"{fetch_stats['closed']} closed, {fetch_stats['pending']} still pending"

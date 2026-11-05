@@ -61,7 +61,7 @@ def get_jobs():
         SELECT j.job_id, j.title, j.company, j.location, j.link, j.score, j.reasoning,
                j.status, j.created_at, j.estimated_salary, j.is_recruiter, j.is_promoted,
                j.description, j.application_notes, j.apply_url, j.apply_type,
-               j.source, j.jd_language, j.hiring_manager_name, j.fetch_attempts,
+               j.source, j.jd_language, j.hiring_manager_name, j.fetch_attempts, j.track,
                COALESCE(
                    (SELECT MAX(h.created_at) FROM job_history h
                      WHERE h.job_id = j.job_id AND h.new_status = 'applied'),
@@ -248,6 +248,12 @@ def update_status(job_id):
         generating = True
 
     return jsonify({'success': True, 'status': new_status, 'generating': generating})
+
+@app.route('/api/tracks', methods=['GET'])
+def get_tracks():
+    """The track names from search_criteria.md, for the board's track filter."""
+    import scraper
+    return jsonify([name for name, _ in scraper.get_tracks()])
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job(job_id):

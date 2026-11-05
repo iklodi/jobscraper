@@ -137,7 +137,7 @@ Playwright over a persistent Chromium profile (`./chrome_profile`) holding the
 logged-in LinkedIn session. Reads `CVS_DIR/search_criteria.md` for keywords,
 locations and job types; a keyword may pin its own locations
 (`- Interim Manager @ Switzerland / France`). Job types map onto LinkedIn's
-`f_JT` filter. The file wins over the `SEARCH_*` env vars, which apply only when
+`f_JT` filter. `get_tracks()` reads the `# Tracks` section (`- Name: description`). The file wins over the `SEARCH_*` env vars, which apply only when
 it does not exist. Skips jobs already in the database; emails when the session
 has expired and waits five minutes for a login.
 
@@ -159,8 +159,13 @@ holds only real applications (Applied, Interviewing, Offer, or Rejected after
 Applied) at the job's own company: the full list, with every hand-rejected
 job in it, was 40,000+ characters that buried the rules.
 
-When a job clears the bar and another unapproved job from the same company is
-already on To Do, the model picks one and the other is rejected. That is
+It also files every job under one of the search tracks (`track`). The model
+answers with a name, and `normalise_track` keeps only a configured one, else
+"Other". `python evaluate.py --classify-tracks [--all]` files jobs scored
+before tracks existed, with a short prompt and no re-score.
+
+When a job clears the bar and another unapproved job from the same company and
+track is already on To Do, the model picks one and the other is rejected. That is
 skipped for recruiters and aggregators, which post for many unrelated clients
 under one name, and it never rejects an approved job.
 
@@ -179,7 +184,9 @@ formatting (`translate_docx`); a letter not in English gets its header -
 "Hiring Team", country names, the sender band's text box - translated on the
 template, before the company's name is filled in. An English greeting or
 closing left in a French, German or Italian letter is replaced in code. A
-failed CV translation leaves it in English with a note in the job's history. German
+failed CV translation leaves it in English with a note in the job's history.
+The job's track and its description go into the prompt, so a business
+analyst application reads like one (`track_vocabulary`). German
 documents for a Swiss job use Swiss spelling (ss, never ß).
 
 ### `applier.py`
@@ -211,7 +218,8 @@ modification, newest first. Every card has a checkbox; "Select all" takes the
 cards on screen (not those a filter hides or behind Load More), and while any
 are selected the column offers its moves in a menu (`BULK_ACTIONS` in
 `app.js`). `/api/jobs/bulk` makes the moves, skips jobs a background run
-holds, and writes documents for jobs approved together one after another. `/api/settings` edits `search_criteria.md` and
+holds, and writes documents for jobs approved together one after another.
+A track filter above the board (`/api/tracks`) applies to every column. `/api/settings` edits `search_criteria.md` and
 `rules.md` in place, keeping a `.bak`, refusing empty content, and reporting
 what the next run will search for.
 

@@ -56,6 +56,8 @@ def get_search_criteria():
             current_section = 'locations'
         elif line.startswith('# Job Types'):
             current_section = 'job_types'
+        elif line.startswith('# Tracks'):
+            current_section = 'tracks'     # read by get_tracks()
         elif line.startswith('#'):
             continue                      # a comment inside a section
         elif line.startswith('- ') and current_section == 'keywords':
@@ -77,6 +79,29 @@ def get_search_criteria():
         locations = ["Remote"]
 
     return keywords, locations, job_types
+
+def get_tracks():
+    """The job-search tracks from search_criteria.md's "# Tracks" section, as
+    [(name, description)]. Each line is "- Name: what the track is". Every
+    scored job is filed under one of them (or "Other"); empty when the
+    section is missing."""
+    path = os.path.join(os.environ.get('CVS_DIR', 'cvs'), 'search_criteria.md')
+    if not os.path.exists(path):
+        return []
+    tracks, inside = [], False
+    with open(path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('# '):
+                section = line[2:].strip().lower()
+                if section in ('search keywords', 'search locations', 'job types', 'tracks'):
+                    inside = section == 'tracks'
+                continue
+            if inside and line.startswith('- '):
+                name, _, about = line[2:].partition(':')
+                if name.strip():
+                    tracks.append((name.strip(), about.strip()))
+    return tracks
 
 async def run_scraper():
     db.init_db()

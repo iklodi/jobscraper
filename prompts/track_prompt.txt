@@ -1,0 +1,13 @@
+File this job advert under one of my job-search tracks.
+
+My tracks:
+{tracks}
+
+Job title: {job_title}
+Company: {job_company}
+Description (start):
+{job_desc}
+
+Pick the track the role itself belongs to, by what the job is, not by its title alone. Give the track's name exactly as written before the colon, or "Other" if none fits.
+
+Your response must be valid JSON: {"track": "<name>"}

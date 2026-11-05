@@ -708,3 +708,25 @@ h1 {
 }
 .selection-bar .bulk-actions option { background: #1e293b; }
 .card-header .card-company { flex: 1; }
+
+/* The board-wide track filter, above the columns. */
+.board-filters {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.board-filters label { display: flex; align-items: center; gap: 0.5rem; }
+.board-filters select {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font: inherit;
+    cursor: pointer;
+}
+.board-filters select option { background: #1e293b; }
+.meta-track { border-color: rgba(168, 85, 247, 0.4); }

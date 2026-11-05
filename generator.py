@@ -79,6 +79,24 @@ def get_gemini_client():
         return None
     return genai.Client(api_key=api_key)
 
+def track_vocabulary(job_id):
+    """A line for the prompt naming the job's search track, so the CV and the
+    letter speak that track's language - requirements and user stories for a
+    business analyst, not architecture. Empty for a job with no track."""
+    conn = db.get_connection()
+    row = conn.execute('SELECT track FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    conn.close()
+    track = row[0] if row else None
+    if not track or track == 'Other':
+        return ''
+    import scraper
+    about = dict(scraper.get_tracks()).get(track, '')
+    return (f"\nThis role belongs to my '{track}' job-search track"
+            + (f" ({about})" if about else '')
+            + ". Present my experience in the vocabulary and priorities of that kind of role, "
+              "from what the Career Dossier actually contains.\n")
+
+
 def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None, cl_language=None):
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
@@ -90,6 +108,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
     
     candidate_name = os.environ.get('CANDIDATE_NAME', 'Jane Doe')
     
+    track_instruction = track_vocabulary(job_id)
+
     custom_block = f"\nCRITICAL CUSTOM INSTRUCTIONS FROM THE USER (these override any conflicting rules below, including Task 5):\n{custom_instructions}\n" if custom_instructions else ""
 
     prompt_template = load_prompt('generator_prompt.txt')
@@ -102,7 +122,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
                             .replace('{dossier_text}', dossier_text) \
                             .replace('{address_name}', address_name) \
                             .replace('{candidate_name}', candidate_name) \
-                            .replace('{language_instruction}', language_instruction)
+                            .replace('{language_instruction}', language_instruction) \
+                            .replace('{track_instruction}', track_instruction)
         
     max_retries = 5
     for attempt in range(max_retries):

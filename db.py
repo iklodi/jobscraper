@@ -95,8 +95,10 @@ def init_db():
     # the dashboard, or the job's link when that is not LinkedIn (#15).
     # snippet: a source's own short summary (Adzuna's 500 characters), the
     # fallback description when the full advert cannot be read.
+    # track: which of the search tracks in search_criteria.md the job belongs
+    # to, as the scorer filed it ("Other" when none fits).
     for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT',
-                   'snippet TEXT'):
+                   'snippet TEXT', 'track TEXT'):
         try:
             cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
         except sqlite3.OperationalError:
@@ -179,7 +181,7 @@ def job_exists(job_id):
     conn.close()
     return exists
 
-def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None, hiring_manager_name=None, jd_language=None):
+def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None, hiring_manager_name=None, jd_language=None, track=None):
     # A name the model finds in the advert wins; no name keeps the one already
     # recorded (e.g. LinkedIn's job poster, read by public_jobs.py).
     conn = get_connection()
@@ -190,9 +192,11 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
     cursor.execute('''
         UPDATE jobs 
         SET score = ?, reasoning = ?, status = ?, estimated_salary = ?, is_recruiter = ?,
-            hiring_manager_name = COALESCE(?, hiring_manager_name), jd_language = ?
+            hiring_manager_name = COALESCE(?, hiring_manager_name), jd_language = ?,
+            track = COALESCE(?, track)
         WHERE job_id = ?
-    ''', (score, reasoning, status, estimated_salary, is_recruiter, hiring_manager_name, jd_language, job_id))
+    ''', (score, reasoning, status, estimated_salary, is_recruiter, hiring_manager_name, jd_language,
+          track, job_id))
     conn.commit()
     conn.close()
 
@@ -238,16 +242,20 @@ if __name__ == '__main__':
     init_db()
     print("Database initialized.")
 
-def get_competing_jobs(company, exclude_job_id):
+def get_competing_jobs(company, exclude_job_id, track=None):
     # Not 'approved': an approval is a person's decision, and the comparison is
     # allowed to reject what it picked, never what they picked.
+    # Only within one track: a consulting role and a project-manager role at
+    # the same firm are two options, not one. A job scored before tracks
+    # existed has none and is still compared.
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT job_id, title, description
         FROM jobs
         WHERE company = ? AND job_id != ? AND status IN ('to_apply', 'generated', 'synced', 'backlog')
-    ''', (company, exclude_job_id))
+          AND (? IS NULL OR track IS NULL OR track = ?)
+    ''', (company, exclude_job_id, track, track))
     jobs = cursor.fetchall()
     conn.close()
     return jobs

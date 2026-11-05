@@ -29,6 +29,10 @@ Whatever the score, you MUST also report these facts about the job itself:
 - "canton": for a job in Switzerland, its canton as the two-letter code (VD, GE, ZH, ...); else null.
 Report them as facts, independently of the rules: the location rules are checked against them afterwards.
 
+Whatever the score, you MUST also file the job under one of my search tracks, as "track":
+{tracks}
+Give the track's name exactly as written before the colon. Pick the track the role itself belongs to, by what the job is, not by its title alone. If none fits, output "Other".
+
 Whatever the score, you MUST determine:
 - "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR", or a day rate for contract roles) based on the location, role, and typical market rates. Use the advert's own figure when it states one. If completely unknown, output "Unknown".
 
@@ -49,5 +53,6 @@ Your response must be valid JSON in the following format:
     "jd_language": "English",
     "work_arrangement": "hybrid",
     "country": "Switzerland",
-    "canton": "VD"
+    "canton": "VD",
+    "track": "Enterprise architect"
 }

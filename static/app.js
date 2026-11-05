@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const legacy = new URLSearchParams(window.location.search).get('job_id');
     if (legacy) history.replaceState(null, '', window.location.pathname + '#job=' + encodeURIComponent(legacy));
     window.addEventListener('hashchange', openLinkedJob);
-    loadApplyPolicy().then(fetchJobs).then(openLinkedJob);
+    Promise.all([loadApplyPolicy(), loadTracks()]).then(fetchJobs).then(openLinkedJob);
     pollScraperStatus();
 
     const modal = document.getElementById('job-modal');
@@ -57,7 +57,8 @@ window.filterColumn = function(control) {
     column.querySelectorAll('.card').forEach(card => {
         const textOk = !text || card.textContent.toLowerCase().includes(text);
         const scoreOk = minScore === null || Number(card.dataset.score || 0) >= minScore;
-        card.style.display = textOk && scoreOk ? 'block' : 'none';
+        const trackOk = trackMatches(card.dataset.track);
+        card.style.display = textOk && scoreOk && trackOk ? 'block' : 'none';
         // An action applies to what you can see: hiding a card deselects it.
         if (card.style.display === 'none') selectionFor(column.dataset.status).delete(card.dataset.id);
     });
@@ -67,9 +68,54 @@ window.filterColumn = function(control) {
 // Re-apply every active filter, e.g. after the board is redrawn.
 function reapplyFilters() {
     document.querySelectorAll('.kanban-column').forEach(column => {
-        const active = [...column.querySelectorAll('.column-filter')].some(c => c.value);
+        const active = trackFilter || [...column.querySelectorAll('.column-filter')].some(c => c.value);
         if (active) window.filterColumn(column.querySelector('.column-filter'));
     });
+}
+
+// The board-wide track filter: one search track, "Other", or the jobs not
+// filed yet. It applies to every column, together with each column's own.
+const NO_TRACK = '__none__';
+let trackFilter = '';
+let configuredTracks = [];
+try { trackFilter = localStorage.getItem('trackFilter') || ''; } catch (e) {}
+
+function trackMatches(track) {
+    if (!trackFilter) return true;
+    return trackFilter === NO_TRACK ? !track : track === trackFilter;
+}
+
+window.setTrackFilter = function(value) {
+    trackFilter = value;
+    try { localStorage.setItem('trackFilter', value); } catch (e) {}
+    document.querySelectorAll('.kanban-column').forEach(column => {
+        const control = column.querySelector('.column-filter');
+        if (control) window.filterColumn(control);
+    });
+}
+
+async function loadTracks() {
+    try { configuredTracks = await (await fetch('/api/tracks')).json(); } catch (e) { configuredTracks = []; }
+}
+
+// The filter's options, with how many jobs on the board are in each: the
+// configured tracks in their order, then any other name jobs carry.
+function renderTrackFilter() {
+    const select = document.getElementById('track-filter');
+    if (!select) return;
+    const counts = {};
+    let unfiled = 0;
+    allJobs.forEach(job => {
+        if (job.track) counts[job.track] = (counts[job.track] || 0) + 1; else unfiled++;
+    });
+    const names = [...configuredTracks];
+    Object.keys(counts).forEach(name => { if (!names.includes(name)) names.push(name); });
+    const esc = t => String(t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    select.innerHTML = `<option value="">All tracks (${allJobs.length})</option>`
+        + names.map(name => `<option value="${esc(name)}">${esc(name)} (${counts[name] || 0})</option>`).join('')
+        + `<option value="${NO_TRACK}">Not filed yet (${unfiled})</option>`;
+    if (trackFilter && ![...select.options].some(o => o.value === trackFilter)) trackFilter = '';
+    select.value = trackFilter;
 }
 
 // Restore a remembered minimum score once the page has loaded.
@@ -171,6 +217,7 @@ async function fetchJobs() {
     try {
         const response = await fetch('/api/jobs');
         allJobs = await response.json();
+        renderTrackFilter();
         renderBoard();
         renderStats();
     } catch (error) {
@@ -341,6 +388,7 @@ function jobMetaTags(job, columnStatus) {
     if (recruiterStr) metaHtml += `<span class="meta-tag">${recruiterStr}</span>`;
     // Promoted listings are paid placements, so the evaluator marks them down.
     if (job.is_promoted) metaHtml += `<span class="meta-tag meta-promoted" title="Promoted (paid) listing">📢 Promoted</span>`;
+    if (job.track) metaHtml += `<span class="meta-tag meta-track" title="Search track">🧭 ${String(job.track).replace(/</g, '&lt;')}</span>`;
     // Every card says where the job came from (Adzuna's terms require its label).
     const origin = jobSource(job);
     metaHtml += `<span class="meta-tag ${origin.cls}" title="${origin.title.replace(/"/g, '&quot;')}">${origin.label}</span>`;
@@ -384,6 +432,7 @@ function createCard(job, columnStatus) {
     card.draggable = true;
     card.dataset.id = job.job_id;
     card.dataset.score = job.score || 0;
+    card.dataset.track = job.track || '';
     const metaHtml = jobMetaTags(job, columnStatus);
 
     card.innerHTML = `

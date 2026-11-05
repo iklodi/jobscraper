@@ -1,5 +1,5 @@
 You are an expert career advisor. I am applying for the '{title}' role.
-{custom_instructions}
+{custom_instructions}{track_instruction}
 Here is the job description:
 {description}
 

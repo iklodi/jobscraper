@@ -159,7 +159,7 @@ Everything personal sits in `CVS_DIR` and is never committed:
 | `docs/<CV_TEMPLATE_NAME>` | Your CV. Keep the skills in one paragraph separated by ` · ` — the generator's prompt has the model rewrite that paragraph whole. |
 | `docs/<CL_TEMPLATE_NAME>` | Cover letter template. Must keep `[COMPANY]`, `[LOCATION]` and `[DATE]` in the addressee block. |
 | `docs/<DOSSIER_NAME>` | Career history in markdown. The scorer and generator both read it. |
-| `search_criteria.md` | Keywords, locations and job types. A keyword can pin its own: `- Interim Manager @ Switzerland / France`. |
+| `search_criteria.md` | Keywords, locations and job types. A keyword can pin its own: `- Interim Manager @ Switzerland / France`. An optional `# Tracks` section (`- Name: what the track is`) files every scored job under one track, and the board filters by them. |
 | `rules.md` | Scoring rules, injected into the evaluator prompt. |
 | `profile.yaml` | Answer bank for application forms — identity, work authorisation, salary and contract rates, screening answers. The applier never invents an answer; anything missing is reported so you can add it here. |
 | `attach/` | Diplomas, reference letters and anything else a form may ask to upload, wired up under `attachments:` in `profile.yaml`. |

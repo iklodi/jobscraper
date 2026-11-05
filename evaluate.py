@@ -53,6 +53,7 @@ EVAL_SCHEMA = {
         'work_arrangement': {'type': 'string', 'enum': ['on-site', 'hybrid', 'remote', 'unknown']},
         'country': {'type': ['string', 'null']},
         'canton': {'type': ['string', 'null']},
+        'track': {'type': ['string', 'null']},
     },
     'required': ['work_arrangement', 'country', 'canton', 'score', 'reasoning'],
 }
@@ -164,6 +165,32 @@ def location_gate(result):
         return f"Location mismatch: hybrid in {country or 'an unknown country'}"
     return None
 
+OTHER_TRACK = 'Other'
+
+
+def get_tracks():
+    # Imported here, as adzuna.py does: scraper pulls in Playwright.
+    from scraper import get_tracks as read_tracks
+    return read_tracks()
+
+
+def tracks_text(tracks):
+    """The track list for the prompt, one "- Name: description" per line."""
+    return '\n'.join(f'- {name}: {about}' if about else f'- {name}' for name, about in tracks)
+
+
+def normalise_track(value, tracks):
+    """The configured track name the model meant (case and spacing aside), or
+    "Other" - never a name it made up. None when no tracks are configured."""
+    if not tracks:
+        return None
+    wanted = ' '.join(str(value or '').split()).lower()
+    for name, _ in tracks:
+        if ' '.join(name.split()).lower() == wanted:
+            return name
+    return OTHER_TRACK
+
+
 def get_evaluation_rules():
     rules_path = os.path.join(CVS_DIR, 'rules.md')
     if not os.path.exists(rules_path):
@@ -197,6 +224,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
     result = _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_location, job_desc,
                             cv_text, previous_applications, rules_text, is_promoted, custom_instructions)
     if result:
+        result['track'] = normalise_track(result.get('track'), get_tracks())
         broken = location_gate(result)
         if broken and (result.get('score') or 0) > 2:
             result['score'] = 2
@@ -214,7 +242,8 @@ def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_locat
                             .replace('{job_desc}', job_desc) \
                             .replace('{rules_text}', rules_text) \
                             .replace('{previous_applications}', chr(10).join(previous_applications)) \
-                            .replace('{min_score}', str(min_pass_score()))
+                            .replace('{min_score}', str(min_pass_score())) \
+                            .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)')
     
     if custom_instructions:
         prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER FOR RE-EVALUATION:\n{custom_instructions}\n"
@@ -376,8 +405,9 @@ def run_evaluation():
             # One role per company only makes sense for a direct employer. A
             # recruiter or job aggregator posts for many unrelated
             # clients under one name, and comparing those rejected real matches.
+            track = result.get('track')
             if score >= min_pass_score() and not is_recruiter:
-                competing = db.get_competing_jobs(company, job_id)
+                competing = db.get_competing_jobs(company, job_id, track)
                 if competing:
                     c_id, c_title, c_desc = competing[0]
                     print(f"--> Found competing active job for {company}: '{c_title}'. Invoking AI comparison...")
@@ -414,7 +444,8 @@ def run_evaluation():
                 # run with nothing over the bar produces a summary with nothing to click.
                 eval_stats['near_misses'].append(entry)
 
-            db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter, hiring_manager_name, jd_language)
+            db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
+                                hiring_manager_name, jd_language, track)
         else:
             print("--> Failed to evaluate.")
             
@@ -470,11 +501,63 @@ def evaluate_single_job(job_id, custom_instructions=None):
         jd_language = result.get('jd_language', None)
         print(f"--> Score: {score}/10")
         
-        db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter, hiring_manager_name, jd_language)
+        db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
+                            hiring_manager_name, jd_language, result.get('track'))
         return True
     else:
         print("Failed to evaluate.")
         return False
 
+TRACK_SCHEMA = {
+    'type': 'object',
+    'properties': {'track': {'type': 'string'}},
+    'required': ['track'],
+}
+# Columns a person works from; Rejected and Pending Eval are left out unless asked.
+ACTIVE_STATUSES = ('to_apply', 'generated', 'approved', 'ready_to_submit', 'easy_apply',
+                   'applied', 'interviewing', 'failed', 'account_required')
+
+
+def classify_tracks(statuses=ACTIVE_STATUSES, ask=None):
+    """File jobs scored before tracks existed under one, without re-scoring
+    them: a short prompt per job. Returns {track: jobs filed}.
+    `ask` is for tests; by default the Infomaniak model answers."""
+    tracks = get_tracks()
+    if not tracks:
+        print('No "# Tracks" section in search_criteria.md - nothing to file jobs under.')
+        return {}
+    ask = ask or (lambda prompt: infomaniak.chat_json(prompt, TRACK_SCHEMA))
+    template = load_prompt('track_prompt.txt')
+    conn = db.get_connection()
+    marks = ','.join('?' * len(statuses))
+    jobs = conn.execute(f"SELECT job_id, title, company, description FROM jobs "
+                        f"WHERE track IS NULL AND status IN ({marks})", statuses).fetchall()
+    conn.close()
+    counts = {}
+    for index, (job_id, title, company, description) in enumerate(jobs, 1):
+        prompt = template.replace('{tracks}', tracks_text(tracks)) \
+                         .replace('{job_title}', title or '') \
+                         .replace('{job_company}', company or '') \
+                         .replace('{job_desc}', (description or '')[:3000])
+        result = ask(prompt)
+        if not result:
+            print(f'[{index}/{len(jobs)}] {job_id}: no answer, left unfiled')
+            continue
+        track = normalise_track(result.get('track'), tracks)
+        conn = db.get_connection()
+        conn.execute('UPDATE jobs SET track = ? WHERE job_id = ?', (track, job_id))
+        conn.commit()
+        conn.close()
+        counts[track] = counts.get(track, 0) + 1
+        print(f'[{index}/{len(jobs)}] {title} at {company}: {track}')
+    return counts
+
+
 if __name__ == '__main__':
-    run_evaluation()
+    import sys
+    if '--classify-tracks' in sys.argv:
+        # --all includes Pending Eval and Rejected too.
+        print(classify_tracks(('new', 'scored', 'rejected') + ACTIVE_STATUSES
+                              if '--all' in sys.argv else ACTIVE_STATUSES))
+    else:
+        run_evaluation()

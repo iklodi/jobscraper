@@ -163,7 +163,7 @@ that breaks them at 2. Asked to apply such a rule itself, gemma called an
 on-site Geneva role compliant and scored it 9. A job abroad in one of the
 `RELOCATION_COUNTRIES` passes those rules when the model's `salary_chf_annual`
 (its pay estimate as one annual CHF figure) reaches `RELOCATION_MIN_SALARY_CHF`. The "already applied" list
-holds only real applications (Applied, Interviewing, Offer, or Rejected after
+holds only real applications (Applied, Interviewing, Offer, Declined, or Rejected after
 Applied) at the job's own company: the full list, with every hand-rejected
 job in it, was 40,000+ characters that buried the rules.
 
@@ -221,7 +221,8 @@ sign-in wall is reported, not worked around.
 
 ### `app.py` / `static/app.js` / `templates/index.html`
 Flask dashboard. Columns: New, To Do, Approved, Ready to Submit, Applied,
-Interviewing, Failed, Account Required, Rejected — every one ordered by last
+Interviewing, Declined, Failed, Account Required, Discarded (status `rejected`; the
+label changed, the status did not) — every one ordered by last
 modification, newest first. Every card has a checkbox; "Select all" takes the
 cards on screen (not those a filter hides or behind Load More), and while any
 are selected the column offers its moves in a menu (`BULK_ACTIONS` in
@@ -236,20 +237,21 @@ what the next run will search for.
 | Status | Meaning |
 |---|---|
 | `new` | Scraped, not yet scored. |
-| `scored` | Below the bar. Shown on Rejected for `REJECTED_BOARD_DAYS`, then hidden — the row stays, so the scraper still recognises the job. |
-| `rejected` | Rejected by hand, or by the same-company comparison. Same board rule. |
+| `scored` | Below the bar. Shown on Discarded for `REJECTED_BOARD_DAYS`, then hidden — the row stays, so the scraper still recognises the job. |
+| `rejected` | Discarded: by hand, by the same-company comparison, as a duplicate, or never fetched. Same board rule. Shown as "Discarded". |
 | `to_apply` | At or above the bar. (`generated` is the same column, with documents.) |
 | `approved` | Approved by hand; documents are written on this transition. |
 | `ready_to_submit` | Form filled, waiting for a person to send it. |
 | `easy_apply` | LinkedIn Easy Apply only — left for a person, nothing clicked. Shown with Ready to Submit. |
 | `applied` | Submitted — set only when the applier pressed submit itself, or by hand. |
 | `interviewing` | Set by hand. |
+| `declined` | The employer turned the application down: by hand (with a reason) or from LinkedIn's decline email. Never hidden. |
 | `account_required` | The employer wants an account before the form can be filled. |
 | `failed` | No apply button, closed listing, CAPTCHA, or unmappable fields. |
 | `generating` / `evaluating` / `applying` | Transient, while a background run holds the job. |
 
 **Protected statuses.** `approved`, `ready_to_submit`, `easy_apply`,
-`applied`, `interviewing` and `account_required` record a person's decision
+`applied`, `interviewing`, `declined` and `account_required` record a person's decision
 (`db.PROTECTED_STATUSES`). Re-evaluating, regenerating or re-adding a job by
 link must leave it in one of those — a new score informs, it does not undo an
 application.

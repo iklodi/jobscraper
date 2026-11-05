@@ -148,7 +148,8 @@ h1 {
 #col-applied h2 { border-top: 3px solid #ec4899; }
 #col-interviewing h2 { border-top: 3px solid #f97316; }
 #col-offer h2 { border-top: 3px solid #22c55e; }
-#col-rejected h2 { border-top: 3px solid #ef4444; }
+#col-declined h2 { border-top: 3px solid #b91c1c; }
+#col-rejected h2 { border-top: 3px solid #64748b; }
 
 .kanban-cards {
     flex: 1;

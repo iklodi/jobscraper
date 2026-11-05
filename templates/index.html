@@ -82,7 +82,7 @@
                 <div class="column-header">
                     <h2>To Do (Backlog)</h2>
                     <button class="btn-clear-column" onclick="clearBacklog()"
-                            title="Move every job in To Do to Rejected">Clear</button>
+                            title="Move every job in To Do to Discarded">Clear</button>
                 </div>
                 <div class="column-filters">
                     <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
@@ -99,7 +99,7 @@
                 <div class="column-header">
                     <h2>Failed</h2>
                     <button class="btn-clear-column" onclick="clearFailed()"
-                            title="Move every job in Failed to Rejected">Clear</button>
+                            title="Move every job in Failed to Discarded">Clear</button>
                 </div>
                 <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                 <div class="kanban-cards"></div>
@@ -130,8 +130,14 @@
                 <div class="kanban-cards"></div>
             </div>
 
+            <div class="kanban-column" id="col-declined" data-status="declined">
+                <h2>Declined</h2>
+                <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
+                <div class="kanban-cards"></div>
+            </div>
+
             <div class="kanban-column" id="col-rejected" data-status="rejected">
-                <h2>Rejected</h2>
+                <h2>Discarded</h2>
                 <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                 <div class="kanban-cards"></div>
             </div>

@@ -92,10 +92,10 @@ def notes(job_id):
 
 def test_a_rejection_matching_one_applied_job_moves_it(board):
     lines = outcomes.ingest(FakeIMAP([rejected('Senior Consultant, Lead Architecture', 'Example Conseil', 1)]))
-    assert status('1') == 'rejected'
+    assert status('1') == 'declined'
     assert 'declined' in notes('1')
     assert lines == ['LinkedIn: Senior Consultant, Lead Architecture (m/w/d) at Example Conseil - '
-                     'application declined; moved to Rejected.']
+                     'application declined; moved to Declined.']
     assert FakeIMAP.readonly is True
 
 

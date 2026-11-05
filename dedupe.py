@@ -81,9 +81,9 @@ def duplicate_of(title, company, exclude=None):
 
 
 # Which copy of a duplicated advert to keep: the one furthest along.
-KEEP_ORDER = ('offer', 'interviewing', 'applied', 'ready_to_submit', 'easy_apply', 'approved',
+KEEP_ORDER = ('offer', 'interviewing', 'declined', 'applied', 'ready_to_submit', 'easy_apply', 'approved',
               'account_required', 'generated', 'to_apply', 'failed', 'new', 'scored', 'rejected')
-APPLIED = {'applied', 'interviewing', 'offer'}
+APPLIED = {'applied', 'interviewing', 'offer', 'declined'}
 SWEEPABLE = {'new', 'to_apply', 'generated'}
 
 

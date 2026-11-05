@@ -121,14 +121,15 @@ def compare_jobs(groq_client, gemini_client, comp_prompt):
 
 def get_previous_applications():
     """(company, title) of every application actually sent: Applied,
-    Interviewing or Offer, or Rejected after having been Applied (a decline).
+    Interviewing, Offer or Declined, or Rejected after having been Applied (a
+    decline recorded before the Declined column existed).
     Plain 'rejected' also covers jobs turned down by hand or by the
     same-company comparison - never applied to - and listing those told the
     model they were applications."""
     conn = db.get_connection()
     rows = conn.execute('''
         SELECT company, title FROM jobs j
-        WHERE status IN ('applied', 'interviewing', 'offer')
+        WHERE status IN ('applied', 'interviewing', 'offer', 'declined')
            OR (status = 'rejected' AND EXISTS (SELECT 1 FROM job_history h
                 WHERE h.job_id = j.job_id AND h.new_status = 'applied'))''').fetchall()
     conn.close()
@@ -529,7 +530,7 @@ TRACK_SCHEMA = {
 }
 # Columns a person works from; Rejected and Pending Eval are left out unless asked.
 ACTIVE_STATUSES = ('to_apply', 'generated', 'approved', 'ready_to_submit', 'easy_apply',
-                   'applied', 'interviewing', 'failed', 'account_required')
+                   'applied', 'interviewing', 'declined', 'failed', 'account_required')
 
 
 def classify_tracks(statuses=ACTIVE_STATUSES, ask=None):

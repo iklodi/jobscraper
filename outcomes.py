@@ -69,9 +69,9 @@ def handle(kind, company, role, when):
                 f'so nothing was changed.')
     job_id, title, _ = matches[0]
     if kind == 'rejected':
-        db.update_job_status(job_id, 'rejected')
+        db.update_job_status(job_id, 'declined')
         db.add_job_note(job_id, f'LinkedIn: application declined ({when}).')
-        return f'LinkedIn: {title} at {company} - application declined; moved to Rejected.'
+        return f'LinkedIn: {title} at {company} - application declined; moved to Declined.'
     db.add_job_note(job_id, f'LinkedIn: application viewed by {company} ({when}).')
     return f'LinkedIn: {title} at {company} - application viewed.'
 

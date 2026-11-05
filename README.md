@@ -20,7 +20,7 @@ Playwright browser using your own logged-in LinkedIn session.
 | Stage | What happens |
 |---|---|
 | **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. In either mode, `adzuna.py` runs the same searches through Adzuna's job API. |
-| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Rejected**. Re-scoring never moves a job you approved or applied to. |
+| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Discarded**. Re-scoring never moves a job you approved or applied to. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
 | **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
 
@@ -79,7 +79,7 @@ Know the trade-offs:
 With `IMAP_*` set, each run also reads LinkedIn's application-status emails
 from `jobs-noreply@linkedin.com`, in both modes. It only ever looks at jobs in
 Applied. A decline that names the company and the role of exactly one of them
-moves it to Rejected with a note. "Your application was viewed" adds a note.
+moves it to Declined with a note. "Your application was viewed" adds a note.
 Anything that matches no job, or more than one, is listed in the summary email
 and left alone.
 

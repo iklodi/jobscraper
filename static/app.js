@@ -255,6 +255,7 @@ function renderBoard() {
         'ready_to_submit': document.querySelector('#col-ready-to-submit .kanban-cards'),
         'applied': document.querySelector('#col-applied .kanban-cards'),
         'interviewing': document.querySelector('#col-interviewing .kanban-cards'),
+        'declined': document.querySelector('#col-declined .kanban-cards'),
         'rejected': document.querySelector('#col-rejected .kanban-cards')
     };
 
@@ -265,7 +266,7 @@ function renderBoard() {
 
     // Group jobs by status
     const groupedJobs = {
-        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'ready_to_submit': [], 'applied': [], 'interviewing': [], 'rejected': []
+        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'ready_to_submit': [], 'applied': [], 'interviewing': [], 'declined': [], 'rejected': []
     };
 
     allJobs.forEach(job => {
@@ -407,7 +408,7 @@ function jobMetaTags(job, columnStatus) {
 const STATUS_NAMES = { new: 'New', to_apply: 'To Do', generated: 'To Do', approved: 'Approved',
     ready_to_submit: 'Ready to Submit', easy_apply: 'Ready to Submit (Easy Apply)', applied: 'Applied',
     interviewing: 'Interviewing', failed: 'Failed', account_required: 'Account Required',
-    rejected: 'Rejected', scored: 'Rejected (below the bar)', generating: 'Writing documents',
+    declined: 'Declined by the employer', rejected: 'Discarded', scored: 'Discarded (below the bar)', generating: 'Writing documents',
     evaluating: 'Scoring', applying: 'Applying' };
 
 function jobDetailTags(job) {
@@ -542,7 +543,7 @@ function openJobDetails(jobId) {
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">✓ Approve</button>
                 ${applyNowButton(job.job_id)}
                 ${fillNowButton(job.job_id)}
-                <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
+                <button class="btn btn-primary" style="background-color: #ef4444; border-color: #ef4444;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Discard</button>
             `;
         } else if (job.status === 'approved') {
             contextButtonsHtml = `
@@ -580,11 +581,21 @@ function openJobDetails(jobId) {
                 ${fillNowButton(job.job_id)}
                 <button class="btn btn-primary" onclick="showApplyOptions('${job.job_id}')">Mark as Applied</button>
                 <button class="btn btn-primary" style="background-color: #22c55e; border-color: #22c55e;" onclick="changeJobStatus('${job.job_id}', 'approved')">Return to Approved</button>
-                <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Reject</button>
+                <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="changeJobStatus('${job.job_id}', 'rejected')">✗ Discard</button>
             `;
         } else if (job.status === 'applied') {
             contextButtonsHtml = `
                 <button class="btn btn-primary" onclick="changeJobStatus('${job.job_id}', 'interviewing')">Mark as Interviewing</button>
+                <button class="btn" onclick="showDeclinedOptions('${job.job_id}')">Mark as Declined</button>
+            `;
+        } else if (job.status === 'interviewing') {
+            contextButtonsHtml = `
+                <button class="btn" onclick="showDeclinedOptions('${job.job_id}')">Mark as Declined</button>
+            `;
+        } else if (job.status === 'declined') {
+            contextButtonsHtml = `
+                <button class="btn" onclick="changeJobStatus('${job.job_id}', 'applied')">Back to Applied</button>
+                <button class="btn" onclick="changeJobStatus('${job.job_id}', 'interviewing')">Back to Interviewing</button>
             `;
         }
 
@@ -599,6 +610,11 @@ function openJobDetails(jobId) {
                     <button class="btn btn-primary" onclick="submitApplied('${job.job_id}')">Save & Mark Applied</button>
                 </div>
                 
+                <div id="declined-options-${job.job_id}" style="display: none; margin-top: 15px; margin-bottom: 15px;">
+                    <textarea id="declined-notes-${job.job_id}" placeholder="Why the employer declined (their reason, or your guess)..." style="width: 100%; height: 80px; padding: 10px; border-radius: 8px; border: 1px solid rgba(185,28,28,0.4); background: rgba(0,0,0,0.2); color: white; margin-bottom: 10px; font-family: inherit; resize: vertical;"></textarea>
+                    <button class="btn" style="background-color: #b91c1c; border-color: #b91c1c; color: white;" onclick="submitDeclined('${job.job_id}')">Save & Mark Declined</button>
+                </div>
+
                 <div id="failed-options-${job.job_id}" style="display: none; margin-top: 15px; margin-bottom: 15px;">
                     <textarea id="failed-notes-${job.job_id}" placeholder="Reason for failure..." style="width: 100%; height: 80px; padding: 10px; border-radius: 8px; border: 1px solid rgba(239,68,68,0.3); background: rgba(0,0,0,0.2); color: white; margin-bottom: 10px; font-family: inherit; resize: vertical;"></textarea>
                     <button class="btn" style="background-color: #ef4444; border-color: #ef4444; color: white;" onclick="submitFailed('${job.job_id}')">Save & Mark Failed</button>
@@ -846,12 +862,12 @@ setInterval(() => {
     }
 }, 30000);
 
-// Empty the To Do column: every job in it moves to Rejected, each with its
+// Empty the To Do column: every job in it moves to Discarded, each with its
 // history entry, after a confirmation that says how many.
 window.clearBacklog = async function() {
     const count = allJobs.filter(j => ['to_apply', 'generated'].includes(j.status)).length;
     if (!count) { alert('To Do is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in To Do to Rejected?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    if (!confirm(`Move all ${count} jobs in To Do to Discarded?\n\nThey stay in the database and can be moved back one by one.`)) return;
     try {
         const res = await fetch('/api/backlog/clear', { method: 'POST' });
         const data = await res.json();
@@ -866,7 +882,7 @@ window.clearBacklog = async function() {
 window.clearFailed = async function() {
     const count = allJobs.filter(j => j.status === 'failed').length;
     if (!count) { alert('Failed is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in Failed to Rejected?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    if (!confirm(`Move all ${count} jobs in Failed to Discarded?\n\nThey stay in the database and can be moved back one by one.`)) return;
     try {
         const res = await fetch('/api/failed/clear', { method: 'POST' });
         const data = await res.json();
@@ -892,7 +908,8 @@ function isSelected(status, jobId) {
 const FILL = { label: '📝 Fill Now', run: 'fill' };
 const APPLY = { label: '📤 Apply Now', run: 'apply' };
 const REEVALUATE = { label: 'Re-evaluate', run: 'reevaluate' };
-const REJECT = { label: '✗ Reject', status: 'rejected' };
+const REJECT = { label: '✗ Discard', status: 'rejected' };
+const DECLINED = { label: 'Mark as Declined', status: 'declined' };
 const BULK_ACTIONS = {
     new: [REEVALUATE, REJECT],
     to_apply: [{ label: '✓ Approve', status: 'approved' }, FILL, APPLY, REEVALUATE, REJECT],
@@ -905,8 +922,9 @@ const BULK_ACTIONS = {
                { label: 'Mark as Account Required', status: 'account_required' }, REJECT],
     ready_to_submit: [{ label: 'Mark as Applied', status: 'applied' }, FILL,
                       { label: 'Mark as Failed', status: 'failed' }],
-    applied: [{ label: 'Mark as Interviewing', status: 'interviewing' }, { label: 'Mark as Rejected', status: 'rejected' }],
-    interviewing: [{ label: 'Back to Applied', status: 'applied' }, { label: 'Mark as Rejected', status: 'rejected' }],
+    applied: [{ label: 'Mark as Interviewing', status: 'interviewing' }, DECLINED],
+    interviewing: [{ label: 'Back to Applied', status: 'applied' }, DECLINED],
+    declined: [{ label: 'Back to Applied', status: 'applied' }, { label: 'Back to Interviewing', status: 'interviewing' }],
     rejected: [{ label: 'Return to To Do', status: 'to_apply' }, REEVALUATE],
 };
 
@@ -1002,18 +1020,25 @@ window.runBulkAction = async function(status, menu) {
         if (await triggerApply(ids, action.run === 'apply')) { selected.clear(); syncSelection(status); }
         return;
     }
+    let note = null;
+    if (action.status === 'declined') {
+        note = prompt(`Why did the employer decline ${n === '1 job' ? 'it' : 'them'}? (Saved on each job; leave empty for none.)`);
+        if (note === null) return;                 // Cancel
+        note = note.trim() || null;
+    }
     const question = action.run === 'reevaluate'
         ? `Re-evaluate ${n}? They are scored again one after another; jobs you approved or applied to stay where they are.`
         : `${action.label.replace(/^[^A-Za-z]+/, '')}: ${n}?`
           + (action.status === 'approved' ? '\n\nDocuments are written for each one that has none, one after another.' : '');
-    if (!confirm(question)) return;
+    // Declining already asked for the reason; that answer is the confirmation.
+    if (action.status !== 'declined' && !confirm(question)) return;
     try {
         const res = await fetch('/api/jobs/bulk', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(action.run === 'reevaluate'
                 ? { job_ids: ids, action: 'reevaluate' }
-                : { job_ids: ids, action: 'status', status: action.status })
+                : { job_ids: ids, action: 'status', status: action.status, notes: note })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
@@ -1099,6 +1124,35 @@ window.submitApplied = async function(jobId) {
         if (idx > -1) {
             allJobs[idx].status = 'applied';
             allJobs[idx].application_notes = notes;
+            renderBoard();
+            renderStats();
+            closeModal();
+        }
+    } catch(e) {
+        alert("Failed to update status: " + e);
+    }
+}
+
+window.showDeclinedOptions = function(jobId) {
+    document.getElementById(`declined-options-${jobId}`).style.display = 'block';
+    document.getElementById(`declined-notes-${jobId}`).focus();
+};
+
+// Like Mark as Failed: the reason goes into the job's notes and its history.
+window.submitDeclined = async function(jobId) {
+    const notes = document.getElementById(`declined-notes-${jobId}`).value.trim();
+    if (!notes && !confirm('Mark as declined without a reason?')) return;
+    try {
+        const res = await fetch(`/api/jobs/${jobId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(notes ? { status: 'declined', notes } : { status: 'declined' })
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        const idx = allJobs.findIndex(j => j.job_id === jobId);
+        if (idx > -1) {
+            allJobs[idx].status = 'declined';
+            if (notes) allJobs[idx].application_notes = notes;
             renderBoard();
             renderStats();
             closeModal();

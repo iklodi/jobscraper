@@ -128,7 +128,7 @@ def clear_failed():
 # Where a bulk action on the board may move jobs: the columns a person
 # decides on. The transient statuses belong to a background run.
 BULK_STATUSES = ('to_apply', 'approved', 'failed', 'account_required', 'applied',
-                 'interviewing', 'rejected')
+                 'interviewing', 'declined', 'rejected')
 BUSY_STATUSES = ('generating', 'evaluating', 'applying')
 
 def bg_bulk_generate(job_ids):
@@ -156,6 +156,7 @@ def bulk_action():
     job_ids = [str(j) for j in data.get('job_ids') or []]
     action = data.get('action')
     new_status = data.get('status')
+    notes = (data.get('notes') or '').strip() or None
     if not job_ids:
         return jsonify({'error': 'No jobs selected'}), 400
     if action not in ('status', 'reevaluate'):
@@ -191,6 +192,12 @@ def bulk_action():
             INSERT INTO job_history (job_id, event_type, old_status, new_status, note, created_at)
             VALUES (?, 'status_change', ?, ?, 'Bulk action', ?)
         ''', (job_id, old_status, new_status, now))
+        # A reason given with the move (Mark as Declined asks for one) is
+        # stored as the detail view stores it: the job's notes and a history entry.
+        if notes:
+            conn.execute('UPDATE jobs SET application_notes = ? WHERE job_id = ?', (notes, job_id))
+            conn.execute("INSERT INTO job_history (job_id, event_type, note, created_at) "
+                         "VALUES (?, 'note_added', ?, ?)", (job_id, notes, now))
         # Approving commissions the documents, as it does one job at a time.
         if new_status == 'approved' and not get_files_for_job(job_id):
             to_generate.append(job_id)

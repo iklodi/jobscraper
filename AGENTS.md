@@ -220,7 +220,7 @@ read in a fresh `chromium.launch()` browser, never the profile, and a LinkedIn
 sign-in wall is reported, not worked around.
 
 ### `app.py` / `static/app.js` / `templates/index.html`
-Flask dashboard. Columns: New, To Do, Approved, Ready to Submit, Applied,
+Flask dashboard. Columns: New, To Do, Approved, Applied,
 Interviewing, Declined, Failed, Account Required, Discarded (status `rejected`; the
 label changed, the status did not) — every one ordered by last
 modification, newest first. Every card has a checkbox; "Select all" takes the
@@ -241,8 +241,8 @@ what the next run will search for.
 | `rejected` | Discarded: by hand, by the same-company comparison, as a duplicate, or never fetched. Same board rule. Shown as "Discarded". |
 | `to_apply` | At or above the bar. (`generated` is the same column, with documents.) |
 | `approved` | Approved by hand; documents are written on this transition. |
-| `ready_to_submit` | Form filled, waiting for a person to send it. |
-| `easy_apply` | LinkedIn Easy Apply only — left for a person, nothing clicked. Shown with Ready to Submit. |
+| `ready_to_submit` | Form filled, open in Chrome, waiting for a person to send it. Shown in Approved, tagged "Form filled" — no column of its own. |
+| `easy_apply` | LinkedIn Easy Apply only — left for a person, nothing clicked. Shown in Approved, tagged. |
 | `applied` | Submitted — set only when the applier pressed submit itself, or by hand. |
 | `interviewing` | Set by hand. |
 | `declined` | The employer turned the application down: by hand (with a reason) or from LinkedIn's decline email. Never hidden. |
@@ -333,7 +333,7 @@ account — the most bot-like thing this tool could do with it, for a saving of
 about three clicks, against the risk of a restricted account and a lost
 network. The applier reads the apply control's accessible name and, if it says
 "Easy Apply", stops *without clicking*: the job becomes `easy_apply` with a
-direct link, shown in the Ready to Submit column. Do not add Easy Apply
+direct link, shown in the Approved column with an Easy Apply tag. Do not add Easy Apply
 automation back.
 
 Only external applications are automated: the applier follows the posting's

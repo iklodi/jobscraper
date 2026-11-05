@@ -252,7 +252,6 @@ function renderBoard() {
         'failed': document.querySelector('#col-failed .kanban-cards'),
         'account_required': document.querySelector('#col-account-required .kanban-cards'),
         'approved': document.querySelector('#col-approved .kanban-cards'),
-        'ready_to_submit': document.querySelector('#col-ready-to-submit .kanban-cards'),
         'applied': document.querySelector('#col-applied .kanban-cards'),
         'interviewing': document.querySelector('#col-interviewing .kanban-cards'),
         'declined': document.querySelector('#col-declined .kanban-cards'),
@@ -266,7 +265,7 @@ function renderBoard() {
 
     // Group jobs by status
     const groupedJobs = {
-        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'ready_to_submit': [], 'applied': [], 'interviewing': [], 'declined': [], 'rejected': []
+        'new': [], 'to_apply': [], 'failed': [], 'account_required': [], 'approved': [], 'applied': [], 'interviewing': [], 'declined': [], 'rejected': []
     };
 
     allJobs.forEach(job => {
@@ -277,9 +276,11 @@ function renderBoard() {
         if (status === 'scored') {
             status = 'rejected';
         }
-        // Easy Apply jobs wait on the candidate just like filled forms do.
-        if (status === 'easy_apply') {
-            status = 'ready_to_submit';
+        // A filled form (open in Chrome, waiting to be sent) and an Easy Apply
+        // job are still approved work waiting on the candidate: they stay in
+        // Approved, with a tag, until moved by hand.
+        if (status === 'ready_to_submit' || status === 'easy_apply') {
+            status = 'approved';
         }
         if (groupedJobs[status]) {
             groupedJobs[status].push(job);
@@ -395,6 +396,7 @@ function jobMetaTags(job, columnStatus) {
     metaHtml += `<span class="meta-tag ${origin.cls}" title="${origin.title.replace(/"/g, '&quot;')}">${origin.label}</span>`;
     if (job.writing_assets) metaHtml += `<span class="meta-tag meta-writing">⏳ Writing documents...</span>`;
     if (job.status === 'easy_apply') metaHtml += `<span class="meta-tag meta-easy" title="Easy Apply is never automated">✋ Easy Apply - by hand</span>`;
+    if (job.status === 'ready_to_submit') metaHtml += `<span class="meta-tag meta-filled" title="The applier filled the form; it is open in Chrome, waiting for you to check and send it">📝 Form filled - send it in Chrome</span>`;
     // On the Applied board the date that matters is when it went out.
     if (columnStatus === 'applied' && (job.applied_at || job.created_at)) {
         metaHtml += `<span class="meta-tag meta-applied-at" title="Applied on">📮 ${
@@ -406,7 +408,7 @@ function jobMetaTags(job, columnStatus) {
 // Everything known about a job, for the detail view: the card's tags plus
 // what there is no room for on the card.
 const STATUS_NAMES = { new: 'New', to_apply: 'To Do', generated: 'To Do', approved: 'Approved',
-    ready_to_submit: 'Ready to Submit', easy_apply: 'Ready to Submit (Easy Apply)', applied: 'Applied',
+    ready_to_submit: 'Approved (form filled)', easy_apply: 'Approved (Easy Apply)', applied: 'Applied',
     interviewing: 'Interviewing', failed: 'Failed', account_required: 'Account Required',
     declined: 'Declined by the employer', rejected: 'Discarded', scored: 'Discarded (below the bar)', generating: 'Writing documents',
     evaluating: 'Scoring', applying: 'Applying' };
@@ -920,8 +922,6 @@ const BULK_ACTIONS = {
     approved: [FILL, APPLY, { label: 'Mark as Applied', status: 'applied' },
                { label: 'Mark as Failed', status: 'failed' },
                { label: 'Mark as Account Required', status: 'account_required' }, REJECT],
-    ready_to_submit: [{ label: 'Mark as Applied', status: 'applied' }, FILL,
-                      { label: 'Mark as Failed', status: 'failed' }],
     applied: [{ label: 'Mark as Interviewing', status: 'interviewing' }, DECLINED],
     interviewing: [{ label: 'Back to Applied', status: 'applied' }, DECLINED],
     declined: [{ label: 'Back to Applied', status: 'applied' }, { label: 'Back to Interviewing', status: 'interviewing' }],
@@ -1215,7 +1215,7 @@ window.triggerScrape = async function(mode = 'full') {
 }
 
 // Fill without sending: same run, the applier just stops at the submit
-// button. Everything lands in Ready to Submit for a human to send.
+// button. Everything stays in Approved, form open in Chrome, for a human to send.
 window.triggerFill = function(jobId = null) {
     return triggerApply(jobId, false);
 }
@@ -1228,9 +1228,9 @@ window.triggerApply = async function(jobId = null, submit = true) {
     const detail = submit
         ? "A browser will open the employer's form, fill it from your profile and SUBMIT it."
             + "\n\nIt will not submit if any required field is empty, any question went "
-            + "unanswered, or a field refused input - those land in 'Ready to Submit' for you instead."
+            + "unanswered, or a field refused input - those stay in 'Approved', form open, for you instead."
         : "A browser will open the employer's form and fill it from your profile, then stop at the "
-            + "submit button.\n\nNothing is sent. The job lands in 'Ready to Submit' so you can "
+            + "submit button.\n\nNothing is sent. The job stays in 'Approved', form open in Chrome, so you can "
             + "check it and submit yourself.";
     if (!confirm(scope + "\n\n" + detail + "\n\nEvery step is screenshotted.")) return;
 

@@ -137,7 +137,13 @@ Playwright over a persistent Chromium profile (`./chrome_profile`) holding the
 logged-in LinkedIn session. Reads `CVS_DIR/search_criteria.md` for keywords,
 locations and job types; a keyword may pin its own locations
 (`- Interim Manager @ Switzerland / France`). Job types map onto LinkedIn's
-`f_JT` filter. `get_tracks()` reads the `# Tracks` section (`- Name: description`). The file wins over the `SEARCH_*` env vars, which apply only when
+`f_JT` filter. `get_tracks()` reads the `# Tracks` section (`- Name: description`).
+Searches go to LinkedIn's AI search (`/jobs/search-results/`, since November
+2026), whose class names are generated: cards are found by their
+`componentkey` (`job-card-component-ref-<id>`), the title by the card's
+"Dismiss <title> job" button, and the description by the detail panel's
+"About the job" section, read only once the address shows the clicked card's
+`currentJobId`. `LINKEDIN_SEARCH_PAGES` (default 1) pages per search. The file wins over the `SEARCH_*` env vars, which apply only when
 it does not exist. Skips jobs already in the database; emails when the session
 has expired and waits five minutes for a login.
 

@@ -21,6 +21,70 @@ JOB_TYPE_CODES = {
 }
 
 
+# LinkedIn's AI job search (late 2026): /jobs/search-results/, markup with
+# generated class names. What stays put is each card's componentkey, which
+# carries the job id, its "Dismiss <title> job" button, and the detail
+# panel's "About the job" section.
+CARD_KEY_PREFIX = 'job-card-component-ref-'
+CARD_SELECTOR = f'div[role="button"][componentkey^="{CARD_KEY_PREFIX}"]'
+
+SCROLL_JS = """sel => {
+    const cards = document.querySelectorAll(sel);
+    if (cards.length) cards[cards.length - 1].scrollIntoView();
+}"""
+
+# One entry per card: id, title, company, location, promoted. The card's
+# lines are the title (twice over, with screen-reader prefixes such as
+# "Selected,"), then company, then location.
+READ_CARDS_JS = """sel => {
+    const seen = new Set(), out = [];
+    for (const card of document.querySelectorAll(sel)) {
+        const id = card.getAttribute('componentkey').replace('""" + CARD_KEY_PREFIX + """', '');
+        if (!/^\\d+$/.test(id) || seen.has(id)) continue;
+        seen.add(id);
+        const lines = [...card.querySelectorAll('p')].map(p => p.innerText.trim()).filter(Boolean);
+        const dismiss = card.querySelector('button[aria-label^="Dismiss "]');
+        let title = dismiss ? dismiss.getAttribute('aria-label').replace(/^Dismiss /, '').replace(/ job$/, '') : '';
+        if (!title) {
+            const spans = card.querySelectorAll('p span');
+            title = spans.length ? spans[spans.length - 1].innerText.trim() : (lines[0] || '');
+        }
+        out.push({id, title: title.trim(), company: lines[1] || '', location: lines[2] || '',
+                  promoted: lines.some(l => /^Promoted\\b/.test(l))});
+    }
+    return out;
+}"""
+
+# The open advert's text: the section headed "About the job", without the
+# heading or the trailing "… more" of a collapsed box.
+READ_DESCRIPTION_JS = """() => {
+    const heading = [...document.querySelectorAll('h2')]
+        .find(h => /^(About the job|À propos de l.offre d.emploi|Info zum Job|Über den Job)/i.test(h.innerText.trim()));
+    if (!heading) return '';
+    const section = heading.parentElement.parentElement;
+    return section.innerText.replace(heading.innerText, '').replace(/…\\s*more\\s*$/, '').trim();
+}"""
+
+
+def search_pages():
+    """Result pages read per keyword and location: LINKEDIN_SEARCH_PAGES
+    (default 1, 25 jobs each). Every page is one more search on the
+    candidate's own account; the alert emails bring most jobs anyway."""
+    try:
+        return max(1, int(os.environ.get('LINKEDIN_SEARCH_PAGES', '1')))
+    except ValueError:
+        return 1
+
+
+def search_results_url(keyword, location, start=0, type_codes=''):
+    """The AI search's results address. It reads the query as a sentence, so
+    the location goes into the keywords as well as its own parameter."""
+    params = {'keywords': f'{keyword} in {location}', 'location': location, 'start': start}
+    if type_codes:
+        params['f_JT'] = type_codes
+    return f"https://www.linkedin.com/jobs/search-results/?{urllib.parse.urlencode(params)}"
+
+
 def get_search_criteria():
     """Read keywords, locations and job types from search_criteria.md (or env)."""
     # search_criteria.md is the source of truth - it is what the dashboard's
@@ -155,87 +219,75 @@ async def run_scraper():
                   + (f" (f_JT={type_codes})" if type_codes else " - none recognised, ignoring"))
         keyword_stats = {k: 0 for k, _ in keyword_specs}
         session_total_added = 0
-        total_pages = sum(len(locs or locations_list) for _, locs in keyword_specs) * 3
+        pages_per_search = search_pages()
+        total_pages = sum(len(locs or locations_list) for _, locs in keyword_specs) * pages_per_search
         pages_processed = 0
 
         for keyword, keyword_locations in keyword_specs:
             for location in (keyword_locations or locations_list):
-                for page_num in range(3): # Scrape up to 3 pages (75 jobs) per keyword/location combo
+                for page_num in range(pages_per_search):
                     if progress_tracker.is_stop_requested():
                         print("Stop requested during scraping!")
                         await browser.close()
                         return keyword_stats
-                    
+
                     pages_processed += 1
                     progress_tracker.set_status(f"Scraping '{keyword}'", pages_processed, total_pages)
-                    start = page_num * 25
-                    params = {'keywords': keyword, 'location': location, 'start': start}
-                    if type_codes:
-                        params['f_JT'] = type_codes
-                    query = urllib.parse.urlencode(params)
-                    search_url = f"https://www.linkedin.com/jobs/search/?{query}"
-                    
+                    search_url = search_results_url(keyword, location, page_num * 25, type_codes)
+
                     print(f"Searching for jobs: {keyword} in {location} (Page {page_num + 1})")
                     try:
                         await page.goto(search_url, timeout=60000)
                     except Exception as e:
                         print(f"Failed to navigate to {search_url}: {e}. Skipping page...")
                         continue
-                    
+
                     try:
-                        await page.wait_for_selector('.job-card-container', timeout=15000)
+                        await page.wait_for_selector(CARD_SELECTOR, timeout=15000)
                     except Exception:
                         print(f"Timeout waiting for job cards for {keyword} in {location} (Page {page_num + 1}). Skipping...")
                         break # No more jobs
-                    
+
                     print("Scrolling to load jobs...")
                     for _ in range(5):
-                        await page.evaluate('''
-                            const cards = document.querySelectorAll('.job-card-container');
-                            if (cards.length > 0) {
-                                cards[cards.length - 1].scrollIntoView();
-                            }
-                        ''')
+                        await page.evaluate(SCROLL_JS, CARD_SELECTOR)
                         await asyncio.sleep(2)
-                        
-                    job_cards = await page.query_selector_all('.job-card-container')
-                    print(f"Found {len(job_cards)} job cards on this page.")
-                    
-                    if len(job_cards) == 0:
+
+                    cards = await page.evaluate(READ_CARDS_JS, CARD_SELECTOR)
+                    print(f"Found {len(cards)} job cards on this page.")
+
+                    if len(cards) == 0:
                         break
-                    
+
                     new_jobs_count = 0
-                    for card in job_cards:
+                    for info in cards:
                         try:
-                            job_id = await card.get_attribute('data-job-id')
-                            if job_id and db.job_exists(job_id):
+                            job_id = info['id']
+                            if db.job_exists(job_id):
                                 continue # Skip entirely if we already scraped this job
-                                
-                            await card.click()
-                            await asyncio.sleep(1.5)
-                            
-                            card_text = await card.inner_text()
-                            is_promoted = "Promoted" in card_text
-                            
-                            title_elem = await card.query_selector('.artdeco-entity-lockup__title, .job-card-list__title')
-                            title = await title_elem.inner_text() if title_elem else "Unknown Title"
-                            
-                            company_elem = await card.query_selector('.artdeco-entity-lockup__subtitle, .job-card-container__primary-description')
-                            company = await company_elem.inner_text() if company_elem else "Unknown Company"
-                            
-                            location_elem = await card.query_selector('.artdeco-entity-lockup__caption, .job-card-container__metadata-item')
-                            job_location = await location_elem.inner_text() if location_elem else "Unknown Location"
-                            
-                            job_id = await card.get_attribute('data-job-id')
-                            link = f"https://www.linkedin.com/jobs/view/{job_id}/" if job_id else ""
+                            title, company = info['title'], info['company']
+                            job_location = info['location'] or "Unknown Location"
+                            if not title or not company:
+                                continue
                             # The same advert from Adzuna, an employer feed or an alert.
-                            if dedupe.already_listed(title.strip(), company.strip()):
+                            if dedupe.already_listed(title, company):
                                 print(f"Skipping duplicate job ({job_id}): {title} at {company}")
                                 continue
-                            
-                            desc_elem = await page.query_selector('#job-details')
-                            description = await desc_elem.inner_text() if desc_elem else ""
-                            
+
+                            # Clicking a card shows its advert in the detail panel and
+                            # puts its id in the address; wait for both, so the text
+                            # read is this job's and not the previous one's.
+                            await page.click(f'{CARD_SELECTOR}[componentkey="{CARD_KEY_PREFIX}{job_id}"]')
+                            try:
+                                await page.wait_for_function(
+                                    "id => location.href.includes('currentJobId=' + id)", arg=job_id, timeout=10000)
+                            except Exception:
+                                print(f"Job {job_id} did not open in the detail panel. Skipping...")
+                                continue
+                            await asyncio.sleep(1.5)
+                            description = await page.evaluate(READ_DESCRIPTION_JS)
+                            link = f"https://www.linkedin.com/jobs/view/{job_id}/"
+
                             def is_duplicate(comp, desc):
                                 existing_descs = db.get_jobs_by_company(comp)
                                 for old_desc in existing_descs:
@@ -243,20 +295,20 @@ async def run_scraper():
                                     if ratio > 0.90:
                                         return True
                                 return False
-                            
-                            if job_id and title and description:
-                                if is_duplicate(company.strip(), description.strip()):
+
+                            if description:
+                                if is_duplicate(company, description):
                                     print(f"Skipping duplicate job ({job_id}): {title} at {company}")
                                     continue
-                                
-                                added = db.add_job(job_id, title.strip(), company.strip(), job_location.strip(), description.strip(), link, is_promoted)
+
+                                added = db.add_job(job_id, title, company, job_location.strip(), description, link, info['promoted'])
                                 if added:
                                     new_jobs_count += 1
                                     session_total_added += 1
                                     print(f"[{session_total_added}] Added new job ({job_id}): {title} at {company}")
                         except Exception as e:
                             print(f"Error parsing a job card: {e}")
-                            
+
                     if keyword not in keyword_stats:
                         keyword_stats[keyword] = 0
                     keyword_stats[keyword] += new_jobs_count

@@ -17,6 +17,8 @@ import progress_tracker
 import mode
 import alerts
 import public_jobs
+import declines
+import link_queue
 import adzuna
 import ats_feeds
 import dedupe
@@ -126,6 +128,20 @@ async def main():
             print(f"Employer feeds failed: {e}")
             source_notes.append(f"⚠️ Employer feeds failed: {e}")
 
+    # Links the candidate queued (link_queue.py add): read in a fresh browser.
+    if not skip_scrape:
+        try:
+            link_stats = await link_queue.fetch_pending()
+            if any(link_stats.values()):
+                line = (f"Queued links: {link_stats['read']} read, {link_stats['duplicates']} already on "
+                        f"the board, {link_stats['failed']} could not be read, "
+                        f"{link_stats['pending']} still to read")
+                print(line)
+                source_notes.append(line)
+        except Exception as e:
+            print(f"Reading queued links failed: {e}")
+            source_notes.append(f"⚠️ Reading queued links failed: {e}")
+
     # The same advert from several sources: keep the copy furthest along.
     try:
         retired = dedupe.sweep()
@@ -143,6 +159,13 @@ async def main():
         except Exception as e:
             print(f"Reading application updates failed: {e}")
             source_notes.append(f"⚠️ Reading application updates failed: {e}")
+    # Employers' declines, filed by the candidate under DECLINE_FOLDER.
+    if declines.configured():
+        try:
+            source_notes.extend(declines.ingest())
+        except Exception as e:
+            print(f"Reading decline emails failed: {e}")
+            source_notes.append(f"⚠️ Reading decline emails failed: {e}")
 
     skip_eval = '--no-eval' in sys.argv
     

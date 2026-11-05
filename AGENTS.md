@@ -101,6 +101,27 @@ exactly one job, "viewed" only adds a note, and everything else goes to the
 summary untouched. Do not loosen the matching: a wrong match hides a live
 application.
 
+### `declines.py` — employers' decline emails, from a folder
+The candidate files declines under a mail label (`DECLINE_FOLDER`, off when
+empty). Labelling a Gmail conversation labels every message in it, so the
+emails are grouped into conversations (References/In-Reply-To, or subject plus
+correspondent - never subject alone: ATS mail is all "Your application") and
+only the newest is read. The model reports whether it is a decline, the
+company, the role and the reason; the code offers it only that company's jobs
+in Applied, Interviewing or Declined (`same_company`) to pick from, and any
+doubt changes nothing. A match moves the job to Declined with the reason in
+its notes and "Found in: <sender>, <subject>, <date>, <folder>" in its
+history. Infomaniak only; a silent model leaves the email for the next run.
+
+### `link_queue.py` — links the candidate collected
+`python link_queue.py add <file or URL>...` queues adverts (a list, or a saved
+page of links) as Pending Eval jobs with only a link; `fetch_pending` reads
+them nightly, in a fresh browser, with the + button's reader
+(`generate_from_url._read_page` / `extract_metadata`), and retires a copy of
+an advert already on the board. LinkedIn links are left to `public_jobs.py`,
+which in turn skips `url-` jobs. Single adverts chosen by the candidate, 5-10 s
+apart - not a crawl.
+
 ### `ats_feeds.py` — employers' own job feeds, in either mode
 One adapter per ATS (Greenhouse, Lever, Ashby, Personio, SmartRecruiters,
 Recruitee), each reading the public feed documented for programs: never the

@@ -114,6 +114,16 @@ def init_db():
             processed_at TIMESTAMP
         )
     ''')
+    # Employers' decline emails already read from DECLINE_FOLDER (declines.py).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS decline_emails (
+            message_id TEXT PRIMARY KEY,
+            received_at TIMESTAMP,
+            job_id TEXT,
+            result TEXT,
+            processed_at TIMESTAMP
+        )
+    ''')
     # LinkedIn's application-status emails already applied (outcomes.py, #19).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS outcome_emails (

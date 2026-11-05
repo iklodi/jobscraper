@@ -165,20 +165,22 @@ def mark_read_enabled():
     return os.environ.get('IMAP_MARK_READ', '').strip().lower() in ('1', 'true', 'yes')
 
 
-def read_mail(sender, table, imap_factory=None, mark_read=False):
+def read_mail(sender, table, imap_factory=None, mark_read=False, folder=None, lookback_days=None):
     """Yield (message_id, message) for every email from `sender` not yet
     recorded in `table`. Read with BODY.PEEK, nothing moved; with `mark_read`
     each message is flagged as read once the caller has handled it (the loop
     asked for the next one), and one already recorded is flagged too.
 
     `table` has message_id and received_at columns; the search starts a day
-    before the newest email recorded there, or ALERT_LOOKBACK_DAYS back on the
-    first run. The caller records each message it has handled.
+    before the newest email recorded there, or ALERT_LOOKBACK_DAYS (or
+    `lookback_days`) back on the first run. The caller records each message
+    it has handled. `sender` None reads every sender; `folder` overrides
+    IMAP_FOLDER.
     imap_factory is for tests; by default it connects with IMAP4_SSL.
     """
     host = os.environ.get('IMAP_HOST')
-    folder = os.environ.get('IMAP_FOLDER', 'INBOX')
-    lookback = int(os.environ.get('ALERT_LOOKBACK_DAYS', '14'))
+    folder = folder or os.environ.get('IMAP_FOLDER', 'INBOX')
+    lookback = lookback_days or int(os.environ.get('ALERT_LOOKBACK_DAYS', '14'))
 
     conn = db.get_connection()
     newest = conn.execute(f'SELECT MAX(received_at) FROM {table}').fetchone()[0]
@@ -194,9 +196,10 @@ def read_mail(sender, table, imap_factory=None, mark_read=False):
     try:
         imap.login(os.environ['IMAP_USER'].strip(), os.environ['IMAP_PASSWORD'].strip())
         imap.select(f'"{folder}"', readonly=not mark_read)   # readonly: nothing gets marked
-        status, data = imap.search(None, 'FROM', f'"{sender}"', 'SINCE', since.strftime('%d-%b-%Y'))
+        criteria = (['FROM', f'"{sender}"'] if sender else []) + ['SINCE', since.strftime('%d-%b-%Y')]
+        status, data = imap.search(None, *criteria)
         ids = data[0].split() if status == 'OK' and data and data[0] else []
-        print(f'{len(ids)} email(s) from {sender} since {since:%Y-%m-%d}.')
+        print(f'{len(ids)} email(s) {f"from {sender}" if sender else f"in {folder}"} since {since:%Y-%m-%d}.')
 
         for num in ids:
             status, parts = imap.fetch(num, '(BODY.PEEK[])')

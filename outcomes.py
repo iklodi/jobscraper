@@ -8,7 +8,7 @@ subject and LinkedIn's own tracking name in the links carry the meaning.
 
 Only jobs already in Applied are ever matched, and nothing is guessed:
 - a rejection needs the company and the role to match exactly one job, which
-  then moves to Rejected with a note;
+  then moves to Declined with a note;
 - "viewed" needs the company to match exactly one job, and only adds a note;
 - anything else is reported in the summary, never acted on.
 

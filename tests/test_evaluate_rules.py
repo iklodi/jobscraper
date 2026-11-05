@@ -56,3 +56,30 @@ def test_only_real_applications_at_the_same_company_are_listed(tmp_path, monkeyp
     assert sorted(previous) == [('Example AG', 'Role 1'), ('Example AG', 'Role 2'), ('Other AG', 'Role 3')]
     assert evaluate.applications_at('Example AG', previous) == ['Example AG - Role 1', 'Example AG - Role 2']
     assert evaluate.applications_at('Unrelated SA', previous) == ['(none at this company)']
+
+
+@pytest.fixture
+def relocation(rules, monkeypatch):
+    monkeypatch.setenv('RELOCATION_COUNTRIES', 'Germany,United Kingdom,United Arab Emirates')
+    monkeypatch.setenv('RELOCATION_MIN_SALARY_CHF', '150000')
+
+
+@pytest.mark.parametrize('facts, broken', [
+    # Abroad, in a country worth a move: the pay decides.
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_chf_annual': 160000}, False),
+    ({'work_arrangement': 'hybrid', 'country': 'United Kingdom', 'salary_chf_annual': 150000}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_chf_annual': 120000}, True),
+    ({'work_arrangement': 'on-site', 'country': 'United Arab Emirates', 'salary_chf_annual': None}, True),
+    # Not on the list: no pay is enough.
+    ({'work_arrangement': 'on-site', 'country': 'Singapore', 'salary_chf_annual': 400000}, True),
+    # The ordinary rules still apply at home.
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'VD'}, False),
+])
+def test_a_move_abroad_needs_the_pay(relocation, facts, broken):
+    assert bool(evaluate.location_gate(facts)) is broken
+
+
+def test_the_reason_says_what_pay_was_needed(relocation):
+    reason = evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany',
+                                     'salary_chf_annual': 120000})
+    assert reason == 'Location mismatch: on-site in Germany, worth a move only from CHF 150,000 a year (estimated: CHF 120,000)'

@@ -35,6 +35,7 @@ Give the track's name exactly as written before the colon. Pick the track the ro
 
 Whatever the score, you MUST determine:
 - "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR", or a day rate for contract roles) based on the location, role, and typical market rates. Use the advert's own figure when it states one. If completely unknown, output "Unknown".
+- "salary_chf_annual": the same estimate as one number - the middle of the range, as an annual gross amount converted to Swiss francs (for a day rate, the rate times 200 working days). null only if salary_estimate is "Unknown".
 
 If the score you are giving is {min_score} or higher, you MUST also determine:
 1. "is_recruiter": A boolean (true/false). Set to true if the job is posted by a recruiting/staffing agency (e.g. Optomi, Hays, Michael Page). Set to false if it's a direct role with the employing company.
@@ -48,6 +49,7 @@ Your response must be valid JSON in the following format:
     "reasoning": "Strong match with enterprise architecture experience...",
     "missing_skills": ["AWS", "Kubernetes"],
     "salary_estimate": "130k-160k CHF",
+    "salary_chf_annual": 145000,
     "is_recruiter": false,
     "hiring_manager_name": "Jane Doe",
     "jd_language": "English",

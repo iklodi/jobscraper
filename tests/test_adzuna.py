@@ -218,3 +218,9 @@ def test_countries_adzuna_does_not_serve_are_skipped(monkeypatch):
     monkeypatch.setenv('ADZUNA_WIDE_COUNTRIES', 'de, lu, ch')
     searches, _ = adzuna.plan_searches([('X', None)], ['Worldwide'])
     assert [c for _, c, _ in searches] == ['de', 'ch']
+
+
+def test_a_country_without_an_adzuna_site_is_skipped_not_searched_at_home():
+    searches, skipped = adzuna.plan_searches([('X', None)], ['Germany', 'Luxembourg', 'United Arab Emirates'])
+    assert searches == [('X', 'de', None)]
+    assert skipped == ['Luxembourg', 'United Arab Emirates']

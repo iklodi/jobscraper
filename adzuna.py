@@ -67,6 +67,11 @@ COUNTRIES = {
     'united states': 'us', 'usa': 'us', 'canada': 'ca', 'australia': 'au',
     'new zealand': 'nz', 'singapore': 'sg', 'india': 'in', 'brazil': 'br',
     'mexico': 'mx', 'south africa': 'za',
+    # Countries Adzuna has no site for: named here so a search there is
+    # skipped, not run as a place name inside ADZUNA_COUNTRY.
+    'luxembourg': 'lu', 'denmark': 'dk', 'ireland': 'ie', 'sweden': 'se', 'norway': 'no',
+    'finland': 'fi', 'portugal': 'pt', 'united arab emirates': 'ae', 'uae': 'ae',
+    'saudi arabia': 'sa', 'qatar': 'qa', 'bahrain': 'bh', 'kuwait': 'kw', 'oman': 'om',
 }
 WIDE = {'worldwide', 'europe', 'emea', 'remote', 'anywhere'}
 # The countries Adzuna's API serves; anything else answers 404.
@@ -99,6 +104,9 @@ def plan_searches(keywords, locations):
     for keyword, pinned in keywords:
         for location in pinned or locations:
             name = location.strip().lower()
+            if name in COUNTRIES and COUNTRIES[name] not in SUPPORTED:
+                skipped.append(location)
+                continue
             if name in COUNTRIES:
                 targets = [(COUNTRIES[name], None)]
             elif name in WIDE:
@@ -189,8 +197,8 @@ def ingest(criteria=None, session=None, sleep=time.sleep, days=None):
     keywords, locations, job_types = criteria
     searches, skipped = plan_searches(keywords, locations)
     if skipped:
-        print(f"Adzuna: skipping {', '.join(skipped)} - set ADZUNA_WIDE_COUNTRIES "
-              f"(e.g. ch,de,fr,gb) to search them.")
+        print(f"Adzuna: skipping {', '.join(skipped)} - countries Adzuna has no site for, or "
+              f"regions (set ADZUNA_WIDE_COUNTRIES, e.g. ch,de,fr,gb, to search a region).")
     contract_filter = type_filter(job_types)
     days = days or _max_days_old()
     max_pages = int(os.environ.get('ADZUNA_MAX_PAGES', '2'))

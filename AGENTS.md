@@ -160,7 +160,9 @@ scores: a job added by link lands on To Do even at 2/10, and should show one.
 model. It reports facts - work arrangement, country, Swiss canton - which it
 gets right, and `ONSITE_CANTONS` / `HYBRID_COUNTRIES` in `.env` cap a job
 that breaks them at 2. Asked to apply such a rule itself, gemma called an
-on-site Geneva role compliant and scored it 9. The "already applied" list
+on-site Geneva role compliant and scored it 9. A job abroad in one of the
+`RELOCATION_COUNTRIES` passes those rules when the model's `salary_chf_annual`
+(its pay estimate as one annual CHF figure) reaches `RELOCATION_MIN_SALARY_CHF`. The "already applied" list
 holds only real applications (Applied, Interviewing, Offer, or Rejected after
 Applied) at the job's own company: the full list, with every hand-rejected
 job in it, was 40,000+ characters that buried the rules.

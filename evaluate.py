@@ -46,6 +46,8 @@ EVAL_SCHEMA = {
         'reasoning': {'type': 'string'},
         'missing_skills': {'type': 'array', 'items': {'type': 'string'}},
         'salary_estimate': {'type': ['string', 'null']},
+        # The same estimate as one figure, for the relocation rule in code.
+        'salary_chf_annual': {'type': ['integer', 'null']},
         'is_recruiter': {'type': ['boolean', 'null']},
         'hiring_manager_name': {'type': ['string', 'null']},
         'jd_language': {'type': ['string', 'null']},
@@ -153,17 +155,29 @@ def location_gate(result):
     The model knows a town's canton, but it does not reliably apply a rule
     such as "on-site only in VD, VS or FR": asked directly, it called an
     on-site Geneva role compliant. Settings (.env, empty = no rule):
-    ONSITE_CANTONS (two-letter codes), HYBRID_COUNTRIES. Returns the reason
-    when a rule is broken, else None."""
+    ONSITE_CANTONS (two-letter codes), HYBRID_COUNTRIES, and for a move
+    abroad RELOCATION_COUNTRIES with RELOCATION_MIN_SALARY_CHF: a job there
+    that breaks the other rules passes when the model's annual pay estimate
+    (salary_chf_annual) reaches the bar. Returns the reason when a rule is
+    broken, else None."""
     arrangement = (result.get('work_arrangement') or '').lower()
     country = (result.get('country') or '').strip()
     canton = (result.get('canton') or '').strip()
     cantons, countries = _allowed('ONSITE_CANTONS'), _allowed('HYBRID_COUNTRIES')
+    broken = None
     if arrangement == 'on-site' and cantons and canton.lower() not in cantons:
-        return f"Location mismatch: on-site in {canton or country or 'an unknown place'}"
-    if arrangement == 'hybrid' and countries and country.lower() not in countries:
-        return f"Location mismatch: hybrid in {country or 'an unknown country'}"
-    return None
+        broken = f"Location mismatch: on-site in {canton or country or 'an unknown place'}"
+    elif arrangement == 'hybrid' and countries and country.lower() not in countries:
+        broken = f"Location mismatch: hybrid in {country or 'an unknown country'}"
+    if broken and country.lower() in _allowed('RELOCATION_COUNTRIES'):
+        bar = int(os.environ.get('RELOCATION_MIN_SALARY_CHF', '0') or 0)
+        pay = result.get('salary_chf_annual')
+        if isinstance(pay, (int, float)) and pay >= bar:
+            return None
+        return (f"Location mismatch: {arrangement} in {country}, worth a move only from "
+                f"CHF {bar:,} a year (estimated: {f'CHF {int(pay):,}' if isinstance(pay, (int, float)) else 'unknown'})")
+    return broken
+
 
 OTHER_TRACK = 'Other'
 

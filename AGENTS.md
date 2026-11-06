@@ -289,7 +289,10 @@ cards on screen (not those a filter hides or behind Load More), and while any
 are selected the column offers its moves in a menu (`BULK_ACTIONS` in
 `app.js`). `/api/jobs/bulk` makes the moves, skips jobs a background run
 holds, and writes documents for jobs approved together one after another.
-A track filter above the board (`/api/tracks`) applies to every column. Below
+A track filter above the board (`/api/tracks`) applies to every column, and each
+column's text and score filters to all its jobs, not just the cards drawn:
+`renderBoard` builds every column from the jobs that pass, so counts ("n of
+m") and Load More follow the filters. Below
 768px wide (`style.css`'s phone block) the board shows one column per screen
 width, with a sticky `.column-nav` strip of column names and counts to jump
 between them (`renderColumnNav` in `app.js`). `/api/settings` edits `search_criteria.md` and

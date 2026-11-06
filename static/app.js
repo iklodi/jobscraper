@@ -45,33 +45,45 @@ window.closeModal = function() {
     }
 }
 
-// A column's filters - the text box, and on To Do a minimum score - apply together.
+// A column's filters - the text box, and on To Do a minimum score - apply
+// together, to every job in the column, not only the cards drawn so far: the
+// board is rebuilt from the jobs that pass (renderBoard), so the count, Load
+// More and Select all follow them. Typing waits a moment before redrawing.
+let filterTimer;
 window.filterColumn = function(control) {
     const column = control.closest('.kanban-column');
-    const text = (column.querySelector('input.column-filter')?.value || '').toLowerCase();
     const scoreSelect = column.querySelector('.score-filter');
-    const minScore = scoreSelect && scoreSelect.value ? Number(scoreSelect.value) : null;
     if (scoreSelect) {
         try { localStorage.setItem('minScore:' + column.id, scoreSelect.value); } catch (e) {}
     }
-    column.querySelectorAll('.card').forEach(card => {
-        const textOk = !text || card.textContent.toLowerCase().includes(text);
-        const scoreOk = minScore === null || Number(card.dataset.score || 0) >= minScore;
-        const trackOk = trackMatches(card.dataset.track);
-        card.style.display = textOk && scoreOk && trackOk ? 'block' : 'none';
-        // An action applies to what you can see: hiding a card deselects it.
-        if (card.style.display === 'none') selectionFor(column.dataset.status).delete(card.dataset.id);
-    });
-    syncSelection(column.dataset.status);
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(renderBoard, control.tagName === 'SELECT' ? 0 : 200);
 }
 
-// Re-apply every active filter, e.g. after the board is redrawn.
-function reapplyFilters() {
-    document.querySelectorAll('.kanban-column').forEach(column => {
-        const active = trackFilter || [...column.querySelectorAll('.column-filter')].some(c => c.value);
-        if (active) window.filterColumn(column.querySelector('.column-filter'));
-    });
+// Typing, pasting or clearing the box: any change of its text filters.
+document.addEventListener('input', e => {
+    if (e.target.matches && e.target.matches('input.column-filter')) window.filterColumn(e.target);
+});
+
+// The column's own filters, read from its controls: (job) => keep it?
+function columnFilter(column) {
+    const text = (column?.querySelector('input.column-filter')?.value || '').trim().toLowerCase();
+    const scoreSelect = column?.querySelector('.score-filter');
+    const minScore = scoreSelect && scoreSelect.value ? Number(scoreSelect.value) : null;
+    const active = !!text || minScore !== null;
+    const keep = (job, status) => {
+        if (minScore !== null && Number(job.score || 0) < minScore) return false;
+        if (!text) return true;
+        // What the card shows: company, id, score, title and its tags.
+        const tags = jobMetaTags(job, status).replace(/<[^>]*>/g, ' ');
+        return `${job.company} #${job.job_id} ${job.score || ''}/10 ${job.title} ${tags}`
+            .toLowerCase().includes(text);
+    };
+    return { active, keep };
 }
+
+// Kept for callers that redraw after a fetch: filters are part of the redraw now.
+function reapplyFilters() {}
 
 // The board-wide track filter: one search track, "Other", or the jobs not
 // filed yet. It applies to every column, together with each column's own.
@@ -301,7 +313,10 @@ function renderBoard() {
     // Render columns with limits
     Object.entries(columns).forEach(([status, col]) => {
         if (col) {
-            const jobsInCol = groupedJobs[status] || [];
+            const filter = columnFilter(col.closest('.kanban-column'));
+            const inTrack = groupedJobs[status] || [];
+            const jobsInCol = filter.active ? inTrack.filter(job => filter.keep(job, status)) : inTrack;
+            groupedJobs[status] = jobsInCol;          // what the selection may keep
             const totalCount = jobsInCol.length;
             const limit = columnLimits[status] || 100;
             
@@ -323,21 +338,22 @@ function renderBoard() {
                 col.appendChild(loadBtn);
             }
 
-            // Update header count with TOTAL count (not visible count)
+            // The header counts every job that passes the filters, drawn or
+            // behind Load More; "n of m" while the column's own filter is on.
             const h2 = col.parentElement.querySelector('h2');
             if (h2) {
                 let baseText = h2.getAttribute('data-title');
                 if (!baseText) {
-                    baseText = h2.innerText.replace(/\s*\(\d+\)$/, '');
+                    baseText = h2.innerText.replace(/\s*\(\d+( of \d+)?\)$/, '');
                     h2.setAttribute('data-title', baseText);
                 }
-                h2.innerText = `${baseText} (${totalCount})`;
+                h2.dataset.count = totalCount;
+                h2.innerText = `${baseText} (${filter.active ? `${totalCount} of ${inTrack.length}` : totalCount})`;
             }
         }
     });
 
     setupDragAndDrop();
-    reapplyFilters();          // a redraw must not drop the user's filters
     renderColumnNav();
     Object.keys(columns).forEach(status => {
         const ids = new Set((groupedJobs[status] || []).map(j => j.job_id));
@@ -358,8 +374,8 @@ function renderColumnNav() {
     nav.innerHTML = columns.map((col, i) => {
         const h2 = col.querySelector('h2');
         const name = h2 ? (h2.getAttribute('data-title') || h2.innerText) : col.id;
-        const count = (h2 ? h2.innerText : '').match(/\((\d+)\)\s*$/);
-        return `<button type="button" data-index="${i}">${name.replace(/\s*\(Backlog\)/i, '')}${count ? ` ${count[1]}` : ''}</button>`;
+        const count = h2 ? h2.dataset.count : undefined;
+        return `<button type="button" data-index="${i}">${name.replace(/\s*\(Backlog\)/i, '')}${count !== undefined ? ` ${count}` : ''}</button>`;
     }).join('');
     nav.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
         const col = columns[Number(btn.dataset.index)];

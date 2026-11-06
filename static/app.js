@@ -85,13 +85,12 @@ function trackMatches(track) {
     return trackFilter === NO_TRACK ? !track : track === trackFilter;
 }
 
+// The board is rebuilt: the track decides which jobs are in each column, so
+// the column counts, the phone strip and Load More all follow it.
 window.setTrackFilter = function(value) {
     trackFilter = value;
     try { localStorage.setItem('trackFilter', value); } catch (e) {}
-    document.querySelectorAll('.kanban-column').forEach(column => {
-        const control = column.querySelector('.column-filter');
-        if (control) window.filterColumn(control);
-    });
+    renderBoard();
 }
 
 async function loadTracks() {
@@ -269,6 +268,7 @@ function renderBoard() {
     };
 
     allJobs.forEach(job => {
+        if (!trackMatches(job.track)) return;     // the board-wide track filter
         let status = job.status;
         if (['generated', 'synced', 'backlog'].includes(status)) {
             status = 'to_apply';
@@ -919,7 +919,7 @@ setInterval(() => {
 window.clearBacklog = async function() {
     const count = allJobs.filter(j => ['to_apply', 'generated'].includes(j.status)).length;
     if (!count) { alert('To Do is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in To Do to Discarded?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    if (!confirm(`Move all ${count} jobs in To Do to Discarded?${trackFilter ? ' That is every track, not only the one selected.' : ''}\n\nThey stay in the database and can be moved back one by one.`)) return;
     try {
         const res = await fetch('/api/backlog/clear', { method: 'POST' });
         const data = await res.json();
@@ -934,7 +934,7 @@ window.clearBacklog = async function() {
 window.clearFailed = async function() {
     const count = allJobs.filter(j => j.status === 'failed').length;
     if (!count) { alert('Failed is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in Failed to Discarded?\n\nThey stay in the database and can be moved back one by one.`)) return;
+    if (!confirm(`Move all ${count} jobs in Failed to Discarded?${trackFilter ? ' That is every track, not only the one selected.' : ''}\n\nThey stay in the database and can be moved back one by one.`)) return;
     try {
         const res = await fetch('/api/failed/clear', { method: 'POST' });
         const data = await res.json();

@@ -47,7 +47,7 @@ EVAL_SCHEMA = {
         'missing_skills': {'type': 'array', 'items': {'type': 'string'}},
         'salary_estimate': {'type': ['string', 'null']},
         # The same estimate as one figure, for the relocation rule in code.
-        'salary_chf_annual': {'type': ['integer', 'null']},
+        'salary_annual': {'type': ['integer', 'null']},
         'is_recruiter': {'type': ['boolean', 'null']},
         'hiring_manager_name': {'type': ['string', 'null']},
         'jd_language': {'type': ['string', 'null']},
@@ -162,6 +162,11 @@ def region_fact():
     return f'- "region": {where}, its {kind}; else null.'
 
 
+def salary_currency():
+    """The currency pay is compared in (SALARY_CURRENCY, an ISO code)."""
+    return os.environ.get('SALARY_CURRENCY', '').strip().upper() or 'EUR'
+
+
 def _home():
     return os.environ.get('HOME_COUNTRY', '').strip().lower()
 
@@ -174,9 +179,9 @@ def location_gate(result):
     HOME_COUNTRY - on-site and hybrid jobs are fine anywhere in it;
     ONSITE_REGIONS - on-site jobs only in these regions (of HOME_COUNTRY when
     set); HYBRID_COUNTRIES - hybrid jobs also in these countries; and for a
-    move abroad RELOCATION_COUNTRIES with RELOCATION_MIN_SALARY_CHF: a job
-    there that breaks the other rules passes when the model's annual pay
-    estimate (salary_chf_annual) reaches the bar. Returns the reason when a
+    move abroad RELOCATION_COUNTRIES with RELOCATION_MIN_SALARY: a job there
+    that breaks the other rules passes when the model's annual pay estimate
+    (salary_annual, in SALARY_CURRENCY) reaches the bar. Returns the reason when a
     rule is broken, else None."""
     arrangement = (result.get('work_arrangement') or '').lower()
     country = (result.get('country') or '').strip()
@@ -192,12 +197,12 @@ def location_gate(result):
     elif arrangement == 'hybrid' and hybrid and country.lower() not in hybrid:
         broken = f"Location mismatch: hybrid in {country or 'an unknown country'}"
     if broken and country.lower() in _allowed('RELOCATION_COUNTRIES'):
-        bar = int(os.environ.get('RELOCATION_MIN_SALARY_CHF', '0') or 0)
-        pay = result.get('salary_chf_annual')
+        bar = int(os.environ.get('RELOCATION_MIN_SALARY', '0') or 0)
+        pay, cur = result.get('salary_annual'), salary_currency()
         if isinstance(pay, (int, float)) and pay >= bar:
             return None
         return (f"Location mismatch: {arrangement} in {country}, worth a move only from "
-                f"CHF {bar:,} a year (estimated: {f'CHF {int(pay):,}' if isinstance(pay, (int, float)) else 'unknown'})")
+                f"{cur} {bar:,} a year (estimated: {f'{cur} {int(pay):,}' if isinstance(pay, (int, float)) else 'unknown'})")
     return broken
 
 
@@ -314,6 +319,7 @@ def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_locat
                             .replace('{rules_text}', rules_text) \
                             .replace('{previous_applications}', chr(10).join(previous_applications)) \
                             .replace('{min_score}', str(min_pass_score())) \
+                            .replace('{salary_currency}', salary_currency()) \
                             .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)') \
                             .replace('{region_fact}', region_fact())
     

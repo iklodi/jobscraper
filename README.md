@@ -109,8 +109,10 @@ code - not the model - applies your rules, capping a job that breaks them at 2
   ("VD"), a US state ("CA"), a French department ("75"). `ONSITE_REGIONS`
   limits on-site jobs to some of them; `HYBRID_COUNTRIES` allows hybrid jobs
   in more countries.
-- `RELOCATION_COUNTRIES` with `RELOCATION_MIN_SALARY_CHF`: a job there that
-  breaks the rules still passes when the estimated pay is worth a move.
+- `RELOCATION_COUNTRIES` with `RELOCATION_MIN_SALARY`: a job there that
+  breaks the rules still passes when the estimated pay is worth a move. The
+  bar is in `SALARY_CURRENCY` (EUR, CHF, GBP...), and the scorer converts its
+  estimate to it.
 - `RELOCATION_PENALTY` and `REGION_MOVE_PENALTY` (with `HOME_REGIONS`) take
   points off a job that means moving, so it ranks below an equal fit nearer
   home. The reasoning says so: "A move to United Kingdom: -1 (fit 9)". Jobs

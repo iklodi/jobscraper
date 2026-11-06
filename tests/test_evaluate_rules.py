@@ -63,17 +63,18 @@ def test_only_real_applications_at_the_same_company_are_listed(tmp_path, monkeyp
 @pytest.fixture
 def relocation(rules, monkeypatch):
     monkeypatch.setenv('RELOCATION_COUNTRIES', 'Germany,United Kingdom,United Arab Emirates')
-    monkeypatch.setenv('RELOCATION_MIN_SALARY_CHF', '150000')
+    monkeypatch.setenv('RELOCATION_MIN_SALARY', '150000')
+    monkeypatch.setenv('SALARY_CURRENCY', 'CHF')
 
 
 @pytest.mark.parametrize('facts, broken', [
     # Abroad, in a country worth a move: the pay decides.
-    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_chf_annual': 160000}, False),
-    ({'work_arrangement': 'hybrid', 'country': 'United Kingdom', 'salary_chf_annual': 150000}, False),
-    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_chf_annual': 120000}, True),
-    ({'work_arrangement': 'on-site', 'country': 'United Arab Emirates', 'salary_chf_annual': None}, True),
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_annual': 160000}, False),
+    ({'work_arrangement': 'hybrid', 'country': 'United Kingdom', 'salary_annual': 150000}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_annual': 120000}, True),
+    ({'work_arrangement': 'on-site', 'country': 'United Arab Emirates', 'salary_annual': None}, True),
     # Not on the list: no pay is enough.
-    ({'work_arrangement': 'on-site', 'country': 'Singapore', 'salary_chf_annual': 400000}, True),
+    ({'work_arrangement': 'on-site', 'country': 'Singapore', 'salary_annual': 400000}, True),
     # The ordinary rules still apply at home.
     ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': 'VD'}, False),
 ])
@@ -83,7 +84,7 @@ def test_a_move_abroad_needs_the_pay(relocation, facts, broken):
 
 def test_the_reason_says_what_pay_was_needed(relocation):
     reason = evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany',
-                                     'salary_chf_annual': 120000})
+                                     'salary_annual': 120000})
     assert reason == 'Location mismatch: on-site in Germany, worth a move only from CHF 150,000 a year (estimated: CHF 120,000)'
 
 
@@ -118,7 +119,7 @@ def test_a_move_within_switzerland_can_cost_points_too(penalties, monkeypatch):
 def test_the_penalty_comes_off_the_score_and_says_so(penalties, monkeypatch):
     monkeypatch.setattr(evaluate, '_ask_evaluator', lambda *a, **k: {
         'score': 9, 'reasoning': 'Strong fit.', 'work_arrangement': 'hybrid',
-        'country': 'United Kingdom', 'salary_chf_annual': 200000})
+        'country': 'United Kingdom', 'salary_annual': 200000})
     monkeypatch.setattr(evaluate, 'get_tracks', lambda: [])
     result = evaluate.evaluate_job(None, None, 'Role', 'Example Ltd', 'London', 'text', 'cv', [], 'rules', False)
     assert result['score'] == 8
@@ -127,7 +128,7 @@ def test_the_penalty_comes_off_the_score_and_says_so(penalties, monkeypatch):
 
 def test_a_broken_rule_is_not_penalised_twice(penalties):
     result = evaluate.apply_location_rules({'score': 8, 'reasoning': '', 'work_arrangement': 'on-site',
-                                            'country': 'Germany', 'salary_chf_annual': 100000})
+                                            'country': 'Germany', 'salary_annual': 100000})
     assert result['score'] == 2
 
 
@@ -191,3 +192,20 @@ def test_a_move_abroad_from_germany_costs_points(germany, monkeypatch):
     monkeypatch.setenv('RELOCATION_PENALTY', '1')
     assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland'})[0] == 1
     assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Germany', 'region': 'BY'})[0] == 0
+
+
+def test_the_pay_bar_is_in_any_currency(relocation, monkeypatch):
+    monkeypatch.setenv('SALARY_CURRENCY', 'eur')
+    monkeypatch.setenv('RELOCATION_MIN_SALARY', '90000')
+    assert evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany',
+                                   'salary_annual': 95000}) is None
+    assert evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany', 'salary_annual': 80000}) == \
+        'Location mismatch: on-site in Germany, worth a move only from EUR 90,000 a year (estimated: EUR 80,000)'
+
+
+def test_the_prompt_asks_for_pay_in_the_configured_currency(monkeypatch):
+    monkeypatch.setenv('SALARY_CURRENCY', 'GBP')
+    assert '{salary_currency}' in evaluate.load_prompt('eval_prompt.txt')
+    assert evaluate.salary_currency() == 'GBP'
+    monkeypatch.delenv('SALARY_CURRENCY')
+    assert evaluate.salary_currency() == 'EUR'

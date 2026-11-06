@@ -113,6 +113,12 @@ code - not the model - applies your rules, capping a job that breaks them at 2
   breaks the rules still passes when the estimated pay is worth a move. The
   bar is in `SALARY_CURRENCY` (EUR, CHF, GBP...), and the scorer converts its
   estimate to it.
+- **CV norms** follow the job's region too (`cv_norms.py`): no photo, date of
+  birth or similar in the US, UK, Ireland, Australia and New Zealand, a résumé
+  rather than a CV in North America, the region's page length, nationality for
+  the Gulf, and for Germany, Austria and Switzerland one dossier PDF of
+  letter, CV and certificates (`dossier:` in profile.yaml). The job's history
+  says what was applied.
 - What else depends on a country - letter greetings, closings, date and
   spelling, phone formats, the languages offered first - follows the job's
   country, and `HOME_COUNTRY` where that is unknown (`locales.py`).

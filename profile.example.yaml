@@ -134,6 +134,11 @@ attachments:
   diplomas: "attach/diplomas.pdf"
   reference_letter: "attach/reference_letter.pdf"
 
+# For jobs in Germany, Austria and Switzerland a single application dossier PDF
+# is also built: cover letter, CV, then these attachments, in this order.
+# Leave it out to include every attachment.
+dossier: [diplomas, reference_letter]
+
 known_gaps:
   # Anything listed here will stop an application rather than be guessed at.
   - field: "Professional references"

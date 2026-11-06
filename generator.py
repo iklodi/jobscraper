@@ -12,6 +12,7 @@ from google.genai import types
 import time
 import progress_tracker
 import locales
+import cv_norms
 import infomaniak
 from evaluate import GEMINI_MODELS, GROQ_MODELS, any_model_configured
 from playwright.async_api import async_playwright
@@ -62,9 +63,11 @@ GEN_SCHEMA = {
         'cover_letter_body': {'type': 'string'},
         'company_hq': {'type': 'string'},
         'display_company': {'type': 'string'},
+        # Where the employer is headquartered, for cv_norms' multinational rule.
+        'headquarters_country': {'type': ['string', 'null']},
     },
     'required': ['cv_summary', 'cv_replacements', 'cv_removals',
-                 'cover_letter_body', 'company_hq', 'display_company'],
+                 'cover_letter_body', 'company_hq', 'display_company', 'headquarters_country'],
 }
 
 
@@ -98,7 +101,8 @@ def track_vocabulary(job_id):
               "from what the Career Dossier actually contains.\n")
 
 
-def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None, cl_language=None):
+def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text, custom_instructions=None,
+                            cl_language=None, norms_text=''):
     job_id, title, company, location, description, link, score, reasoning, status, created_at, is_promoted, estimated_salary, is_recruiter, hiring_manager_name, jd_language, application_notes = job
     
     address_name = hiring_manager_name.split()[0] if hiring_manager_name else "the hiring manager"
@@ -124,7 +128,8 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
                             .replace('{address_name}', address_name) \
                             .replace('{candidate_name}', candidate_name) \
                             .replace('{language_instruction}', language_instruction) \
-                            .replace('{track_instruction}', track_instruction)
+                            .replace('{track_instruction}', track_instruction) \
+                            .replace('{cv_norms}', norms_text)
         
     max_retries = 5
     for attempt in range(max_retries):
@@ -250,6 +255,130 @@ def adapt_cv(base_cv_path, new_cv_path, texts):
                     break
                 
     doc.save(new_cv_path)
+
+PERSONAL_DETAILS = {
+    'date_of_birth': r'date of birth|\bborn\b|\bDOB\b|geburtsdatum|date de naissance|data di nascita|'
+                     r'fecha de nacimiento',
+    'age': r'^\s*(age|alter|âge|età|edad)\s*[:\-]',
+    'marital_status': r'marital status|civil status|état civil|zivilstand|familienstand|stato civile|estado civil',
+    'nationality': r'nationality|nationalit[éäà]|staatsangehörigkeit|citizenship|nacionalidad',
+    'gender': r'\bgender\b|^\s*sex\s*:|geschlecht|^\s*sexe\s*:',
+}
+DETAIL_LABELS = {'date_of_birth': 'date of birth', 'age': 'age', 'marital_status': 'marital status',
+                 'nationality': 'nationality', 'gender': 'gender'}
+PICTURE = '{http://schemas.openxmlformats.org/drawingml/2006/main}blip'
+DRAWING = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing'
+
+
+def _pictures(doc):
+    return [d for d in doc.element.body.iter(DRAWING) if next(d.iter(PICTURE), None) is not None]
+
+
+def _insert_after(paragraph, text):
+    """A new paragraph after `paragraph`, in its formatting."""
+    import copy
+    new = copy.deepcopy(paragraph._p)
+    for drawing in list(new.iter(DRAWING)):
+        drawing.getparent().remove(drawing)
+    paragraph._p.addnext(new)
+    from docx.text.paragraph import Paragraph
+    added = Paragraph(new, paragraph._parent)
+    runs = added.runs
+    if runs:
+        runs[0].text = text
+        for run in runs[1:]:
+            run.text = ''
+    else:
+        added.add_run(text)
+    return added
+
+
+def load_profile():
+    """CVS_DIR/profile.yaml, or {} when there is none."""
+    import yaml
+    path = os.path.join(CVS_DIR, 'profile.yaml')
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        return yaml.safe_load(f) or {}
+
+
+def apply_cv_norms(path, norms, profile=None):
+    """Apply the job's regional CV norms (cv_norms.py) to a written CV: the
+    photo, personal-detail lines, the referees line. Returns what was done and
+    what the candidate should know, as sentences for the job's history."""
+    import re
+    if not norms:
+        return []
+    profile = profile or {}
+    doc = Document(path)
+    done = []
+    pictures = _pictures(doc)
+    if norms['photo'] == 'no' and pictures:
+        for drawing in pictures:
+            drawing.getparent().remove(drawing)
+        done.append('photo removed')
+    elif norms['photo'] in ('expected', 'mandatory') and not pictures:
+        done.append(f"a photo is {norms['photo']} there, and the CV template has none")
+    paragraphs = [p for p in doc.paragraphs if p.text.strip()]
+    for detail in norms.get('omit', ()):
+        pattern = re.compile(PERSONAL_DETAILS[detail], re.I)
+        for p in paragraphs:
+            if len(p.text) < 120 and pattern.search(p.text) and p._p.getparent() is not None:
+                delete_paragraph(p)
+                done.append(f'{DETAIL_LABELS[detail]} left out')
+        paragraphs = [p for p in doc.paragraphs if p.text.strip()]
+    text = '\n'.join(p.text for p in paragraphs)
+    if 'nationality' in norms.get('include', ()) and not re.search(PERSONAL_DETAILS['nationality'], text, re.I):
+        nationality = ((profile.get('work_authorization') or {}).get('nationality') or '').strip()
+        # The header block: the short lines before the first blank paragraph.
+        header = None
+        for p in doc.paragraphs:
+            if not p.text.strip():
+                break
+            header = p
+        if nationality and header is not None:
+            _insert_after(header, f'Nationality: {nationality}')
+            done.append('nationality added from profile.yaml')
+        else:
+            done.append('nationality is expected there - add work_authorization.nationality to profile.yaml')
+    if 'visa_status' in norms.get('include', ()) and not re.search(r'visa|permit|residen|bewilligung|permis',
+                                                                    text, re.I):
+        done.append('visa or residence status is expected there, and the CV states none')
+    if norms.get('referees') and not re.search(r'referee', text, re.I) and paragraphs:
+        _insert_after(paragraphs[-1], 'Referees available upon request.')
+        done.append('"Referees available upon request" added')
+    doc.save(path)
+    if norms.get('warning'):
+        done.append(norms['warning'])
+    done += norms.get('reasons', [])
+    return done
+
+
+def build_dossier(dossier_path, cl_pdf, cv_pdf, profile):
+    """One PDF of the letter, the CV and the profile's dossier attachments
+    (profile.yaml `dossier:` - attachment keys - else every attachment), as
+    DACH employers expect. Returns the attachment keys included, or None."""
+    files = [f for f in (cl_pdf, cv_pdf) if f and os.path.exists(f)]
+    if len(files) < 2:
+        return None
+    attachments = profile.get('attachments') or {}
+    keys = profile.get('dossier') or list(attachments)
+    included = []
+    for key in keys:
+        rel = attachments.get(key)
+        path = rel if rel and os.path.isabs(rel) else os.path.join(CVS_DIR, rel or '')
+        if rel and path.lower().endswith('.pdf') and os.path.exists(path):
+            files.append(path)
+            included.append(key)
+    merger = PyPDF2.PdfMerger()
+    for f in files:
+        merger.append(f)
+    with open(dossier_path, 'wb') as out:
+        merger.write(out)
+    merger.close()
+    return included
+
 
 def delete_paragraph(paragraph):
     p = paragraph._element
@@ -763,12 +892,24 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         print("Converting baseline CV to PDF for page counting...")
         convert_to_pdf_libreoffice(CV_PATH)
     baseline_page_count = get_pdf_page_count(baseline_pdf_path) or 3
-    
+    # The job's regional CV norms (cv_norms.py): first from its location; the
+    # employer's headquarters, known once the model has answered, can still
+    # drop the photo. CV_PAGE_LIMIT=template keeps the template's own length.
+    stored_country = conn.execute('SELECT country FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    stored_country = stored_country[0] if stored_country else None
+    norms = cv_norms.for_job(stored_country, location, language=jd_language)
+    page_limit = baseline_page_count
+    if os.environ.get('CV_PAGE_LIMIT', 'norms').strip().lower() != 'template':
+        page_limit = cv_norms.page_target(norms, baseline_page_count)
+    norms_text = cv_norms.prompt_block(norms, page_limit if page_limit < baseline_page_count else None)
+    profile = load_profile()
+    norm_notes = []
+
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
             texts = generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_text,
-                                            custom_instructions, cl_language)
+                                            custom_instructions, cl_language, norms_text)
             if not texts:
                 print(f"AI returned empty result for job {job_id}")
                 cursor.execute('UPDATE jobs SET status = ? WHERE job_id = ?', (failure_status, job_id))
@@ -797,13 +938,17 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
                         
         os.makedirs(job_dir, exist_ok=True)
         
-        new_cv_docx = os.path.join(job_dir, f"{today}_{safe_company}_CV.docx")
+        job_norms = cv_norms.for_job(stored_country, location, texts.get('company_hq'),
+                                     hq_country=texts.get('headquarters_country'), language=jd_language) or norms
+        cv_term = (job_norms or {}).get('file_term', 'CV')            # "Resume" in North America
+        new_cv_docx = os.path.join(job_dir, f"{today}_{safe_company}_{cv_term}.docx")
         new_cl_docx = os.path.join(job_dir, f"{today}_{safe_company}_CoverLetter.docx")
-        new_cv_md = os.path.join(job_dir, f"{today}_{safe_company}_CV.md")
+        new_cv_md = os.path.join(job_dir, f"{today}_{safe_company}_{cv_term}.md")
         new_cl_md = os.path.join(job_dir, f"{today}_{safe_company}_CoverLetter.md")
         
         # Adapt DOCX files
         adapt_cv(CV_PATH, new_cv_docx, texts)
+        norm_notes = apply_cv_norms(new_cv_docx, job_norms, profile)
         cv_language = cv_language or jd_language
         if not is_english(cv_language):
             print(f"Translating the CV into {cv_language}...")
@@ -840,16 +985,36 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         new_cv_pdf = new_cv_docx.replace('.docx', '.pdf')
         new_page_count = get_pdf_page_count(new_cv_pdf)
         
-        if new_page_count and new_page_count > baseline_page_count:
+ 
+        if new_page_count and new_page_count > page_limit:
             if attempt < max_attempts:
-                print(f"Generated CV is {new_page_count} pages (baseline is {baseline_page_count}). Retrying...")
-                custom_instructions = (custom_instructions or "") + "\n\nCRITICAL: The previous generation was too long. You MUST shorten your bullet point replacements slightly to ensure the CV fits within its original page limit."
+                print(f"Generated CV is {new_page_count} pages (limit {page_limit}). Retrying...")
+                custom_instructions = (custom_instructions or "") + f"\n\nCRITICAL: The previous generation was too long ({new_page_count} pages). You MUST shorten your bullet point replacements, and remove the least relevant detail with cv_removals if needed, so the CV fits on {page_limit} page{'s' if page_limit > 1 else ''}."
                 continue
             else:
                 print(f"Generated CV is still too long after {max_attempts} attempts. Keeping it.")
+                if page_limit < baseline_page_count:
+                    norm_notes.append(f'the CV is {new_page_count} pages, over the {page_limit} expected there')
                 break
         else:
             break
+
+    if job_norms and job_norms.get('dossier'):
+        dossier = os.path.join(job_dir, f"{today}_{safe_company}_Dossier.pdf")
+        try:
+            included = build_dossier(dossier, new_cl_docx.replace('.docx', '.pdf'), new_cv_pdf, profile)
+            if included is not None:
+                norm_notes.append('application dossier PDF built (cover letter, CV'
+                                  + ''.join(f', {k}' for k in included) + ')')
+        except Exception as e:
+            norm_notes.append(f'the dossier PDF could not be built ({e})')
+    if job_norms:
+        cursor.execute("""INSERT INTO job_history (job_id, event_type, note, created_at)
+                          VALUES (?, 'note_added', ?, ?)""",
+                       (job_id, f"CV norms for {job_norms['country'].title()} ({job_norms['label']}): "
+                                + ('; '.join(norm_notes) if norm_notes else 'nothing to change') + '.',
+                        datetime.datetime.now()))
+        conn.commit()
             
         
     # Save Job Description as PDF using Playwright

@@ -234,6 +234,22 @@ analyst application reads like one (`track_vocabulary`). A country's own
 spelling is applied in code (`locales` `spelling`): German documents for a
 Swiss job use ss, never ß.
 
+### `cv_norms.py` — how a CV is expected to look where the job is
+Regional norms (`REGIONS`, hard-coded): the document's name (a résumé in the
+US and Canada), the photo rule, page range, personal details to leave out or
+state, a UK personal statement, AU/NZ referees line, the DACH dossier, and
+warnings (Japan's Rirekisho is not generated). `for_job` picks the job's
+region from its location, else HOME_COUNTRY, and drops the photo when a
+US/UK-headquartered employer hires in English in a photo-standard country
+(the model reports `headquarters_country`). The generator applies them:
+`prompt_block` instructs the model; `apply_cv_norms` removes the photo and
+personal-detail lines, adds a nationality line (from profile.yaml) or the
+referees line; the file is named `_Resume` in North America; the page limit
+is the region's maximum, never above the template (`CV_PAGE_LIMIT=template`
+keeps the old rule); `build_dossier` writes `_Dossier.pdf` (letter, CV,
+profile.yaml `dossier:` attachments), which the applier offers as
+`dossier`. Each job's history records what was done ("CV norms for ...").
+
 ### `locales.py` — what differs by country
 One table (`COUNTRIES`): names in a country's own languages, its languages,
 letter date format, dialling code and trunk prefix, letter closings that

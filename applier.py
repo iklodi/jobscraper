@@ -383,11 +383,11 @@ def application_files(job_id):
             folder = os.path.join(OUTPUT_DIR, d)
             cv = cl = None
             for f in os.listdir(folder):
-                if not f.endswith('.pdf'):
+                if not f.endswith('.pdf') or f.endswith('_Dossier.pdf'):
                     continue
                 if 'CoverLetter' in f:
                     cl = os.path.join(folder, f)
-                elif 'CV' in f:
+                elif f.endswith(('_CV.pdf', '_Resume.pdf')) or 'CV' in f:
                     cv = os.path.join(folder, f)
             return cv, cl, folder
     return None, None, None
@@ -1537,13 +1537,15 @@ DOCUMENT_BLURBS = {
     'diplomas': 'all supporting documents in one PDF: university diplomas and work certificates '
                 '(the reference letter included) - the answer to any generic upload slot',
     'reference_letter': 'a written reference letter from a former employer',
+    'dossier': 'the complete application in one PDF - cover letter, CV, diplomas and references - '
+               'for a single upload slot that asks for the whole application or dossier',
 }
 
 
 def describe_documents(attachments):
     """The document menu the model picks from, limited to what actually exists."""
     lines = []
-    for key in ('cv', 'cover_letter', 'diplomas', 'reference_letter'):
+    for key in ('cv', 'cover_letter', 'diplomas', 'reference_letter', 'dossier'):
         if attachments.get(key):
             lines.append(f'  - "{key}": {DOCUMENT_BLURBS[key]}')
     for key, path in sorted(attachments.items()):
@@ -1980,6 +1982,10 @@ async def process_job(page, client, profile, job, auto_submit=False):
 
     trace = Trace(job_id, folder)
     attachments = attachment_paths(profile)
+    # The DACH dossier (generator.build_dossier): letter, CV and certificates in one PDF.
+    dossier = next((os.path.join(folder, f) for f in sorted(os.listdir(folder)) if f.endswith('_Dossier.pdf')), None)
+    if dossier:
+        attachments['dossier'] = dossier
     cover_letter = cover_letter_body(folder, cl_path)
     apply_url, apply_type = db.get_apply_target(job_id)
     how, start = plan_start(link, apply_url, apply_type, safe_mode())

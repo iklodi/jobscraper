@@ -146,9 +146,12 @@ another copy, moves to Rejected with "Duplicate of #id".
 
 ### `main.py` — the nightly controller
 Full mode scrapes LinkedIn; safe mode does not. Both then read the job-alert
-emails (when IMAP is configured) and fetch their descriptions logged out, run
-the Adzuna searches and the employer feeds, score, and email the summary.
-`--no-scrape` skips every source.
+emails (when IMAP is configured), fetch descriptions logged out and retire
+the ones that never came (`expire_stale`), run the Adzuna searches and the
+employer feeds, read the queued links, sweep duplicates, read LinkedIn's
+status emails and the decline folder, score, and email the summary. Each step
+is wrapped: one that fails (a crashed LinkedIn tab, a refused feed) is noted
+in the summary and the rest still run. `--no-scrape` skips every source.
 **It does not generate documents**: that waits for an explicit Approve on the
 dashboard, so nothing is written for a job that will never be sent. Flags: `--no-scrape`, `--no-eval`, and `--gen` to
 generate for everything on To Do.
@@ -248,7 +251,7 @@ read in a fresh `chromium.launch()` browser, never the profile, and a LinkedIn
 sign-in wall is reported, not worked around.
 
 ### `app.py` / `static/app.js` / `templates/index.html`
-Flask dashboard. Columns: New, To Do, Approved, Applied,
+Flask dashboard. Columns: Pending Eval (`new`), To Do, Approved, Applied,
 Interviewing, Declined, Failed, Account Required, Discarded (status `rejected`; the
 label changed, the status did not) — every one ordered by last
 modification, newest first. Every card has a checkbox; "Select all" takes the
@@ -256,7 +259,10 @@ cards on screen (not those a filter hides or behind Load More), and while any
 are selected the column offers its moves in a menu (`BULK_ACTIONS` in
 `app.js`). `/api/jobs/bulk` makes the moves, skips jobs a background run
 holds, and writes documents for jobs approved together one after another.
-A track filter above the board (`/api/tracks`) applies to every column. `/api/settings` edits `search_criteria.md` and
+A track filter above the board (`/api/tracks`) applies to every column. Below
+768px wide (`style.css`'s phone block) the board shows one column per screen
+width, with a sticky `.column-nav` strip of column names and counts to jump
+between them (`renderColumnNav` in `app.js`). `/api/settings` edits `search_criteria.md` and
 `rules.md` in place, keeping a `.bak`, refusing empty content, and reporting
 what the next run will search for.
 

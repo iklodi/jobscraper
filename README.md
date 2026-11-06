@@ -19,10 +19,11 @@ Playwright browser using your own logged-in LinkedIn session.
 
 | Stage | What happens |
 |---|---|
-| **Scrape** | `scraper.py` walks the searches in `search_criteria.md` and stores anything new. In either mode, `adzuna.py` runs the same searches through Adzuna's job API. |
-| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`. At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Discarded**. Re-scoring never moves a job you approved or applied to. |
+| **Find** | `scraper.py` walks the searches in `search_criteria.md` on LinkedIn (full mode only) and stores anything new. LinkedIn's job-alert emails, Adzuna's job API, employers' own job feeds and links you collected add more, in either mode. A job seen on two of them is kept once. |
+| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`, and files it under one of your search tracks. The location rules are applied in code (see [Where you will work](#where-you-will-work)). At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Discarded**. Re-scoring never moves a job you approved or applied to. A job whose description could not be read within `SAFE_FETCH_MAX_AGE_DAYS` (14) is discarded unscored. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
-| **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button. Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
+| **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button, leaving the form open in the browser for you (the card stays in Approved, tagged "Form filled"). Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
+| **Hear back** | A decline moves the job to **Declined** with the reason: from LinkedIn's status emails, from the decline emails you file under a mail label, or by hand. |
 
 The nightly run stops after scoring. Pass `--gen` to `main.py` if you want it to
 generate for everything on To Do the old way.
@@ -36,7 +37,8 @@ generate for everything on To Do the old way.
   `IMAP_*` set it also reads your LinkedIn job-alert emails, as safe mode does:
   they bring jobs the scraper's searches miss.
 - **safe** never automates your logged-in account. It reads the **job-alert
-  emails** LinkedIn sends you over IMAP, leaving them unread unless you set
+  emails** LinkedIn sends you over IMAP, from `IMAP_FOLDER` (a Gmail label
+  works: let a filter file them there), leaving them unread unless you set
   `IMAP_MARK_READ=true`. Set up LinkedIn job alerts
   for your searches (daily, by email), then fill in the `IMAP_*` settings.
   Descriptions are then read from the public job pages, logged out, and the
@@ -83,6 +85,37 @@ moves it to Declined with a note. "Your application was viewed" adds a note.
 Anything that matches no job, or more than one, is listed in the summary email
 and left alone.
 
+### Declines you file in your mailbox
+
+Employers decline by email in any wording, from an applicant-tracking system,
+a recruiter or the hiring manager. File those emails under a label of their
+own and set `DECLINE_FOLDER` to it. Each run, an AI model reads every new one
+for the company, the role and the reason, and picks the application from your
+jobs at that company in Applied, Interviewing or Declined. A match moves it to
+Declined, with the reason in its notes and where it was found (sender,
+subject, date, folder) in its history. Labelling a Gmail conversation labels
+all of it, so a whole conversation counts as one email: its newest message.
+Anything uncertain changes nothing and is listed in the summary email. The
+first run looks `DECLINE_LOOKBACK_DAYS` (90) back.
+
+## Where you will work
+
+The scorer reports each job's work arrangement, country and region, and the
+code - not the model - applies your rules, capping a job that breaks them at 2
+("Location mismatch"). In `.env`:
+
+- `HOME_COUNTRY`: on-site and hybrid jobs pass anywhere in it.
+- `REGION_TYPE`: what a region is there and how to write it - a Swiss canton
+  ("VD"), a US state ("CA"), a French department ("75"). `ONSITE_REGIONS`
+  limits on-site jobs to some of them; `HYBRID_COUNTRIES` allows hybrid jobs
+  in more countries.
+- `RELOCATION_COUNTRIES` with `RELOCATION_MIN_SALARY_CHF`: a job there that
+  breaks the rules still passes when the estimated pay is worth a move.
+- `RELOCATION_PENALTY` and `REGION_MOVE_PENALTY` (with `HOME_REGIONS`) take
+  points off a job that means moving, so it ranks below an equal fit nearer
+  home. The reasoning says so: "A move to United Kingdom: -1 (fit 9)". Jobs
+  scored before you set them: `python evaluate.py --move-penalty`.
+
 ## A second source: Adzuna
 
 [Adzuna](https://developer.adzuna.com) aggregates many job boards and offers
@@ -118,6 +151,16 @@ keyword and whose location matches a location, from `search_criteria.md` or
 the company's own `keywords:` / `locations:`. Jobs from feeds come with the full
 description and **the employer's application link**, so Fill Now and Apply Now
 work on them in both modes, with nothing to paste. It never touches LinkedIn.
+
+## Links you collected
+
+Adverts you found yourself - a list of links, or a saved page of them - can be
+queued: `python link_queue.py add links.txt`. They wait in Pending Eval with
+only their link, and each night up to `LINK_FETCH_MAX_PER_RUN` are read in a
+fresh browser, 5-10 seconds apart, and scored like any other job. An advert
+that is gone (404/410) is closed; one a site refuses is tried again on later
+runs, then discarded after 14 days. LinkedIn links are read from LinkedIn's
+public pages instead.
 
 ## Setup
 
@@ -179,6 +222,15 @@ will search for.
 - **📤 Apply to Approved / 📝 Fill Approved** — work through every approved job.
   Apply is greyed out when `policies.never_submit_without_review` is `true` in
   `profile.yaml`; hover it to see why. Fill always works.
+- **Checkboxes** on every card, and **Select all** per column (the cards on
+  screen, not those a filter hides). With cards selected, the column offers
+  its moves in a menu: approve, fill or apply, re-evaluate, discard, mark as
+  declined (with one reason for all)...
+- **Track filter** above the board, for the tracks in `search_criteria.md`.
+- **Mark as Declined** on an applied job asks for the employer's reason.
+  **Clear** moves everything on To Do or Failed to Discarded.
+- **On a phone** the board shows one column at a time, with a strip of column
+  names to jump between them.
 - After a batch, the email lists every question your profile could not answer,
   grouped by question, so you can add the answers to `profile.yaml`.
 - Each card shows its score, location, estimated salary, whether the poster is a
@@ -207,6 +259,10 @@ python alerts.py --suggest        # the LinkedIn job alerts that match search_cr
 python ats_feeds.py               # read the employers' feeds in companies.yaml
 python ats_feeds.py --detect URL  # the companies.yaml entry for an employer's job link
 python outcomes.py                # apply LinkedIn's application-status emails now
+python declines.py                # file the decline emails in DECLINE_FOLDER now
+python link_queue.py add FILE|URL # queue collected job links (fetch: read them now)
+python evaluate.py --classify-tracks [--all]  # file older jobs under a track
+python evaluate.py --move-penalty # apply the move penalty to jobs already on To Do
 ```
 
 ## Notes

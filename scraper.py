@@ -231,90 +231,111 @@ async def run_scraper():
                         await browser.close()
                         return keyword_stats
 
-                    pages_processed += 1
-                    progress_tracker.set_status(f"Scraping '{keyword}'", pages_processed, total_pages)
-                    search_url = search_results_url(keyword, location, page_num * 25, type_codes)
-
-                    print(f"Searching for jobs: {keyword} in {location} (Page {page_num + 1})")
+                    # A fresh tab for every search: LinkedIn's search page keeps
+                    # growing in one tab, and after ~80 searches the tab crashed
+                    # and took the whole nightly run with it.
+                    # The new tab opens before the old one closes, so the window
+                    # always has one.
                     try:
-                        await page.goto(search_url, timeout=60000)
+                        fresh = await browser.new_page()
                     except Exception as e:
-                        print(f"Failed to navigate to {search_url}: {e}. Skipping page...")
-                        continue
-
+                        print(f"The browser is gone ({e}); stopping the LinkedIn search here.")
+                        return keyword_stats
                     try:
-                        await page.wait_for_selector(CARD_SELECTOR, timeout=15000)
+                        await page.close()
                     except Exception:
-                        print(f"Timeout waiting for job cards for {keyword} in {location} (Page {page_num + 1}). Skipping...")
-                        break # No more jobs
+                        pass
+                    page = fresh
+                    try:
+                        pages_processed += 1
+                        progress_tracker.set_status(f"Scraping '{keyword}'", pages_processed, total_pages)
+                        search_url = search_results_url(keyword, location, page_num * 25, type_codes)
 
-                    print("Scrolling to load jobs...")
-                    for _ in range(5):
-                        await page.evaluate(SCROLL_JS, CARD_SELECTOR)
-                        await asyncio.sleep(2)
-
-                    cards = await page.evaluate(READ_CARDS_JS, CARD_SELECTOR)
-                    print(f"Found {len(cards)} job cards on this page.")
-
-                    if len(cards) == 0:
-                        break
-
-                    new_jobs_count = 0
-                    for info in cards:
+                        print(f"Searching for jobs: {keyword} in {location} (Page {page_num + 1})")
                         try:
-                            job_id = info['id']
-                            if db.job_exists(job_id):
-                                continue # Skip entirely if we already scraped this job
-                            title, company = info['title'], info['company']
-                            job_location = info['location'] or "Unknown Location"
-                            if not title or not company:
-                                continue
-                            # The same advert from Adzuna, an employer feed or an alert.
-                            if dedupe.already_listed(title, company):
-                                print(f"Skipping duplicate job ({job_id}): {title} at {company}")
-                                continue
+                            await page.goto(search_url, timeout=60000)
+                        except Exception as e:
+                            print(f"Failed to navigate to {search_url}: {e}. Skipping page...")
+                            continue
 
-                            # Clicking a card shows its advert in the detail panel and
-                            # puts its id in the address; wait for both, so the text
-                            # read is this job's and not the previous one's.
-                            await page.click(f'{CARD_SELECTOR}[componentkey="{CARD_KEY_PREFIX}{job_id}"]')
+                        try:
+                            await page.wait_for_selector(CARD_SELECTOR, timeout=15000)
+                        except Exception:
+                            print(f"Timeout waiting for job cards for {keyword} in {location} (Page {page_num + 1}). Skipping...")
+                            break # No more jobs
+
+                        print("Scrolling to load jobs...")
+                        for _ in range(5):
+                            await page.evaluate(SCROLL_JS, CARD_SELECTOR)
+                            await asyncio.sleep(2)
+
+                        cards = await page.evaluate(READ_CARDS_JS, CARD_SELECTOR)
+                        print(f"Found {len(cards)} job cards on this page.")
+
+                        if len(cards) == 0:
+                            break
+
+                        new_jobs_count = 0
+                        for info in cards:
                             try:
-                                await page.wait_for_function(
-                                    "id => location.href.includes('currentJobId=' + id)", arg=job_id, timeout=10000)
-                            except Exception:
-                                print(f"Job {job_id} did not open in the detail panel. Skipping...")
-                                continue
-                            await asyncio.sleep(1.5)
-                            description = await page.evaluate(READ_DESCRIPTION_JS)
-                            link = f"https://www.linkedin.com/jobs/view/{job_id}/"
-
-                            def is_duplicate(comp, desc):
-                                existing_descs = db.get_jobs_by_company(comp)
-                                for old_desc in existing_descs:
-                                    ratio = difflib.SequenceMatcher(None, desc, old_desc).ratio()
-                                    if ratio > 0.90:
-                                        return True
-                                return False
-
-                            if description:
-                                if is_duplicate(company, description):
+                                job_id = info['id']
+                                if db.job_exists(job_id):
+                                    continue # Skip entirely if we already scraped this job
+                                title, company = info['title'], info['company']
+                                job_location = info['location'] or "Unknown Location"
+                                if not title or not company:
+                                    continue
+                                # The same advert from Adzuna, an employer feed or an alert.
+                                if dedupe.already_listed(title, company):
                                     print(f"Skipping duplicate job ({job_id}): {title} at {company}")
                                     continue
 
-                                added = db.add_job(job_id, title, company, job_location.strip(), description, link, info['promoted'])
-                                if added:
-                                    new_jobs_count += 1
-                                    session_total_added += 1
-                                    print(f"[{session_total_added}] Added new job ({job_id}): {title} at {company}")
-                        except Exception as e:
-                            print(f"Error parsing a job card: {e}")
+                                # Clicking a card shows its advert in the detail panel and
+                                # puts its id in the address; wait for both, so the text
+                                # read is this job's and not the previous one's.
+                                await page.click(f'{CARD_SELECTOR}[componentkey="{CARD_KEY_PREFIX}{job_id}"]')
+                                try:
+                                    await page.wait_for_function(
+                                        "id => location.href.includes('currentJobId=' + id)", arg=job_id, timeout=10000)
+                                except Exception:
+                                    print(f"Job {job_id} did not open in the detail panel. Skipping...")
+                                    continue
+                                await asyncio.sleep(1.5)
+                                description = await page.evaluate(READ_DESCRIPTION_JS)
+                                link = f"https://www.linkedin.com/jobs/view/{job_id}/"
 
-                    if keyword not in keyword_stats:
-                        keyword_stats[keyword] = 0
-                    keyword_stats[keyword] += new_jobs_count
-                            
-                    print(f"Finished scraping '{keyword}' in {location} (Page {page_num + 1}). Added {new_jobs_count} new jobs.")
-                    await asyncio.sleep(3)
+                                def is_duplicate(comp, desc):
+                                    existing_descs = db.get_jobs_by_company(comp)
+                                    for old_desc in existing_descs:
+                                        ratio = difflib.SequenceMatcher(None, desc, old_desc).ratio()
+                                        if ratio > 0.90:
+                                            return True
+                                    return False
+
+                                if description:
+                                    if is_duplicate(company, description):
+                                        print(f"Skipping duplicate job ({job_id}): {title} at {company}")
+                                        continue
+
+                                    added = db.add_job(job_id, title, company, job_location.strip(), description, link, info['promoted'])
+                                    if added:
+                                        new_jobs_count += 1
+                                        session_total_added += 1
+                                        print(f"[{session_total_added}] Added new job ({job_id}): {title} at {company}")
+                            except Exception as e:
+                                print(f"Error parsing a job card: {e}")
+
+                        if keyword not in keyword_stats:
+                            keyword_stats[keyword] = 0
+                        keyword_stats[keyword] += new_jobs_count
+                                
+                        print(f"Finished scraping '{keyword}' in {location} (Page {page_num + 1}). Added {new_jobs_count} new jobs.")
+                        await asyncio.sleep(3)
+                    except Exception as e:
+                        # One search failing (a crashed tab, a page that never
+                        # settles) costs that search, not the rest of the run.
+                        print(f"Search '{keyword}' in {location} failed: {type(e).__name__}: {e}. Moving on.")
+                        break
         await browser.close()
         return keyword_stats
 

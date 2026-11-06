@@ -45,7 +45,14 @@ async def main():
         print("=== Step 1: Safe mode - no LinkedIn search ===")
     elif not skip_scrape:
         print("=== Step 1: Scraping LinkedIn Jobs ===")
-        keyword_stats = await run_scraper()
+        try:
+            keyword_stats = await run_scraper()
+        except Exception as e:
+            # The other sources, the scoring and the summary still run.
+            print(f"LinkedIn search failed: {type(e).__name__}: {e}")
+            keyword_stats = {}
+            source_notes.append(f"⚠️ The LinkedIn search failed part-way ({type(e).__name__}: {e}); "
+                                "the jobs it had found are kept.")
         if progress_tracker.is_stop_requested():
             print("Stop requested. Exiting.")
             progress_tracker.clear_status()

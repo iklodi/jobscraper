@@ -123,7 +123,7 @@ def test_the_penalty_comes_off_the_score_and_says_so(penalties, monkeypatch):
     monkeypatch.setattr(evaluate, 'get_tracks', lambda: [])
     result = evaluate.evaluate_job(None, None, 'Role', 'Example Ltd', 'London', 'text', 'cv', [], 'rules', False)
     assert result['score'] == 8
-    assert result['reasoning'] == 'A move to United Kingdom: -1 (fit 9). Strong fit.'
+    assert result['reasoning'] == 'A move to United Kingdom: -1 (fit 9.00). Strong fit.'
 
 
 def test_a_broken_rule_is_not_penalised_twice(penalties):

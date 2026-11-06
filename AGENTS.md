@@ -111,7 +111,8 @@ company, the role and the reason; the code offers it only that company's jobs
 in Applied, Interviewing or Declined (`same_company`) to pick from, and any
 doubt changes nothing. A match moves the job to Declined with the reason in
 its notes and "Found in: <sender>, <subject>, <date>, <folder>" in its
-history. Infomaniak only; a silent model leaves the email for the next run.
+history. Infomaniak or Claude only (`llm.py`), never Gemini or Groq; a silent
+model leaves the email for the next run.
 
 ### `link_queue.py` — links the candidate collected
 `python link_queue.py add <file or URL>...` queues adverts (a list, or a saved
@@ -172,7 +173,23 @@ it does not exist. Skips jobs already in the database; emails when the session
 has expired and waits five minutes for a login.
 
 ### `evaluate.py`
-Scores each `new` job 1-10 against the career dossier and `CVS_DIR/rules.md`.
+Scores each `new` job 0-10 against the career dossier and `CVS_DIR/rules.md`.
+The model does not give the score: in one turn it rates ten factors 0-100
+(`scoring.FACTORS`), plus its own `overall` 1-10 for reference and a
+`rule_reason` when a hard rule applies. `apply_factors` turns them into the
+composite (`scoring.composite`, two decimals) with the weight set of the
+model that answered (`llm.answered_by()`). **Nothing caps the score** - the
+candidate wants a weak factor outweighable by strong ones: rules.md's "must
+score 1 or 2" is weighed in the factor it concerns, a job breaking the
+location rules gets location 0 (`location_gate` on the reported facts), and
+only `HARD_RULES` reasons (default "Already applied", "Blacklisted company")
+set 1. The move penalty applies only to old-style answers without factors.
+The factors and the model are stored (`factor_scores`, `scored_by`) and
+shown in the job's detail view. Keep the factor scale and the weights apart:
+a model's grading bias belongs in its weight set (`scoring_weights.yaml`
+`models:`, fitted by `scoring.fit` to equal pass shares), never in the prompt.
+Everything before `THE JOB` in `eval_prompt.txt` is constant per run and
+cached; keep anything job-specific after it.
 At or above the pass mark it becomes `to_apply`, below it `scored`. The pass
 mark comes from one place, `db.min_pass_score()`, read live, and is injected
 into the prompt as `{min_score}` — so the board threshold and the score from
@@ -182,14 +199,15 @@ scores: a job added by link lands on To Do even at 2/10, and should show one.
 
 **Hard location rules are applied in code** (`location_gate`), not left to the
 model. It reports facts - work arrangement, country, region - which it gets
-right, and `HOME_COUNTRY` / `ONSITE_REGIONS` / `HYBRID_COUNTRIES` in `.env` cap
-a job that breaks them at 2. Nothing is tied to one country: "region" is
+right, and `HOME_COUNTRY` / `ONSITE_REGIONS` / `HYBRID_COUNTRIES` in `.env` set
+the location factor of a job that breaks them to 0 (old-style answers without
+factors: capped at 2). Nothing is tied to one country: "region" is
 whatever `REGION_TYPE` says (a Swiss canton, a US state, a French
 department), and the prompt asks for it in that form (`region_fact`). Asked to apply such a rule itself, gemma called an
 on-site Geneva role compliant and scored it 9. A job abroad in one of the
 `RELOCATION_COUNTRIES` passes those rules when the model's `salary_annual`
 (its pay estimate as one annual figure, converted to `SALARY_CURRENCY`)
-reaches `RELOCATION_MIN_SALARY`. A job that
+reaches `RELOCATION_MIN_SALARY`. For old-style answers only, a job that
 passes but means a move loses points (`location_penalty`): `RELOCATION_PENALTY`
 outside `HOME_COUNTRY`, `REGION_MOVE_PENALTY` outside `HOME_REGIONS`; the reasoning starts
 "A move to <country>: -1 (fit 9)". The facts are stored (`work_arrangement`,
@@ -234,6 +252,14 @@ analyst application reads like one (`track_vocabulary`). A country's own
 spelling is applied in code (`locales` `spelling`): German documents for a
 Swiss job use ss, never ß.
 
+### `scoring.py` — factors and the composite
+`FACTORS` (name → what the model rates), `DEFAULT_WEIGHTS`, and
+`scoring_weights.yaml` (repo, then `CVS_DIR` key by key). The composite is
+Σ weight·factor / Σ *default* weight / 10, clamped 0-10: a model's set that
+sums higher lifts its composites, which is how calibration works. `fit()`
+makes each model's set the default × (all models' mean / its mean) per factor,
+then scales it so the same share of the comparison's jobs passes one mark.
+
 ### `cv_norms.py` — how a CV is expected to look where the job is
 Regional norms (`REGIONS`, hard-coded): the document's name (a résumé in the
 US and Canada), the photo rule, page range, personal details to leave out or
@@ -264,14 +290,41 @@ Walks from the LinkedIn posting to the employer's form, fills it from
 defensive file here — see **Applier invariants**.
 
 ### `infomaniak.py`
-Infomaniak AI Services as an OpenAI-compatible provider, tried before Gemini and
-Groq everywhere. Its endpoint accepts **only** `response_format: json_schema` —
+Infomaniak AI Services as an OpenAI-compatible provider, first in the default
+`LLM_PROVIDERS` order. Its endpoint accepts **only** `response_format: json_schema` —
 `json_object` and `text` are rejected — so every caller passes a schema.
 Retries with jittered backoff across 408/429/5xx. Any one provider is enough to
 run; `evaluate.any_model_configured()` is the gate.
 
+### `claude.py` / `llm.py`
+`claude.py` is Anthropic's Claude API (`ANTHROPIC_API_KEY`, `CLAUDE_MODEL`
+default `claude-opus-5-5`, `CLAUDE_MODEL_SCORING` / `CLAUDE_MODEL_WRITING` per
+task via `llm.chat_json(task=)`, `CLAUDE_EFFORT` default `medium`), with the same
+`chat_json(prompt, schema)` as Infomaniak. **Prompt caching**: the scorer and
+the generator pass `cache_prefix`, the start of the prompt that is the same
+for every job (the CV, and for the generator the dossier too), which goes as
+its own block marked `cache_control`. Keep the job-specific placeholders
+*after* it in `eval_prompt.txt` and `generator_prompt.txt`
+(`test_claude.py` checks), or every call pays full price. `claude.USAGE`
+totals tokens per model. Answers are constrained with
+structured outputs; `strict_schema` closes every object
+(`additionalProperties: false`) and drops bounds the API rejects, so the
+schemas elsewhere stay as they are. No `temperature` is sent (current models
+reject it), and a classifier refusal is re-run server-side
+(`fallbacks: "default"`). `llm.py` holds every provider - Infomaniak, Claude,
+and the Gemini and Groq cascades - and asks them in `LLM_PROVIDERS` order
+(default `infomaniak,claude,gemini,groq`; one left out is never asked). Every
+caller goes through `llm.chat_json`; none has its own provider code. Decline
+emails pass `private=True`: Infomaniak and Claude only.
+
 ### `generate_from_url.py`
-One advert by URL, for the dashboard's + button. Reads the page, scores it, and
+One advert by URL, for the dashboard's + button. With several links in its
+box (pasted one per line, or from an uploaded text file or saved page, parsed
+by `/api/links/parse` with `link_queue.urls_in`), the button instead calls
+`/api/jobs/from-urls` → `link_queue.add_and_read`: queue them, read them now
+(LinkedIn ones logged out through `public_jobs`), and score them, filed on To
+Do or Discarded by score like any queued link; links already on the board are
+listed, not re-read. Reads the page, scores it, and
 files it on To Do *whatever it scores* — a link pasted by hand is a job already
 chosen. If the link is for a job already approved or applied to, it goes back
 where it was. `--generate` writes the documents immediately. A LinkedIn link
@@ -284,7 +337,13 @@ sign-in wall is reported, not worked around.
 Flask dashboard. Columns: Pending Eval (`new`), To Do, Approved, Applied,
 Interviewing, Declined, Failed, Account Required, Discarded (status `rejected`; the
 label changed, the status did not) — every one ordered by last
-modification, newest first. Every card has a checkbox; "Select all" takes the
+modification, newest first, unless its sort control (added to every column by
+`addSortControls` in `app.js`, remembered per column) picks date added, score
+or salary. Salary sorts on `salary_annual`, the scorer's annual figure in
+`SALARY_CURRENCY`; `python evaluate.py --salary-figures` fills it for jobs
+scored before it was stored, else the board reads the estimate's text. Every
+column has Clear filters (its text and score filters). There is no
+clear-the-column button: Select all and a bulk move do that. Every card has a checkbox; "Select all" takes the
 cards on screen (not those a filter hides or behind Load More), and while any
 are selected the column offers its moves in a menu (`BULK_ACTIONS` in
 `app.js`). `/api/jobs/bulk` makes the moves, skips jobs a background run
@@ -325,9 +384,10 @@ application.
 
 ## Models
 
-Infomaniak first (`google/gemma-4-31B-it` → `mistralai/Mistral-Small-4-119B`
-→ `swiss-ai/Apertus-v1.5-70B`), then the Gemini cascade, then Groq's
-`gpt-oss` models. The cascades in `evaluate.py` are shared by the generator.
+`LLM_PROVIDERS` sets the order; by default Infomaniak (`google/gemma-4-31B-it`
+→ `mistralai/Mistral-Small-4-119B` → `swiss-ai/Apertus-v1.5-70B`), then Claude
+(`CLAUDE_MODEL`), then the Gemini cascade, then Groq's `gpt-oss` models. The
+cascades live in `llm.py` and are shared by every caller.
 
 gemma leads despite being slower. Scoring the same 395 jobs with gemma and
 Mistral showed they agree on only 11%, with Mistral averaging 1.59 points high

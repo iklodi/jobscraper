@@ -1,0 +1,90 @@
+# Weights for the composite job score (scoring.py). Each factor is scored
+# 0-100 by the model; the composite is sum(weight * factor) / sum(default) / 10.
+# Override any of this in CVS_DIR/scoring_weights.yaml.
+default:
+  role_fit: 22
+  seniority: 13
+  experience: 10
+  skills: 10
+  industry: 5
+  location: 20        # heavily: a job in the wrong place rarely makes up for it
+  salary: 8
+  language: 6
+  employer: 3
+  growth: 3
+
+# Per-model sets, so the score means the same whichever model answers
+# (scoring.py): the default weights scaled factor by factor to the models'
+# common average, then as a whole so that every model passes the same share
+# of the same jobs at one mark. Fitted 2026-11-06 on 100 jobs scored by all
+# six models below, 51 of which passed under the old 1-10 scores; with these
+# sets each model passes about 51 of them at MIN_PASS_SCORE=6.41
+# (python scoring.py --fit ... --pass-share 0.51). A model not listed uses
+# the default weights, uncalibrated.
+models:
+  claude-haiku-5-5:
+    role_fit: 26.31
+    seniority: 14.77
+    experience: 12.74
+    skills: 13.12
+    industry: 6.89
+    location: 21.92
+    salary: 9.57
+    language: 6.17
+    employer: 3.37
+    growth: 3.42
+  claude-sonnet-5-5:
+    role_fit: 24.95
+    seniority: 14.11
+    experience: 11.49
+    skills: 11.18
+    industry: 5.77
+    location: 21.72
+    salary: 8.77
+    language: 5.93
+    employer: 3.15
+    growth: 3.48
+  claude-opus-5-5:
+    role_fit: 24.87
+    seniority: 14.19
+    experience: 12.22
+    skills: 11.73
+    industry: 5.85
+    location: 23.34
+    salary: 9.63
+    language: 6.03
+    employer: 3.23
+    growth: 3.34
+  google/gemma-4-31B-it:
+    role_fit: 19.52
+    seniority: 11.48
+    experience: 8.19
+    skills: 8.36
+    industry: 4.27
+    location: 14.66
+    salary: 6.96
+    language: 5.50
+    employer: 2.67
+    growth: 2.85
+  mistralai/Mistral-Small-4-119B-2603:
+    role_fit: 18.58
+    seniority: 11.95
+    experience: 8.56
+    skills: 8.65
+    industry: 4.42
+    location: 23.00
+    salary: 7.24
+    language: 6.79
+    employer: 2.87
+    growth: 2.43
+  gemini-3.5-flash:
+    role_fit: 20.38
+    seniority: 12.28
+    experience: 8.83
+    skills: 8.82
+    industry: 4.01
+    location: 18.49
+    salary: 6.88
+    language: 5.72
+    employer: 2.85
+    growth: 2.83

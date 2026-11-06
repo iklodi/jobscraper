@@ -20,7 +20,7 @@ Playwright browser using your own logged-in LinkedIn session.
 | Stage | What happens |
 |---|---|
 | **Find** | `scraper.py` walks the searches in `search_criteria.md` on LinkedIn (full mode only) and stores anything new. LinkedIn's job-alert emails, Adzuna's job API, employers' own job feeds and links you collected add more, in either mode. A job seen on two of them is kept once. |
-| **Score** | `evaluate.py` scores each job 1-10 against your dossier and `rules.md`, and files it under one of your search tracks. The location rules are applied in code (see [Where you will work](#where-you-will-work)). At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Discarded**. Re-scoring never moves a job you approved or applied to. A job whose description could not be read within `SAFE_FETCH_MAX_AGE_DAYS` (14) is discarded unscored. |
+| **Score** | `evaluate.py` rates each job against your dossier and `rules.md` on ten factors (role fit, seniority, experience, skills, industry, location, salary, language, employer, growth), each 0-100, in one model call, and computes the score from them: a weighted composite from 0 to 10, shown to two decimals (see [How a job is scored](#how-a-job-is-scored)). It also files the job under one of your search tracks. The location rules are applied in code (see [Where you will work](#where-you-will-work)). At or above `MIN_PASS_SCORE` it lands on **To Do**; below, on **Discarded**. Re-scoring never moves a job you approved or applied to. A job whose description could not be read within `SAFE_FETCH_MAX_AGE_DAYS` (14) is discarded unscored. |
 | **Approve** | You press **Approve** on the dashboard. *Only then* are documents written — nothing is generated for a job you will never send. |
 | **Apply** | **Apply Now** fills the employer's form and submits it; **Fill Now** does the same but stops at the submit button, leaving the form open in the browser for you (the card stays in Approved, tagged "Form filled"). Every step is screenshotted. LinkedIn **Easy Apply** is never automated — those jobs get a direct link for you to apply by hand. |
 | **Hear back** | A decline moves the job to **Declined** with the reason: from LinkedIn's status emails, from the decline emails you file under a mail label, or by hand. |
@@ -101,8 +101,9 @@ first run looks `DECLINE_LOOKBACK_DAYS` (90) back.
 ## Where you will work
 
 The scorer reports each job's work arrangement, country and region, and the
-code - not the model - applies your rules, capping a job that breaks them at 2
-("Location mismatch"). In `.env`:
+code - not the model - applies your rules: a job that breaks them gets 0 for
+the location factor ("Location mismatch"), which weighs heavily in the score
+but does not cap it. In `.env`:
 
 - `HOME_COUNTRY`: on-site and hybrid jobs pass anywhere in it.
 - `REGION_TYPE`: what a region is there and how to write it - a Swiss canton
@@ -166,7 +167,8 @@ work on them in both modes, with nothing to paste. It never touches LinkedIn.
 ## Links you collected
 
 Adverts you found yourself - a list of links, or a saved page of them - can be
-queued: `python link_queue.py add links.txt`. They wait in Pending Eval with
+added from the dashboard's **+** (read and scored at once), or queued:
+`python link_queue.py add links.txt`. Queued ones wait in Pending Eval with
 only their link, and each night up to `LINK_FETCH_MAX_PER_RUN` are read in a
 fresh browser, 5-10 seconds apart, and scored like any other job. An advert
 that is gone (404/410) is closed; one a site refuses is tried again on later
@@ -187,8 +189,9 @@ public pages instead.
 
 3. **Configuration**: copy `.env.example` to `.env` and fill it in. Every
    setting is documented there; the ones you cannot skip are one model provider
-   (`INFOMANIAK_API_TOKEN` + `INFOMANIAK_PRODUCT_ID`, `GEMINI_API_KEY` or
-   `GROQ_API_KEY` — any one is enough) and `CVS_DIR`. Then copy
+   (`INFOMANIAK_API_TOKEN` + `INFOMANIAK_PRODUCT_ID`, `ANTHROPIC_API_KEY` for
+   the Claude API, `GEMINI_API_KEY` or `GROQ_API_KEY` — any one is enough;
+   `LLM_PROVIDERS` sets the default provider and the fallback order) and `CVS_DIR`. Then copy
    `profile.example.yaml` to `CVS_DIR/profile.yaml` and fill in your answers.
 
 4. **Log in to LinkedIn once**:
@@ -206,6 +209,28 @@ public pages instead.
 
 ## Your files live outside the repo
 
+## How a job is scored
+
+The model rates every factor 0-100 in a single answer, and the score is computed
+in code (`scoring.py`):
+
+    score = sum(weight × factor) / sum(default weights) / 10
+
+Nothing caps it: a weak factor can be made up by strong ones. Location weighs
+the most after role fit, and a job that breaks your location rules (checked in
+code) gets 0 for location. Only `HARD_RULES` (default `Already applied,
+Blacklisted company`) rule a job out, at 1. The weights are in
+`scoring_weights.yaml`; put your own in `CVS_DIR/scoring_weights.yaml` to
+change what matters (only the keys you set change). Each job's detail view
+shows its factors and the model that scored it.
+
+Models grade differently - one's 70 is another's 85 - so each model can have its
+own weight set under `models:`: the default weights scaled factor by factor
+to a common average, then as a whole so that every model passes the same
+share of the same jobs at one pass mark. `python scoring.py --fit results.json
+--pass-share 0.5` computes the sets and that mark from a comparison of models
+on the same jobs. `MIN_PASS_SCORE` may have decimals (`6.5`).
+
 Everything personal sits in `CVS_DIR` and is never committed:
 
 | File | What it is |
@@ -215,6 +240,7 @@ Everything personal sits in `CVS_DIR` and is never committed:
 | `docs/<DOSSIER_NAME>` | Career history in markdown. The scorer and generator both read it. |
 | `search_criteria.md` | Keywords, locations and job types. A keyword can pin its own: `- Interim Manager @ Switzerland / France`. An optional `# Tracks` section (`- Name: what the track is`) files every scored job under one track, and the board filters by them. |
 | `rules.md` | Scoring rules, injected into the evaluator prompt. |
+| `scoring_weights.yaml` | Optional: your own factor weights, over the repository's `scoring_weights.yaml`. |
 | `profile.yaml` | Answer bank for application forms — identity, work authorisation, salary and contract rates, screening answers. The applier never invents an answer; anything missing is reported so you can add it here. |
 | `attach/` | Diplomas, reference letters and anything else a form may ask to upload, wired up under `attachments:` in `profile.yaml`. |
 | `applications/` | Generated documents, the screenshot trail, and a `<job_id>_run.json` manifest per application. |
@@ -227,7 +253,10 @@ will search for.
 
 - **+** — paste any job URL (LinkedIn or an employer's own page). It reads the
   advert, scores it, and puts it on To Do whatever it scores; approving it there
-  writes the documents.
+  writes the documents. Paste several, one per line, or **Upload a text file**
+  of them (or a saved page of links): they are read and scored one after
+  another, filed on To Do or Discarded by score, and listed when done.
+  Ctrl/Cmd+Enter sends.
 - **⚙️ Search Settings** — edit the keywords and scoring rules.
 - **Run Pipeline / Run Evaluations Only** — trigger a run by hand.
 - **📤 Apply to Approved / 📝 Fill Approved** — work through every approved job.
@@ -239,7 +268,8 @@ will search for.
   declined (with one reason for all)...
 - **Track filter** above the board, for the tracks in `search_criteria.md`.
 - **Mark as Declined** on an applied job asks for the employer's reason.
-  **Clear** moves everything on To Do or Failed to Discarded.
+- **Sort** any column by last change, date added, score or salary (the arrow
+  flips the order); **Clear filters** on every column resets its filters. To empty a column, Select all and move the jobs.
 - **On a phone** the board shows one column at a time, with a strip of column
   names to jump between them.
 - After a batch, the email lists every question your profile could not answer,

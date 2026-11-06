@@ -3,11 +3,11 @@ import os
 import json
 from groq import Groq
 from google import genai
-from google.genai import types
 from docx import Document
 import time
 import progress_tracker
-import infomaniak
+import llm
+import scoring
 
 CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 
@@ -18,6 +18,12 @@ def min_pass_score():
     estimate is asked for every job."""
     return db.min_pass_score()
 
+
+def format_min_score():
+    """The pass mark for the prompt: "7", or "6.5" when set so."""
+    mark = min_pass_score()
+    return f'{mark:g}'
+
 DOSSIER_NAME = os.environ.get('DOSSIER_NAME', 'Career_Dossier.md')
 DOSSIER_PATH = os.path.join(CVS_DIR, 'docs', DOSSIER_NAME)
 
@@ -25,16 +31,9 @@ def load_prompt(filename):
     path = os.path.join(os.path.dirname(__file__), 'prompts', filename)
     with open(path, 'r', encoding='utf-8') as f:
         return f.read()
-GEMINI_MODELS = [
-#    'gemini-3.1-pro-preview',
-    'gemini-3.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite'
-]
-GROQ_MODELS = [
-    'openai/gpt-oss-120b',
-    'openai/gpt-oss-20b'
-]
+# The cascades live in llm.py; named here for the modules importing them.
+GEMINI_MODELS = llm.GEMINI_MODELS
+GROQ_MODELS = llm.GROQ_MODELS
 
 # Infomaniak's endpoint only accepts response_format 'json_schema', so the
 # shapes the prompts ask for have to be spelled out. Fields the prompt lets
@@ -42,7 +41,15 @@ GROQ_MODELS = [
 EVAL_SCHEMA = {
     'type': 'object',
     'properties': {
-        'score': {'type': 'integer'},
+        # Each factor 0-100; the score itself is computed from them in code
+        # (scoring.composite), with the model's weights.
+        'factors': scoring.schema(),
+        # A rule that rules the job out entirely ("Already applied"): only the
+        # reasons in HARD_RULES cap the score; every other rule works through
+        # the factors.
+        'rule_reason': {'type': ['string', 'null']},
+        # The model's own 1-10 verdict, kept for comparison; not the score.
+        'overall': {'type': ['integer', 'null']},
         'reasoning': {'type': 'string'},
         'missing_skills': {'type': 'array', 'items': {'type': 'string'}},
         'salary_estimate': {'type': ['string', 'null']},
@@ -57,7 +64,7 @@ EVAL_SCHEMA = {
         'region': {'type': ['string', 'null']},
         'track': {'type': ['string', 'null']},
     },
-    'required': ['work_arrangement', 'country', 'region', 'score', 'reasoning'],
+    'required': ['factors', 'rule_reason', 'work_arrangement', 'country', 'region', 'reasoning'],
 }
 
 COMPARE_SCHEMA = {
@@ -71,53 +78,15 @@ COMPARE_SCHEMA = {
 
 
 def compare_jobs(groq_client, gemini_client, comp_prompt):
-    max_retries = 3
+    """The clients are unused: llm.py asks every provider, in LLM_PROVIDERS order."""
     delay = 2
-    for attempt in range(max_retries):
-        # Infomaniak first when configured: Swiss-hosted, and it keeps the
-        # scoring off Gemini's quota. Falls through silently when unset.
-        result = infomaniak.chat_json(comp_prompt, COMPARE_SCHEMA)
+    for attempt in range(3):
+        result = llm.chat_json(comp_prompt, COMPARE_SCHEMA, task='scoring')
         if result:
             return result
-        if gemini_client:
-            for model_name in GEMINI_MODELS:
-                try:
-                    response = gemini_client.models.generate_content(
-                        model=model_name,
-                        contents=comp_prompt,
-                        config=types.GenerateContentConfig(response_mime_type="application/json")
-                    )
-                    text = response.text.strip()
-                    if text.startswith('```json'): text = text[7:]
-                    elif text.startswith('```'): text = text[3:]
-                    if text.endswith('```'): text = text[:-3]
-                    start = text.find('{'); end = text.rfind('}')
-                    if start != -1 and end != -1: text = text[start:end+1]
-                    return json.loads(text)
-                except Exception:
-                    continue
-        if groq_client:
-            for model_name in GROQ_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=[{"role": "user", "content": comp_prompt}],
-                        response_format={"type": "json_object"},
-                        temperature=0.1
-                    )
-                    text = response.choices[0].message.content.strip()
-                    if text.startswith('```json'): text = text[7:]
-                    elif text.startswith('```'): text = text[3:]
-                    if text.endswith('```'): text = text[:-3]
-                    start = text.find('{'); end = text.rfind('}')
-                    if start != -1 and end != -1: text = text[start:end+1]
-                    return json.loads(text)
-                except Exception:
-                    continue
         time.sleep(delay)
         delay *= 2
     return None
-
 
 def get_previous_applications():
     """(company, title) of every application actually sent: Applied,
@@ -249,13 +218,64 @@ def apply_location_rules(result):
     broken = location_gate(result)
     if broken:
         if score > 2:
-            result['score'] = 2
+            result['score'] = 2.0
             result['reasoning'] = f"{broken}. {result.get('reasoning') or ''}".strip()
         return result
     points, why = location_penalty(result)
     if points and score > 1:
-        result['score'] = max(1, score - points)
-        result['reasoning'] = f"{why} (fit {score}). {result.get('reasoning') or ''}".strip()
+        result['score'] = round(max(1, score - points), 2)
+        result['reasoning'] = f"{why} (fit {format_score(score)}). {result.get('reasoning') or ''}".strip()
+    return result
+
+
+def format_score(score):
+    """A score as the board shows it: two decimals (7.25), whole numbers too."""
+    try:
+        return f'{float(score):.2f}'
+    except (TypeError, ValueError):
+        return str(score)
+
+
+DEFAULT_HARD_RULES = 'Already applied,Blacklisted company'
+# What the location factor becomes when a job breaks the location rules.
+LOCATION_BROKEN = 0
+
+
+def hard_rules():
+    """Rule reasons that still rule a job out (score 1): HARD_RULES in .env,
+    comma-separated. Facts, not judgements - an application already sent, a
+    company never to apply to. Everything else is weighed in the factors."""
+    setting = os.environ.get('HARD_RULES')
+    setting = DEFAULT_HARD_RULES if setting is None else setting
+    return [r.strip().lower() for r in setting.split(',') if r.strip()]
+
+
+def apply_factors(result, model=None):
+    """The board score from the model's factors (in place).
+
+    Nothing caps the score: a weak factor is outweighed by strong ones. The
+    location rules work through the location factor instead - a job that
+    breaks them (location_gate, on the facts the model reported) gets
+    location 0, and its reasoning says why. Only a reason in HARD_RULES
+    ("Already applied") sets the score to 1. A reply with no factors (an
+    old-style answer) keeps its score and gets the old location rules."""
+    result['scored_by'] = model
+    if not isinstance(result.get('factors'), dict):
+        if 'score' not in result:
+            result['score'] = float(result.get('overall') or 0)
+        return apply_location_rules(result)
+    factors = scoring.clean_factors(result['factors'])
+    broken = location_gate(result)
+    if broken:
+        factors['location'] = min(factors['location'], LOCATION_BROKEN)
+        result['reasoning'] = f"{broken}: location {LOCATION_BROKEN}. {result.get('reasoning') or ''}".strip()
+    result['factors'] = factors
+    result['score'] = scoring.composite(factors, model)
+    reason = (result.get('rule_reason') or '').strip()
+    if reason and any(reason.lower().startswith(rule) for rule in hard_rules()):
+        result['score'] = 1.0
+        if not (result.get('reasoning') or '').startswith(reason):
+            result['reasoning'] = f"{reason}. {result.get('reasoning') or ''}".strip()
     return result
 
 
@@ -293,10 +313,9 @@ def get_evaluation_rules():
         return f.read()
 
 def any_model_configured(groq_client=None, gemini_client=None):
-    """True when at least one provider can answer. Infomaniak alone is enough;
-    the gates used to check only Gemini and Groq, so an Infomaniak-only setup
-    silently skipped evaluation."""
-    return bool(infomaniak.get_config() or groq_client or gemini_client)
+    """True when at least one provider in LLM_PROVIDERS can answer. The
+    clients are kept for the callers' sake: llm.py makes its own."""
+    return bool(llm.configured())
 
 
 def get_groq_client():
@@ -319,7 +338,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                             cv_text, previous_applications, rules_text, is_promoted, custom_instructions)
     if result:
         result['track'] = normalise_track(result.get('track'), get_tracks())
-        apply_location_rules(result)
+        apply_factors(result, llm.answered_by()[1])
     return result
 
 
@@ -327,116 +346,45 @@ def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_locat
     prompt_template = load_prompt('eval_prompt.txt')
     for placeholder, value in prompt_example_facts().items():
         prompt_template = prompt_template.replace(placeholder, value)
-    prompt = prompt_template.replace('{cv_text}', cv_text) \
-                            .replace('{job_title}', job_title) \
-                            .replace('{job_company}', job_company) \
-                            .replace('{job_location}', job_location) \
-                            .replace('{is_promoted}', str(is_promoted)) \
-                            .replace('{job_desc}', job_desc) \
-                            .replace('{rules_text}', rules_text) \
-                            .replace('{previous_applications}', chr(10).join(previous_applications)) \
-                            .replace('{min_score}', str(min_pass_score())) \
-                            .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)') \
-                            .replace('{region_fact}', region_fact())
-    
+    # Everything before the job is the same for every job - the CV, the
+    # rules, the instructions: the cacheable start of the prompt.
+    head = prompt_template.replace('{cv_text}', cv_text) \
+                          .replace('{rules_text}', rules_text) \
+                          .replace('{factors}', scoring.prompt_lines()) \
+                          .replace('{factor_example}', json.dumps({f: 70 for f in scoring.FACTORS})) \
+                          .replace('{min_score}', format_min_score()) \
+                          .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)') \
+                          .replace('{region_fact}', region_fact())
+    prompt = head.replace('{job_title}', job_title) \
+                 .replace('{job_company}', job_company) \
+                 .replace('{job_location}', job_location) \
+                 .replace('{is_promoted}', str(is_promoted)) \
+                 .replace('{job_desc}', job_desc) \
+                 .replace('{previous_applications}', chr(10).join(previous_applications))
+    cache_prefix = head[:head.index('THE JOB\nJob Title: {job_title}')]
+
     if custom_instructions:
         prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER FOR RE-EVALUATION:\n{custom_instructions}\n"
     
     
     max_retries = 5
     delay = 10
-    
+
     for attempt in range(max_retries):
-        # Infomaniak first when configured; unset, this costs one dict lookup.
-        result = infomaniak.chat_json(prompt, EVAL_SCHEMA)
+        # Every provider, in LLM_PROVIDERS order (llm.py).
+        result = llm.chat_json(prompt, EVAL_SCHEMA, task='scoring', cache_prefix=cache_prefix)
         if result:
             return result
 
-        # Try all Gemini models in descending order of quality
-        if gemini_client:
-            for model_name in GEMINI_MODELS:
-                try:
-                    response = gemini_client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                        ),
-                    )
-                    
-                    text = response.text.strip()
-                    if text.startswith('```json'):
-                        text = text[7:]
-                    elif text.startswith('```'):
-                        text = text[3:]
-                    if text.endswith('```'):
-                        text = text[:-3]
-                    
-                    # Safety catch to only parse what's inside the braces
-                    start = text.find('{')
-                    end = text.rfind('}')
-                    if start != -1 and end != -1:
-                        text = text[start:end+1]
-                        
-                    return json.loads(text)
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if '429' in error_str or 'resource_exhausted' in error_str or 'quota' in error_str:
-                        print(f"  -> Gemini {model_name} rate limited. Cascading to next model...")
-                        continue
-                    elif '503' in error_str or 'unavailable' in error_str:
-                        print(f"  -> Gemini {model_name} overloaded. Cascading to next model...")
-                        continue
-                    else:
-                        print(f"  -> Gemini Error on {model_name}: {e}")
-                        continue
-        
-        # Fallback to Groq models
-        if groq_client:
-            for model_name in GROQ_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_format={"type": "json_object"},
-                        temperature=0.1
-                    )
-                    
-                    text = response.choices[0].message.content.strip()
-                    if text.startswith('```json'):
-                        text = text[7:]
-                    elif text.startswith('```'):
-                        text = text[3:]
-                    if text.endswith('```'):
-                        text = text[:-3]
-                        
-                    start = text.find('{')
-                    end = text.rfind('}')
-                    if start != -1 and end != -1:
-                        text = text[start:end+1]
-                        
-                    return json.loads(text)
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if '429' in error_str or 'rate_limit' in error_str:
-                        print(f"  -> Groq {model_name} rate limited. Cascading...")
-                        continue
-                    elif '503' in error_str:
-                        print(f"  -> Groq {model_name} overloaded. Cascading...")
-                        continue
-                    else:
-                        print(f"  -> Groq Error on {model_name}: {e}")
-                        continue
-        
         if not any_model_configured(groq_client, gemini_client):
-            print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
+            print("Error: no model configured - set INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY or GROQ_API_KEY.")
             return None
-            
-        # If we exhausted ALL models in the cascade, we hit a hard wall.
+
+        # Every provider failed: a hard wall, usually quotas.
         print(f"All models exhausted. Sleeping for {delay} seconds to clear quotas before trying again...")
         time.sleep(delay)
         delay *= 2
-                
+
     print("Max retries exceeded. Could not evaluate job.")
     return None
 
@@ -454,7 +402,7 @@ def run_evaluation():
     gemini_client = get_gemini_client()
     
     if not any_model_configured(groq_client, gemini_client):
-        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY or GROQ_API_KEY.")
         return
 
     print("Loading Career Dossier...")
@@ -492,7 +440,7 @@ def run_evaluation():
             hiring_manager_name = result.get('hiring_manager_name', None)
             jd_language = result.get('jd_language', None)
             
-            print(f"--> Score: {score}/10")
+            print(f"--> Score: {format_score(score)}/10")
             if score >= min_pass_score():
                 print(f"--> Salary: {estimated_salary} | Recruiter: {is_recruiter} | HM: {hiring_manager_name} | Lang: {jd_language}")
             
@@ -529,17 +477,20 @@ def run_evaluation():
             
             # Counted after the comparison, so a job rejected in favour of an
             # existing one is not announced in the summary as a new match.
-            eval_stats['score_counts'][score] = eval_stats['score_counts'].get(score, 0) + 1
+            bucket = max(1, min(10, int(score)))        # the summary counts whole points
+            eval_stats['score_counts'][bucket] = eval_stats['score_counts'].get(bucket, 0) + 1
             entry = {'job_id': job_id, 'title': title, 'company': company, 'score': score}
             if score >= min_pass_score():
                 eval_stats['recent_backlog'].append(entry)
-            elif score >= int(os.environ.get('NEAR_MISS_SCORE', 6)):
+            elif score >= float(os.environ.get('NEAR_MISS_SCORE', 6)):
                 # Worth a look even though they did not clear the bar - otherwise a
                 # run with nothing over the bar produces a summary with nothing to click.
                 eval_stats['near_misses'].append(entry)
 
             db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
-                                hiring_manager_name, jd_language, track)
+                                hiring_manager_name, jd_language, track,
+                                factors=result.get('factors'), scored_by=result.get('scored_by'),
+                                salary_annual=result.get('salary_annual'))
             db.set_location_facts(job_id, result)
         else:
             print("--> Failed to evaluate.")
@@ -566,7 +517,7 @@ def evaluate_single_job(job_id, custom_instructions=None):
     gemini_client = get_gemini_client()
     
     if not any_model_configured(groq_client, gemini_client):
-        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY or GROQ_API_KEY.")
         return False
         
     try:
@@ -594,10 +545,12 @@ def evaluate_single_job(job_id, custom_instructions=None):
         is_recruiter = result.get('is_recruiter', None)
         hiring_manager_name = result.get('hiring_manager_name', None)
         jd_language = result.get('jd_language', None)
-        print(f"--> Score: {score}/10")
+        print(f"--> Score: {format_score(score)}/10")
         
         db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
-                            hiring_manager_name, jd_language, result.get('track'))
+                            hiring_manager_name, jd_language, result.get('track'),
+                            factors=result.get('factors'), scored_by=result.get('scored_by'),
+                                salary_annual=result.get('salary_annual'))
         db.set_location_facts(job_id, result)
         return True
     else:
@@ -617,12 +570,12 @@ ACTIVE_STATUSES = ('to_apply', 'generated', 'approved', 'ready_to_submit', 'easy
 def classify_tracks(statuses=ACTIVE_STATUSES, ask=None):
     """File jobs scored before tracks existed under one, without re-scoring
     them: a short prompt per job. Returns {track: jobs filed}.
-    `ask` is for tests; by default the Infomaniak model answers."""
+    `ask` is for tests; by default the configured providers answer (llm.py)."""
     tracks = get_tracks()
     if not tracks:
         print('No "# Tracks" section in search_criteria.md - nothing to file jobs under.')
         return {}
-    ask = ask or (lambda prompt: infomaniak.chat_json(prompt, TRACK_SCHEMA))
+    ask = ask or (lambda prompt: llm.chat_json(prompt, TRACK_SCHEMA, task='scoring'))
     template = load_prompt('track_prompt.txt')
     conn = db.get_connection()
     marks = ','.join('?' * len(statuses))
@@ -679,7 +632,7 @@ def apply_move_penalty(statuses=('to_apply', 'generated'), ask=None):
     points off. A job whose facts are already stored is left alone, so the
     penalty is never taken twice. A job that falls below the pass mark moves
     to Discarded's below-the-bar list (scored). Returns {'checked', 'lowered', 'dropped'}."""
-    ask = ask or (lambda prompt: infomaniak.chat_json(prompt, LOCATION_SCHEMA))
+    ask = ask or (lambda prompt: llm.chat_json(prompt, LOCATION_SCHEMA, task='scoring'))
     conn = db.get_connection()
     marks = ','.join('?' * len(statuses))
     jobs = conn.execute(f"SELECT job_id, title, company, location, description, score, reasoning, status "
@@ -700,11 +653,11 @@ def apply_move_penalty(statuses=('to_apply', 'generated'), ask=None):
         points, why = location_penalty(result)
         if not points or (score or 0) <= 1:
             continue
-        new = max(1, score - points)
+        new = round(max(1, score - points), 2)
         new_status = status if new >= min_pass_score() else 'scored'
         conn = db.get_connection()
         conn.execute('UPDATE jobs SET score = ?, reasoning = ? WHERE job_id = ?',
-                     (new, f'{why} (fit {score}). {reasoning or ""}'.strip(), job_id))
+                     (new, f'{why} (fit {format_score(score)}). {reasoning or ""}'.strip(), job_id))
         conn.commit()
         conn.close()
         if new_status != status:
@@ -715,8 +668,65 @@ def apply_move_penalty(statuses=('to_apply', 'generated'), ask=None):
     return stats
 
 
+SALARY_FIGURES_SCHEMA = {
+    'type': 'object',
+    'properties': {'figures': {'type': 'array', 'items': {
+        'type': 'object',
+        'properties': {'id': {'type': 'string'}, 'annual': {'type': ['integer', 'null']}},
+        'required': ['id', 'annual']}}},
+    'required': ['figures'],
+}
+SALARY_FIGURES_PROMPT = """Each line below is a salary estimate for a job, written by a recruiter. For each,
+give "annual": one number - the middle of the range, as an annual gross amount
+converted to {currency} at current exchange rates (a day rate times 200 working
+days; a monthly figure times 12; an hourly one times 1,600). Where a line gives
+several figures, use the one in {currency}, else the annual one. null when it
+states no amount. Answer as {{"figures": [{{"id": ..., "annual": ...}}, ...]}}, one per line.
+
+{lines}
+"""
+
+
+def fill_salary_figures(statuses=None, batch=40, ask=None):
+    """Store salary_annual for jobs scored before it was kept, from their
+    salary estimate's text, so the board can sort them by pay. Many
+    estimates per prompt: a short task. Returns how many were filled."""
+    ask = ask or (lambda prompt: llm.chat_json(prompt, SALARY_FIGURES_SCHEMA, task='scoring'))
+    conn = db.get_connection()
+    where = "salary_annual IS NULL AND COALESCE(TRIM(estimated_salary), '') NOT IN ('', 'Unknown')"
+    args = ()
+    if statuses:
+        where += f" AND status IN ({','.join('?' * len(statuses))})"
+        args = tuple(statuses)
+    rows = conn.execute(f'SELECT job_id, estimated_salary FROM jobs WHERE {where}', args).fetchall()
+    conn.close()
+    filled = 0
+    for start in range(0, len(rows), batch):
+        chunk = rows[start:start + batch]
+        lines = '\n'.join(f'{job_id}: {" ".join(text.split())[:200]}' for job_id, text in chunk)
+        answer = ask(SALARY_FIGURES_PROMPT.format(currency=salary_currency(), lines=lines)) or {}
+        known = {job_id for job_id, _ in chunk}
+        conn = db.get_connection()
+        for item in answer.get('figures') or []:
+            value = item.get('annual')
+            if str(item.get('id')) in known and isinstance(value, (int, float)) and value > 0:
+                conn.execute('UPDATE jobs SET salary_annual = ? WHERE job_id = ?', (value, str(item['id'])))
+                filled += 1
+        conn.commit()
+        conn.close()
+        print(f'[{min(start + batch, len(rows))}/{len(rows)}] salary figures filled: {filled}')
+    return filled
+
+
 if __name__ == '__main__':
     import sys
+    if '--salary-figures' in sys.argv:
+        # --all includes every job, Discarded too; by default the active columns.
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+        db.init_db()
+        print(fill_salary_figures(None if '--all' in sys.argv else ACTIVE_STATUSES + ('new',)))
+        sys.exit()
     if '--move-penalty' in sys.argv:
         from dotenv import load_dotenv
         load_dotenv(override=True)

@@ -7,6 +7,14 @@ import markdown
 import db
 import urllib.parse
 
+def _score(score):
+    """A composite score to two decimals, as the board shows it."""
+    try:
+        return f'{float(score):.2f}'
+    except (TypeError, ValueError):
+        return str(score)
+
+
 def dashboard_url():
     """Base URL for links that have to work from another device."""
     return os.environ.get('DASHBOARD_URL', 'http://localhost:5050').rstrip('/')
@@ -75,7 +83,7 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts, source_no
     if total_evaluated > 0:
         for score in range(1, 11):
             if score_counts.get(score, 0) > 0:
-                lines.append(f"- **Score {score}**: {score_counts[score]}")
+                lines.append(f"- **Score {score}-{score}.99**: {score_counts[score]}")
     lines.append("")
                 
     recent_backlog = eval_stats.get('recent_backlog', [])
@@ -87,16 +95,16 @@ def format_summary(duration, keyword_stats, eval_stats, status_counts, source_no
             company = job['company']
             score = job['score']
             
-            lines.append(f"- **[{score}/10]** {title} @ **{company}**" + _job_links(job_id))
+            lines.append(f"- **[{_score(score)}/10]** {title} @ **{company}**" + _job_links(job_id))
     lines.append("")
             
     # Near misses: without these, a run with no 9s has nothing to click.
     near_misses = eval_stats.get('near_misses', [])
     if near_misses:
-        lines.append(f"## Worth a look (scored {os.environ.get('NEAR_MISS_SCORE', 6)}-"
-                     f"{int(os.environ.get('MIN_PASS_SCORE', 7)) - 1})\n")
+        lines.append(f"## Worth a look (scored {os.environ.get('NEAR_MISS_SCORE', 6)} to just under "
+                     f"{os.environ.get('MIN_PASS_SCORE', 7)})\n")
         for job in sorted(near_misses, key=lambda j: -j['score'])[:10]:
-            lines.append(f"- **[{job['score']}/10]** {job['title']} @ **{job['company']}**"
+            lines.append(f"- **[{_score(job['score'])}/10]** {job['title']} @ **{job['company']}**"
                          + _job_links(job.get('job_id')))
         lines.append("")
 

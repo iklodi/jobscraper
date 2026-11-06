@@ -8,13 +8,12 @@ import subprocess
 import sys
 from groq import Groq
 from google import genai
-from google.genai import types
 import time
 import progress_tracker
 import locales
 import cv_norms
-import infomaniak
-from evaluate import GEMINI_MODELS, GROQ_MODELS, any_model_configured
+import llm
+from evaluate import any_model_configured
 from playwright.async_api import async_playwright
 import PyPDF2
 
@@ -130,60 +129,26 @@ def generate_tailored_texts(groq_client, gemini_client, job, cv_text, dossier_te
                             .replace('{language_instruction}', language_instruction) \
                             .replace('{track_instruction}', track_instruction) \
                             .replace('{cv_norms}', norms_text)
+    # The CV and dossier are the same for every job: the cacheable start.
+    cache_prefix = prompt_template[:prompt_template.index("I am applying for the '{title}'")] \
+        .replace('{cv_text}', cv_text).replace('{dossier_text}', dossier_text)
         
-    max_retries = 5
-    for attempt in range(max_retries):
-        result = None
-        error_msg = ""
-
-        # Infomaniak first when configured; unset, chat_json returns None
-        # immediately and the Gemini/Groq path below is unchanged.
-        result = infomaniak.chat_json(prompt, GEN_SCHEMA)
-
-        if not result and gemini_client:
-            for model_name in GEMINI_MODELS:
-                try:
-                    response = gemini_client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                        ),
-                    )
-                    result = json.loads(response.text)
-                    break
-                except Exception as e:
-                    error_msg += f"Gemini {model_name}: {str(e)} | "
-
-        if not result and groq_client:
-            for model_name in GROQ_MODELS:
-                try:
-                    response = groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_format={"type": "json_object"},
-                        temperature=0.1
-                    )
-                    result = json.loads(response.choices[0].message.content)
-                    break
-                except Exception as e:
-                    error_msg += f"Groq {model_name}: {str(e)} | "
-
+    # Every provider, in LLM_PROVIDERS order (llm.py); a round where none
+    # answers is usually a quota, so wait and try again before giving up.
+    result = None
+    for attempt in range(4):
+        result = llm.chat_json(prompt, GEN_SCHEMA, task='writing', cache_prefix=cache_prefix)
         if result:
             break
-            
-        if '429' in error_msg or 'RESOURCE_EXHAUSTED' in error_msg or 'rate_limit' in error_msg:
-            print(f"API Rate Limit Block: {error_msg}")
-            print("Falling back to 'Slow and Smart' mode (sleeping 32 seconds to clear TPM quota)...")
-            import time
-            time.sleep(32)
-        elif '503' in error_msg or 'UNAVAILABLE' in error_msg:
-            print(f"API overload detected: {error_msg}")
-            import time
-            time.sleep(10)
-        else:
-            raise Exception(f"Failed to generate documents from APIs: {error_msg}")
-    
+        if not llm.configured():
+            break
+        if attempt < 3:
+            print(f"No provider answered; trying again in {10 * (attempt + 1)} seconds...")
+            time.sleep(10 * (attempt + 1))
+    if not result:
+        raise Exception('Failed to generate documents: no model provider answered '
+                        '(see the log above for each one\'s error).')
+
     # Aggressive post-processing fallback just in case the AI ignores the prompt
     result['cv_summary'] = result['cv_summary'].replace('—', ' - ').replace('–', ' - ')
     result['cover_letter_body'] = result['cover_letter_body'].replace('—', ' - ').replace('–', ' - ')
@@ -416,28 +381,7 @@ def is_english(language):
 
 def ask_json(prompt, schema):
     """One JSON answer from the first provider that gives one; None if none does."""
-    result = infomaniak.chat_json(prompt, schema)
-    if result:
-        return result
-    gemini_client = get_gemini_client()
-    for model_name in (GEMINI_MODELS if gemini_client else []):
-        try:
-            response = gemini_client.models.generate_content(
-                model=model_name, contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json"))
-            return json.loads(response.text)
-        except Exception as e:
-            print(f"Gemini {model_name}: {e}")
-    groq_client = get_groq_client()
-    for model_name in (GROQ_MODELS if groq_client else []):
-        try:
-            response = groq_client.chat.completions.create(
-                model=model_name, messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}, temperature=0.1)
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"Groq {model_name}: {e}")
-    return None
+    return llm.chat_json(prompt, schema, task='writing')
 
 
 def translate_texts(items, language):
@@ -869,7 +813,7 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
     gemini_client = get_gemini_client()
     
     if not any_model_configured(groq_client, gemini_client):
-        print("Error: no model configured - set INFOMANIAK_API_TOKEN, GEMINI_API_KEY or GROQ_API_KEY.")
+        print("Error: no model configured - set INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY, GEMINI_API_KEY or GROQ_API_KEY.")
         conn.close()
         return False
         

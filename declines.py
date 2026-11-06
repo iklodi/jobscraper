@@ -20,7 +20,8 @@ confident pick, or an email that is not a decline - goes to the summary and
 changes nothing: a wrong match would hide a live application.
 
 Mail is read as alerts.py reads it, with BODY.PEEK, and never marked or moved.
-The email's text goes to the Infomaniak model only (no fallback provider).
+The email's text goes only to Infomaniak or Claude (llm.py, LLM_PROVIDERS),
+never to the Gemini or Groq fallbacks.
 
 Settings (.env): DECLINE_FOLDER (empty = off), DECLINE_LOOKBACK_DAYS (default
 90, first run only).
@@ -33,7 +34,7 @@ import re
 
 import alerts
 import db
-import infomaniak
+import llm
 from dedupe import same_company
 
 CANDIDATE_STATUSES = ('applied', 'interviewing', 'declined')
@@ -86,7 +87,7 @@ Which application is being declined? Answer with its job_id. If the email names 
 
 
 def configured():
-    return alerts.configured() and bool(folder()) and bool(infomaniak.get_config())
+    return alerts.configured() and bool(folder()) and llm.configured(private=True)
 
 
 def folder():
@@ -220,9 +221,9 @@ def handle(message, ask, thread_size=1):
 
 def ingest(imap_factory=None, ask=None):
     """Read new emails in DECLINE_FOLDER and file them. Returns summary lines.
-    `ask(prompt, schema)` is for tests; by default the Infomaniak model."""
+    `ask(prompt, schema)` is for tests; by default Infomaniak or Claude (llm.py)."""
     db.init_db()
-    ask = ask or (lambda prompt, schema: infomaniak.chat_json(prompt, schema))
+    ask = ask or (lambda prompt, schema: llm.chat_json(prompt, schema, private=True))
     lookback = int(os.environ.get('DECLINE_LOOKBACK_DAYS', '90'))
     lines = []
     unread = list(alerts.read_mail(None, 'decline_emails', imap_factory,

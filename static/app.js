@@ -76,7 +76,7 @@ function columnFilter(column) {
         if (!text) return true;
         // What the card shows: company, id, score, title and its tags.
         const tags = jobMetaTags(job, status).replace(/<[^>]*>/g, ' ');
-        return `${job.company} #${job.job_id} ${job.score || ''}/10 ${job.title} ${tags}`
+        return `${job.company} #${job.job_id} ${job.score ? fmtScore(job.score) : ''}/10 ${job.title} ${tags}`
             .toLowerCase().includes(text);
     };
     return { active, keep };
@@ -305,9 +305,21 @@ function renderBoard() {
     // between columns or a note - so whatever you just handled is on top.
     // Applied cards still *display* the date the application went out, which
     // is the same moment today but does not move when a note is added later.
+    // A column's sort control can order it by date added, score or salary
+    // instead (columnSort); jobs without a score or salary go last.
     const stamp = (job) => job.updated_at || job.created_at || '';
     Object.keys(groupedJobs).forEach(status => {
-        groupedJobs[status].sort((a, b) => stamp(b).localeCompare(stamp(a)));
+        const col = columns[status]?.closest('.kanban-column');
+        const { key, ascending } = columnSort(col);
+        const value = SORT_KEYS[key] || SORT_KEYS.updated;
+        groupedJobs[status].sort((a, b) => {
+            const va = value(a), vb = value(b);
+            if (va === null && vb === null) return stamp(b).localeCompare(stamp(a));
+            if (va === null) return 1;
+            if (vb === null) return -1;
+            const order = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+            return (ascending ? order : -order) || stamp(b).localeCompare(stamp(a));
+        });
     });
 
     // Render columns with limits
@@ -477,7 +489,7 @@ const STATUS_NAMES = { new: 'New', to_apply: 'To Do', generated: 'To Do', approv
 function jobDetailTags(job) {
     const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
     let html = `<span class="meta-tag" title="Job id">#${esc(job.job_id)}</span>`;
-    if (job.score) html += `<span class="meta-tag" title="Score">⭐ ${job.score}/10</span>`;
+    if (job.score) html += `<span class="meta-tag" title="Score">⭐ ${fmtScore(job.score)}/10</span>`;
     html += `<span class="meta-tag" title="Column">📋 ${esc(STATUS_NAMES[job.status] || job.status)}</span>`;
     html += jobMetaTags(job, job.status === 'applied' ? 'applied' : '');
     if (job.created_at) html += `<span class="meta-tag" title="Added">🗓 Added ${formatStamp(job.created_at)}</span>`;
@@ -505,7 +517,7 @@ function createCard(job, columnStatus) {
                    ${isSelected(columnStatus, job.job_id) ? 'checked' : ''}
                    onchange="toggleCardSelection('${columnStatus}', '${job.job_id}', this.checked)">
             <span class="card-company">${job.company} <span style="font-size: 0.7em; color: rgba(255,255,255,0.5); font-weight: normal;">#${job.job_id}</span></span>
-            ${job.score ? `<span class="card-score">${job.score}/10</span>` : ''}
+            ${job.score ? `<span class="card-score">${fmtScore(job.score)}/10</span>` : ''}
         </div>
         <div class="card-title">${job.title}</div>
         <div class="card-meta">
@@ -781,6 +793,7 @@ function openJobDetails(jobId) {
         <div class="detail-section">
             <h4>AI Reasoning</h4>
             <p>${job.reasoning || 'No reasoning available.'}</p>
+            ${factorBreakdown(job)}
         </div>
         
         <div class="detail-section">
@@ -930,35 +943,17 @@ setInterval(() => {
     }
 }, 30000);
 
-// Empty the To Do column: every job in it moves to Discarded, each with its
-// history entry, after a confirmation that says how many.
-window.clearBacklog = async function() {
-    const count = allJobs.filter(j => ['to_apply', 'generated'].includes(j.status)).length;
-    if (!count) { alert('To Do is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in To Do to Discarded?${trackFilter ? ' That is every track, not only the one selected.' : ''}\n\nThey stay in the database and can be moved back one by one.`)) return;
-    try {
-        const res = await fetch('/api/backlog/clear', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        await fetchJobs();
-    } catch (e) {
-        alert('Could not clear the backlog: ' + e.message);
+// A column's Clear filters button: its text box and score filter back to
+// showing everything (the board-wide track filter and the sort stay).
+window.clearColumnFilters = function(button) {
+    const column = button.closest('.kanban-column');
+    column.querySelectorAll('input.column-filter').forEach(input => { input.value = ''; });
+    const scoreSelect = column.querySelector('.score-filter');
+    if (scoreSelect) {
+        scoreSelect.value = '';
+        try { localStorage.setItem('minScore:' + column.id, ''); } catch (e) {}
     }
-}
-
-// Empty the Failed column the same way.
-window.clearFailed = async function() {
-    const count = allJobs.filter(j => j.status === 'failed').length;
-    if (!count) { alert('Failed is already empty.'); return; }
-    if (!confirm(`Move all ${count} jobs in Failed to Discarded?${trackFilter ? ' That is every track, not only the one selected.' : ''}\n\nThey stay in the database and can be moved back one by one.`)) return;
-    try {
-        const res = await fetch('/api/failed/clear', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
-        await fetchJobs();
-    } catch (e) {
-        alert('Could not clear Failed: ' + e.message);
-    }
+    renderBoard();
 }
 
 // Selecting cards for a bulk action. Each column keeps its own selection,
@@ -1539,7 +1534,54 @@ window.openAddJob = function() {
     modal.classList.add('active');
     const input = document.getElementById('add-job-url');
     input.value = '';
+    const file = document.getElementById('add-job-file');
+    if (file) file.value = '';
+    updateAddJobCount();
     input.focus();
+}
+
+// The links in the box: one per line, or anywhere in pasted text.
+function addJobUrls() {
+    const text = document.getElementById('add-job-url').value;
+    const found = text.match(/https?:\/\/[^\s"'<>`]+/g) || [];
+    return [...new Set(found.map(u => u.replace(/[.,);'"]+$/, '')))];
+}
+
+function updateAddJobCount() {
+    const el = document.getElementById('add-job-count');
+    if (!el) return;
+    const n = addJobUrls().length;
+    el.innerText = n > 1 ? `${n} links` : '';
+    const submit = document.getElementById('add-job-submit');
+    if (submit && !submit.disabled) submit.innerText = n > 1 ? `Fetch & score ${n}` : 'Fetch & score';
+}
+document.addEventListener('input', e => { if (e.target.id === 'add-job-url') updateAddJobCount(); });
+
+// A text file of links (or a saved page of them): its links go into the box,
+// one per line, after any already there, so they can be checked before sending.
+window.loadAddJobFile = async function(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const res = await fetch('/api/links/parse', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+        });
+        const urls = (await res.json()).urls || [];
+        if (!urls.length) { addJobStatus(`No links found in ${file.name}.`, '#f87171'); return; }
+        const box = document.getElementById('add-job-url');
+        const known = new Set(addJobUrls());
+        const fresh = urls.filter(u => !known.has(u));
+        box.value = (box.value.trim() ? box.value.trim() + '\n' : '') + fresh.join('\n');
+        updateAddJobCount();
+        addJobStatus(`${fresh.length} link(s) added from ${file.name}`
+                     + (fresh.length < urls.length ? ` (${urls.length - fresh.length} already in the box)` : '') + '.');
+    } catch (e) {
+        addJobStatus('Could not read the file: ' + e, '#f87171');
+    } finally {
+        input.value = '';
+    }
 }
 
 window.closeAddJob = function() {
@@ -1568,9 +1610,11 @@ window.cancelAddJobChoice = function() {
 }
 
 window.submitAddJob = async function(confirmed = false) {
-    const url = document.getElementById('add-job-url').value.trim();
+    const urls = addJobUrls();
     const instructions = document.getElementById('add-job-instructions').value.trim();
-    if (!url) { addJobStatus('Paste a job URL first.', '#f87171'); return; }
+    if (!urls.length) { addJobStatus('Paste a job URL first.', '#f87171'); return; }
+    if (urls.length > 1) return submitAddJobs(urls, instructions);
+    const url = urls[0];
 
     const submit = document.getElementById('add-job-submit');
     submit.disabled = true;
@@ -1620,6 +1664,48 @@ window.submitAddJob = async function(confirmed = false) {
     }
 }
 
+// Several links: queued, read and scored in the background, one after another.
+async function submitAddJobs(urls, instructions) {
+    const submit = document.getElementById('add-job-submit');
+    submit.disabled = true;
+    submit.innerText = 'Working...';
+    addJobStatus(`Queueing ${urls.length} links...`);
+    try {
+        const res = await fetch('/api/jobs/from-urls', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: urls.join('\n'), instructions: instructions })
+        });
+        const data = await res.json();
+        if (data.status === 'started') { pollAddJob(); return; }
+        addJobStatus(data.status === 'already_running'
+            ? 'Another job is being added right now - try again in a moment.' : data.error,
+            data.status === 'already_running' ? '#fbbf24' : '#f87171');
+    } catch (e) {
+        addJobStatus('Could not start: ' + e, '#f87171');
+    }
+    submit.disabled = false;
+    updateAddJobCount();
+}
+
+function bulkAddSummary(result) {
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
+    const line = j => {
+        const name = j.title && !j.title.startsWith('(to fetch)')
+            ? `${esc(j.title)} at ${esc(j.company || 'Unknown')}` : esc(j.company || j.job_id);
+        let where;
+        if (j.status === 'new') where = 'not read or scored yet - the nightly run tries again';
+        else if (j.status === 'rejected') where = 'Discarded (already on the board under another link)';
+        else where = (j.score != null ? `${fmtScore(j.score)}/10, ` : '') + esc(STATUS_NAMES[j.status] || j.status);
+        return `<li><a href="#" onclick="closeAddJob(); openJobDetails('${esc(j.job_id)}'); return false;">${name}</a> - ${where}</li>`;
+    };
+    const known = (result.known || []).map(k =>
+        `<li><a href="#" onclick="closeAddJob(); openJobDetails('${esc(k.job_id)}'); return false;">#${esc(k.job_id)}</a>`
+        + ` - already on the board (${esc(STATUS_NAMES[k.status] || k.status)}), not read again</li>`);
+    const toDo = result.jobs.filter(j => j.status === 'to_apply').length;
+    return `<strong style="color:#4ade80;">Done.</strong> ${result.queued} new link(s) read and scored; `
+        + `${toDo} on To Do.<ul class="add-job-results">${result.jobs.map(line).join('')}${known.join('')}</ul>`;
+}
+
 async function pollAddJob() {
     const submit = document.getElementById('add-job-submit');
     try {
@@ -1640,12 +1726,16 @@ async function pollAddJob() {
             addJobStatus('Finished, but no result was reported.', '#fbbf24');
         } else if (!result.ok) {
             addJobStatus(result.error, '#f87171');
+        } else if (result.bulk) {
+            addJobStatus(bulkAddSummary(result), '#e2e8f0');
+            updateAddJobCount();
+            fetchJobs();
         } else {
             const where = result.company_identified ? '' :
                 '<br><span style="color:#fbbf24;">The employer could not be identified. Add an ' +
                 'instruction like "the company is X" and try again.</span>';
             const scored = result.score != null
-                ? `Scored <strong>${result.score}/10</strong> and put on the To Do board.`
+                ? `Scored <strong>${fmtScore(result.score)}/10</strong> and put on the To Do board.`
                 : 'It could not be scored, but it is on the To Do board.';
             addJobStatus(
                 '<strong style="color:#4ade80;">Done.</strong> ' +
@@ -1662,12 +1752,16 @@ async function pollAddJob() {
     }
 }
 
-// Enter submits from the URL box; Escape closes the dialog.
+// Ctrl/Cmd+Enter submits from the URL box (Enter starts a new line);
+// Escape closes the dialog.
 document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('add-job-modal');
     if (!modal || !modal.classList.contains('active')) return;
     if (e.key === 'Escape') closeAddJob();
-    if (e.key === 'Enter' && e.target.id === 'add-job-url') submitAddJob();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.id === 'add-job-url') {
+        e.preventDefault();
+        submitAddJob();
+    }
 });
 
 // --- Search settings --------------------------------------------------------
@@ -1788,3 +1882,144 @@ document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('settings-modal');
     if (modal && modal.classList.contains('active') && e.key === 'Escape') closeSettings();
 });
+
+
+// Scores are composites with decimals: always shown to two (7.25, 8.00).
+function fmtScore(score) {
+    const n = Number(score);
+    return Number.isFinite(n) ? n.toFixed(2) : String(score);
+}
+
+// The factors the composite was built from (0-100 each), as small bars.
+const FACTOR_NAMES = {
+    role_fit: 'Role fit', seniority: 'Seniority', experience: 'Experience', skills: 'Skills',
+    industry: 'Industry', location: 'Location', salary: 'Salary', language: 'Language',
+    employer: 'Employer', growth: 'Growth',
+};
+function factorBreakdown(job) {
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    let factors = null;
+    try { factors = job.factor_scores ? JSON.parse(job.factor_scores) : null; } catch (e) {}
+    if (!factors) return '';
+    const rows = Object.entries(factors).map(([key, value]) => `
+        <div class="factor-row" title="${esc(FACTOR_NAMES[key] || key)}: ${value}/100">
+            <span class="factor-name">${esc(FACTOR_NAMES[key] || key)}</span>
+            <span class="factor-bar"><span style="width:${Math.max(0, Math.min(100, Number(value) || 0))}%"></span></span>
+            <span class="factor-value">${Number(value) || 0}</span>
+        </div>`).join('');
+    const by = job.scored_by ? `<div class="factor-by">Scored by ${esc(job.scored_by)}</div>` : '';
+    return `<div class="factor-breakdown">${rows}${by}</div>`;
+}
+
+
+// Column sorting: by last change (the default), date added, score or salary,
+// highest / newest first unless the arrow is flipped. Remembered per column.
+function annualSalary(job) {
+    if (job.salary_annual != null && Number(job.salary_annual) > 0) return Number(job.salary_annual);
+    // Jobs scored before the figure was stored: read the estimate's text.
+    // It is free text ("140k-180k DKK monthly / 160k-210k CHF annual
+    // equivalent", "£800-£1,200 per day"), so take the part in the comparison
+    // currency, else an annual one, else the first; the middle of its range,
+    // a day rate as 200 working days, a monthly figure times 12.
+    const parts = String(job.estimated_salary || '').toLowerCase().split(/\s+\/\s+|;|\|/);
+    const currency = String(window.SALARY_CURRENCY || '').toLowerCase();
+    const part = parts.find(p => currency && p.includes(currency) && !/month|monat|mois/.test(p))
+        || parts.find(p => /annual|year|p\.a\./.test(p)) || parts[0];
+    const text = (part || '').replace(/(\d)[,'’](?=\d{3})/g, '$1');
+    const numbers = [...text.matchAll(/(\d+(?:\.\d+)?)\s*(k|m)?/g)]
+        .map(m => Number(m[1]) * (m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : 1))
+        .filter(n => n >= 100);
+    if (!numbers.length) return null;
+    const mid = numbers.length > 1 ? (numbers[0] + numbers[1]) / 2 : numbers[0];
+    if (/day|daily|\/d\b|tjm|tagessatz|jour/.test(text)) return mid * 200;
+    if (/month|monat|mois/.test(text)) return mid * 12;
+    return mid;
+}
+const SORT_KEYS = {
+    updated: job => job.updated_at || job.created_at || '',
+    added: job => job.created_at || null,
+    score: job => (job.score != null && job.score !== '' ? Number(job.score) : null),
+    salary: annualSalary,
+};
+const SORT_LABELS = { updated: 'Changed', added: 'Added', score: 'Score', salary: 'Salary' };
+
+function columnSort(column) {
+    const select = column?.querySelector('.sort-select');
+    return { key: select?.value || 'updated', ascending: select?.dataset.ascending === '1' };
+}
+
+function saveColumnSort(column) {
+    const { key, ascending } = columnSort(column);
+    try { localStorage.setItem('sort:' + column.id, JSON.stringify({ key, ascending })); } catch (e) {}
+}
+
+window.setColumnSort = function(control) {
+    const column = control.closest('.kanban-column');
+    saveColumnSort(column);
+    renderBoard();
+};
+
+window.flipColumnSort = function(button) {
+    const column = button.closest('.kanban-column');
+    const select = column.querySelector('.sort-select');
+    select.dataset.ascending = select.dataset.ascending === '1' ? '0' : '1';
+    button.textContent = select.dataset.ascending === '1' ? '↑' : '↓';
+    button.title = select.dataset.ascending === '1' ? 'Lowest / oldest first' : 'Highest / newest first';
+    saveColumnSort(column);
+    renderBoard();
+};
+
+// Every column gets the control next to its filters, its last choice restored.
+function addSortControls() {
+    document.querySelectorAll('.kanban-column').forEach(column => {
+        if (column.querySelector('.sort-select')) return;
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem('sort:' + column.id) || '{}') || {}; } catch (e) {}
+        let row = column.querySelector('.column-filters');
+        if (!row) {
+            const input = column.querySelector('input.column-filter');
+            if (!input) return;
+            row = document.createElement('div');
+            row.className = 'column-filters';
+            input.replaceWith(row);
+            row.appendChild(input);
+        }
+        const select = document.createElement('select');
+        select.className = 'column-filter sort-select';
+        select.title = 'Sort by';
+        select.innerHTML = Object.entries(SORT_LABELS)
+            .map(([key, label]) => `<option value="${key}">${label}</option>`).join('');
+        select.value = SORT_KEYS[saved.key] ? saved.key : 'updated';
+        select.dataset.ascending = saved.ascending ? '1' : '0';
+        select.onchange = () => window.setColumnSort(select);
+        const flip = document.createElement('button');
+        flip.type = 'button';
+        flip.className = 'column-filter sort-direction';
+        flip.textContent = saved.ascending ? '↑' : '↓';
+        flip.title = saved.ascending ? 'Lowest / oldest first' : 'Highest / newest first';
+        flip.onclick = () => window.flipColumnSort(flip);
+        row.append(select, flip);
+        // Every column gets Clear filters beside its title.
+        if (!column.querySelector('.btn-clear-filters')) {
+            let header = column.querySelector('.column-header');
+            const title = column.querySelector('h2');
+            if (!header && title) {
+                header = document.createElement('div');
+                header.className = 'column-header';
+                title.replaceWith(header);
+                header.appendChild(title);
+            }
+            if (header) {
+                const clear = document.createElement('button');
+                clear.type = 'button';
+                clear.className = 'btn-clear-filters';
+                clear.textContent = 'Clear filters';
+                clear.title = "Clear this column's filters";
+                clear.onclick = () => window.clearColumnFilters(clear);
+                header.appendChild(clear);
+            }
+        }
+    });
+}
+addSortControls();
+document.addEventListener('DOMContentLoaded', () => { addSortControls(); if (allJobs.length) renderBoard(); });

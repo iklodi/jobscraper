@@ -179,8 +179,8 @@ async def main():
     if not skip_eval:
         print("\n=== Step 2: Evaluating Jobs ===")
         if not any_model_configured(get_groq_client(), get_gemini_client()):
-            print("Warning: no model configured (INFOMANIAK_API_TOKEN, GEMINI_API_KEY or "
-                  "GROQ_API_KEY). Skipping evaluation.")
+            print("Warning: no model configured (INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY, "
+                  "GEMINI_API_KEY or GROQ_API_KEY). Skipping evaluation.")
         else:
             result = run_evaluation()
             if result is not None:

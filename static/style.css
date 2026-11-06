@@ -741,7 +741,7 @@ h1 {
 
 /* To Do's text filter and minimum-score selector, side by side. */
 .column-filters { display: flex; gap: 6px; }
-.column-filters input.column-filter { flex: 1; min-width: 0; }
+.column-filters input.column-filter { flex: 1; min-width: 4.5rem; }
 .column-filters .score-filter { width: auto; flex: 0 0 auto; cursor: pointer; }
 
 /* A column title with an action beside it (Clear on To Do and Failed). The title is
@@ -754,16 +754,16 @@ h1 {
     padding-right: 0.75rem;
 }
 .column-header h2 { flex: 1; border-bottom: none; margin-bottom: 0; }
-.btn-clear-column {
+.btn-clear-filters {
     background: transparent;
-    border: 1px solid rgba(248, 113, 113, 0.5);
-    color: #fca5a5;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    color: #cbd5e1;
     border-radius: 6px;
     padding: 0.2rem 0.6rem;
     font-size: 0.75rem;
     cursor: pointer;
 }
-.btn-clear-column:hover { background: rgba(248, 113, 113, 0.15); }
+.btn-clear-filters:hover { background: rgba(148, 163, 184, 0.15); }
 
 /* Regenerate's CV and cover-letter language pickers. */
 .regen-languages { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -776,6 +776,17 @@ h1 {
 
 /* The + dialog's choice for a link already on file. */
 .add-job-choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.add-job-urls {
+    width: 100%; min-height: 90px; padding: 10px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2);
+    color: white; font-family: inherit; font-size: 0.85rem; resize: vertical;
+    white-space: pre; overflow-x: auto;
+}
+.add-job-file { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0.6rem 0 1rem; }
+.add-job-file label { cursor: pointer; }
+#add-job-count { font-size: 0.85rem; color: var(--text-secondary); }
+.add-job-results { margin: 0.6rem 0 0; padding-left: 1.1rem; max-height: 220px; overflow-y: auto; }
+.add-job-results li { margin-bottom: 0.25rem; }
 
 /* Bulk selection: a box on each card, "Select all" and the action menu above
    each column's cards. */
@@ -826,3 +837,24 @@ h1 {
 }
 .board-filters select option { background: #1e293b; }
 .meta-track { border-color: rgba(168, 85, 247, 0.4); }
+.add-job-results a { color: #93c5fd; }
+
+/* Factor breakdown in the job detail: each factor 0-100 as a bar. */
+.factor-breakdown { margin-top: 0.8rem; display: grid; gap: 0.3rem; max-width: 28rem; }
+.factor-row { display: grid; grid-template-columns: 6.5rem 1fr 2.2rem; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+.factor-bar { height: 0.45rem; background: rgba(148, 163, 184, 0.25); border-radius: 999px; overflow: hidden; }
+.factor-bar span { display: block; height: 100%; background: #60a5fa; border-radius: 999px; }
+.factor-value { text-align: right; font-variant-numeric: tabular-nums; color: #cbd5e1; }
+.factor-by { font-size: 0.75rem; color: #94a3b8; margin-top: 0.2rem; }
+
+/* Column sorting: a select and a direction arrow beside the filters. */
+.column-filters .sort-select { width: auto; flex: 0 0 auto; cursor: pointer; max-width: 7.5rem; }
+.column-filters .sort-direction { width: auto; flex: 0 0 auto; cursor: pointer; padding: 8px 10px; line-height: 1; }
+/* Four controls share one row: keep the selects and the arrow compact. */
+.column-filters { gap: 4px; }
+.column-filters select.column-filter { padding-left: 6px; padding-right: 2px; }
+.column-filters .sort-select { max-width: 6.2rem; }
+.column-filters .sort-direction { padding-left: 8px; padding-right: 8px; }
+.column-filters { padding: 0 1rem; }
+.column-filters .sort-select { max-width: 5.9rem; }
+.column-filters input.column-filter { min-width: 3.5rem; }

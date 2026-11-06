@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import datetime
 import os
@@ -6,7 +7,11 @@ def min_pass_score():
     """The score at or above which a job goes to To Do. Read live, so the
     dashboard and a long-running process agree with .env without a restart;
     evaluate.min_pass_score() delegates here, so there is one source."""
-    return int(os.environ.get('MIN_PASS_SCORE', 7))
+    # A composite score has decimals, so the mark may too ("6.5").
+    try:
+        return float(os.environ.get('MIN_PASS_SCORE', 7))
+    except ValueError:
+        return 7.0
 
 
 # Statuses a person put a job into. Re-scoring or regenerating a job must never
@@ -103,7 +108,12 @@ def init_db():
         cursor.execute('ALTER TABLE jobs RENAME COLUMN canton TO region')
     except sqlite3.OperationalError:
         pass
-    for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT',
+    # factor_scores: the scorer's factors (0-100) as JSON, from which the
+    # composite in `score` is computed; scored_by: the model that answered,
+    # whose weight set was used (scoring.py).
+    # salary_annual: the scorer's pay estimate as one annual figure in
+    # SALARY_CURRENCY, for sorting the board by pay.
+    for column in ('factor_scores TEXT', 'scored_by TEXT', 'salary_annual REAL', 'apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT',
                    'snippet TEXT', 'track TEXT', 'work_arrangement TEXT', 'country TEXT', 'region TEXT'):
         try:
             cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
@@ -197,7 +207,8 @@ def job_exists(job_id):
     conn.close()
     return exists
 
-def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None, hiring_manager_name=None, jd_language=None, track=None):
+def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruiter=None, hiring_manager_name=None, jd_language=None, track=None,
+                     factors=None, scored_by=None, salary_annual=None):
     # A name the model finds in the advert wins; no name keeps the one already
     # recorded (e.g. LinkedIn's job poster, read by public_jobs.py).
     conn = get_connection()
@@ -209,10 +220,11 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
         UPDATE jobs 
         SET score = ?, reasoning = ?, status = ?, estimated_salary = ?, is_recruiter = ?,
             hiring_manager_name = COALESCE(?, hiring_manager_name), jd_language = ?,
-            track = COALESCE(?, track)
+            track = COALESCE(?, track), factor_scores = ?, scored_by = ?, salary_annual = ?
         WHERE job_id = ?
     ''', (score, reasoning, status, estimated_salary, is_recruiter, hiring_manager_name, jd_language,
-          track, job_id))
+          track, json.dumps(factors) if factors else None, scored_by,
+          salary_annual if isinstance(salary_annual, (int, float)) else None, job_id))
     conn.commit()
     conn.close()
 

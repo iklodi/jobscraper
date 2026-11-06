@@ -46,9 +46,9 @@ def urls_in(text):
 
 def queue(urls):
     """Add each link as a Pending Eval job with no description yet.
-    Returns {'added': n, 'known': [(url, job_id, status)]}."""
+    Returns {'added': n, 'ids': [new job ids], 'known': [(url, job_id, status)]}."""
     db.init_db()
-    added, known = 0, []
+    added, ids, known = 0, [], []
     for url in urls:
         url = by_link.canonical_url(url)
         existing = by_link.existing_job(url)
@@ -63,11 +63,13 @@ def queue(urls):
             conn.commit()
             conn.close()
             added += 1
-    return {'added': added, 'known': known}
+            ids.append(by_link.job_id_for(url))
+    return {'added': added, 'ids': ids, 'known': known}
 
 
-def pending(limit):
-    """Queued links not yet read: Pending Eval, no description, not LinkedIn."""
+def pending(limit, only=None):
+    """Queued links not yet read: Pending Eval, no description, not LinkedIn.
+    `only`: just these job ids."""
     conn = db.get_connection()
     rows = conn.execute(
         "SELECT job_id, link FROM jobs WHERE status = 'new' AND job_id LIKE 'url-%' "
@@ -75,7 +77,7 @@ def pending(limit):
         "ORDER BY created_at LIMIT ?",
         (int(os.environ.get('SAFE_FETCH_MAX_ATTEMPTS', '3')), limit)).fetchall()
     conn.close()
-    return rows
+    return [row for row in rows if row[0] in only] if only is not None else rows
 
 
 def failed(job_id):
@@ -117,13 +119,13 @@ def store(job_id, meta, description, final_url):
     return f'{title} at {company}', False
 
 
-async def fetch_pending(max_jobs=None, pause=PAUSE):
+async def fetch_pending(max_jobs=None, pause=PAUSE, on_progress=None, only=None):
     """Read queued links. Returns {'read': n, 'duplicates': n, 'closed': n,
     'failed': n, 'pending': n}. A 404 or 410 closes the job; anything else that
     cannot be read (a 403 refusal, a login) is tried again on later runs."""
     db.init_db()
     max_jobs = max_jobs or int(os.environ.get('LINK_FETCH_MAX_PER_RUN', '60'))
-    jobs = pending(max_jobs)
+    jobs = pending(10_000 if only is not None else max_jobs, only)[:max_jobs]
     stats = {'read': 0, 'duplicates': 0, 'closed': 0, 'failed': 0, 'pending': 0}
     if jobs:
         async with async_playwright() as p:
@@ -134,6 +136,8 @@ async def fetch_pending(max_jobs=None, pause=PAUSE):
                 for index, (job_id, url) in enumerate(jobs):
                     if index:
                         await asyncio.sleep(random.uniform(*pause))
+                    if on_progress:
+                        on_progress(f'Reading advert {index + 1} of {len(jobs)}...')
                     page = await context.new_page()
                     try:
                         data = await by_link._read_page(page, url)
@@ -170,6 +174,49 @@ async def fetch_pending(max_jobs=None, pause=PAUSE):
                 await browser.close()
     stats['pending'] = len(pending(10_000))
     return stats
+
+
+def _job(job_id):
+    conn = db.get_connection()
+    row = conn.execute('SELECT title, company, status, score, COALESCE(TRIM(description), \'\') != \'\' '
+                       'FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+    conn.close()
+    return row
+
+
+async def add_and_read(urls, instructions=None, on_progress=None, score=None):
+    """The + button with several links: queue them, read the adverts now
+    (LinkedIn ones logged out, through public_jobs) and score what was read,
+    so they land on To Do or Discarded by score like any queued link. Links
+    already on the board are reported, not read again. `score(job_id,
+    instructions)` is for tests; by default evaluate.evaluate_single_job."""
+    import evaluate
+    import public_jobs
+    progress = on_progress or (lambda message: None)
+    score = score or (lambda job_id, extra: evaluate.evaluate_single_job(job_id, extra))
+    queued = queue(urls)
+    ids = queued['ids']
+    if ids:
+        progress(f'Queued {len(ids)} link(s); reading the adverts...')
+        await fetch_pending(max_jobs=len(ids), on_progress=progress, only=set(ids))
+        linkedin = [job_id for job_id in ids if not job_id.startswith('url-')]
+        if linkedin:
+            progress(f'Reading {len(linkedin)} LinkedIn advert(s), logged out...')
+            await public_jobs.fetch_descriptions(max_jobs=len(linkedin))
+    jobs = []
+    readable = [job_id for job_id in ids if (row := _job(job_id)) and row[2] == 'new' and row[4]]
+    for index, job_id in enumerate(readable):
+        progress(f'Scoring {index + 1} of {len(readable)}...')
+        score(job_id, instructions)
+    for job_id in ids:
+        row = _job(job_id)
+        if row:
+            title, company, status, job_score, _ = row
+            jobs.append({'job_id': job_id, 'title': title, 'company': company,
+                         'status': status, 'score': job_score})
+    return {'ok': True, 'bulk': True, 'queued': len(ids), 'jobs': jobs,
+            'known': [{'url': url, 'job_id': job_id, 'status': status}
+                      for url, job_id, status in queued['known']]}
 
 
 if __name__ == '__main__':

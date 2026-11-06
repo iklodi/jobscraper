@@ -24,6 +24,7 @@ Gemini and Groq exactly as before.
 import json
 import os
 import random
+import threading
 import time
 
 import requests
@@ -108,6 +109,14 @@ def _strip_fence(text):
     return text
 
 
+_last = threading.local()
+
+
+def last_model():
+    """The model that gave this thread's last answer."""
+    return getattr(_last, 'model', None)
+
+
 def chat_json(prompt, schema, temperature=0.1, models=None):
     """Ask Infomaniak for an object matching `schema` (a JSON Schema dict).
 
@@ -153,7 +162,9 @@ def chat_json(prompt, schema, temperature=0.1, models=None):
                         continue
                 res.raise_for_status()
                 content = res.json()['choices'][0]['message']['content']
-                return json.loads(_strip_fence(content))
+                answer = json.loads(_strip_fence(content))
+                _last.model = model
+                return answer
             except Exception as e:
                 if attempt < RETRIES - 1:
                     time.sleep(delay)

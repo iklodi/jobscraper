@@ -55,13 +55,13 @@ you use the tool.
 
 To score jobs and write documents, the tool sends your career dossier, your CV
 text, your profile answers and job descriptions to **the AI providers you
-configure**: Infomaniak, Google (Gemini) or Groq. Their own terms and privacy
+configure**: Infomaniak, Anthropic (Claude), Google (Gemini) or Groq. Their own terms and privacy
 policies apply. If you configure Adzuna, your search keywords and locations are
 sent to its API, and its terms apply to the jobs it returns. Employer job feeds
 (`companies.yaml`) are read anonymously; nothing about you is sent to them,
 and neither is anything to the sites of job links you queue. If you set
 `DECLINE_FOLDER`, the text of the emails you file there is sent to Infomaniak
-to be read. Job-alert emails are marked read only if you set
+or Anthropic (whichever you configure; never Gemini or Groq) to be read. Job-alert emails are marked read only if you set
 `IMAP_MARK_READ`; no email is ever moved or deleted. Screenshots, generated documents and the database stay local.
 Summary emails go through the SMTP server you configure.
 

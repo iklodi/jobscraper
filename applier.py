@@ -23,13 +23,12 @@ import urllib.parse
 import yaml
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
 from playwright.async_api import async_playwright
 
 import db
 import notifier
 import progress_tracker
-import infomaniak
+import llm
 import mode
 from mode import safe_mode
 
@@ -64,12 +63,6 @@ CVS_DIR = os.environ.get('CVS_DIR', 'cvs')
 PROFILE_PATH = os.path.join(CVS_DIR, 'profile.yaml')
 ACCOUNTS_PATH = os.path.join(CVS_DIR, 'ats_accounts.yaml')
 OUTPUT_DIR = os.path.join(CVS_DIR, 'applications')
-
-GEMINI_MODELS = [
-    'gemini-3.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite',
-]
 
 # Pages that mean "we cannot proceed without a human"
 ACCOUNT_WALL_PATTERNS = re.compile(
@@ -453,34 +446,9 @@ REGISTRATION_SCHEMA = {
 
 
 def ask_model(client, prompt, schema):
-    """Infomaniak first (gemma by default), Gemini only if it is unreachable.
-
-    `client` may be None: with Infomaniak configured there is nothing for
-    Gemini to do, and the applier should not refuse to start over a key it
-    no longer needs.
-    """
-    result = infomaniak.chat_json(prompt, schema)
-    if result:
-        return result
-    if not client:
-        return None
-    for model_name in GEMINI_MODELS:
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type='application/json'),
-            )
-            text = response.text.strip()
-            start, end = text.find('{'), text.rfind('}')
-            if start != -1 and end != -1:
-                text = text[start:end + 1]
-            return json.loads(text)
-        except Exception as e:
-            print(f"  -> Gemini error on {model_name}: {e}")
-            continue
-    return None
-
+    """Every provider, in LLM_PROVIDERS order (llm.py). `client` is unused,
+    kept for the callers."""
+    return llm.chat_json(prompt, schema)
 
 
 class Trace:
@@ -2301,9 +2269,9 @@ async def run_applications(limit=None, job_ids=None, auto_submit=False, include_
               f'nothing will be submitted.', flush=True)
         auto_submit = False
     client = get_gemini_client()
-    if not client and not infomaniak.get_config():
+    if not llm.configured():
         release_run_lock()
-        raise RuntimeError('No model configured: set INFOMANIAK_API_TOKEN or GEMINI_API_KEY.')
+        raise RuntimeError('No model configured: set INFOMANIAK_API_TOKEN, ANTHROPIC_API_KEY or GEMINI_API_KEY.')
 
     conn = db.get_connection()
     cursor = conn.cursor()

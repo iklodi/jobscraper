@@ -30,7 +30,10 @@ def get_db_connection():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # The currency pay is compared in: the board reads old salary estimates
+    # in it when sorting by salary.
+    currency = (os.environ.get('SALARY_CURRENCY', '').strip().upper() or 'EUR')
+    return render_template('index.html', salary_currency=currency)
 
 def get_files_for_job(job_id):
     files = []
@@ -62,6 +65,7 @@ def get_jobs():
                j.status, j.created_at, j.estimated_salary, j.is_recruiter, j.is_promoted,
                j.description, j.application_notes, j.apply_url, j.apply_type,
                j.source, j.jd_language, j.hiring_manager_name, j.fetch_attempts, j.track,
+               j.factor_scores, j.scored_by, j.salary_annual,
                COALESCE(
                    (SELECT MAX(h.created_at) FROM job_history h
                      WHERE h.job_id = j.job_id AND h.new_status = 'applied'),
@@ -95,35 +99,6 @@ def get_jobs():
         
     conn.close()
     return jsonify(job_list)
-
-def move_column_to_rejected(statuses, note):
-    """Move every job in the given statuses to Rejected, recording each move
-    in its history with the note. Returns how many moved."""
-    import datetime
-    conn = get_db_connection()
-    marks = ','.join('?' * len(statuses))
-    rows = conn.execute(
-        f"SELECT job_id, status FROM jobs WHERE status IN ({marks})", statuses).fetchall()
-    now = datetime.datetime.now()
-    for row in rows:
-        conn.execute("UPDATE jobs SET status = 'rejected' WHERE job_id = ?", (row['job_id'],))
-        conn.execute('''
-            INSERT INTO job_history (job_id, event_type, old_status, new_status, note, created_at)
-            VALUES (?, 'status_change', ?, 'rejected', ?, ?)
-        ''', (row['job_id'], row['status'], note, now))
-    conn.commit()
-    conn.close()
-    return len(rows)
-
-@app.route('/api/backlog/clear', methods=['POST'])
-def clear_backlog():
-    """Move every job in To Do (to_apply, generated) to Rejected."""
-    return jsonify({'status': 'ok', 'moved': move_column_to_rejected(('to_apply', 'generated'), 'Backlog cleared')})
-
-@app.route('/api/failed/clear', methods=['POST'])
-def clear_failed():
-    """Move every job in Failed to Rejected."""
-    return jsonify({'status': 'ok', 'moved': move_column_to_rejected(('failed',), 'Failed cleared')})
 
 # Where a bulk action on the board may move jobs: the columns a person
 # decides on. The transient statuses belong to a background run.
@@ -268,7 +243,7 @@ def get_job(job_id):
     job = conn.execute('''
         SELECT job_id, title, company, location, link, score, reasoning, status, created_at, 
                estimated_salary, is_recruiter, is_promoted, description, application_notes,
-               apply_url, apply_type
+               apply_url, apply_type, factor_scores, scored_by
         FROM jobs WHERE job_id = ?
     ''', (job_id,)).fetchone()
     conn.close()
@@ -321,6 +296,8 @@ def regenerate_job(job_id):
 def bg_reevaluate(job_id, instructions, prior_status=None):
     import importlib
     import evaluate
+    import scoring
+    importlib.reload(scoring)            # the factors and their weights
     importlib.reload(evaluate)           # same reason as run_applier_bg
     try:
         evaluate.evaluate_single_job(job_id, instructions)
@@ -540,6 +517,50 @@ def add_job_from_url():
         target=run_add_url_bg, args=(url, (data.get('instructions') or '').strip() or None))
     add_url_thread.start()
     return jsonify({'status': 'started'})
+
+def run_add_urls_bg(urls, instructions):
+    """Queue several links, read them now and score them, for the + button."""
+    global add_url_thread, add_url_result
+    import asyncio
+    import importlib
+    import link_queue
+    importlib.reload(link_queue)
+    try:
+        add_url_result = asyncio.run(link_queue.add_and_read(
+            urls, instructions, on_progress=lambda msg: progress_tracker.set_status(msg, 0, 0)))
+    except Exception as e:
+        add_url_result = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
+    finally:
+        add_url_thread = None
+        progress_tracker.clear_status()
+
+MAX_LINKS_AT_ONCE = 200
+
+@app.route('/api/links/parse', methods=['POST'])
+def parse_links():
+    """The advert links in pasted text or an uploaded file (a list, a saved page)."""
+    import link_queue
+    data = request.json or {}
+    return jsonify({'urls': link_queue.urls_in(data.get('text') or '')})
+
+@app.route('/api/jobs/from-urls', methods=['POST'])
+def add_jobs_from_urls():
+    global add_url_thread, add_url_result
+    if add_url_thread and add_url_thread.is_alive():
+        return jsonify({'status': 'already_running'})
+    import link_queue
+    data = request.json or {}
+    urls = link_queue.urls_in(data.get('text') or '')
+    if not urls:
+        return jsonify({'status': 'error', 'error': 'No links found - paste one job URL per line.'}), 400
+    if len(urls) > MAX_LINKS_AT_ONCE:
+        return jsonify({'status': 'error', 'error': f'{len(urls)} links - add at most '
+                        f'{MAX_LINKS_AT_ONCE} at a time.'}), 400
+    add_url_result = None
+    add_url_thread = threading.Thread(
+        target=run_add_urls_bg, args=(urls, (data.get('instructions') or '').strip() or None))
+    add_url_thread.start()
+    return jsonify({'status': 'started', 'count': len(urls)})
 
 @app.route('/api/jobs/from-url/status', methods=['GET'])
 def add_job_from_url_status():

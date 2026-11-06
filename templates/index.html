@@ -84,16 +84,20 @@
             <div class="kanban-column" id="col-backlog" data-status="to_apply">
                 <div class="column-header">
                     <h2>To Do (Backlog)</h2>
-                    <button class="btn-clear-column" onclick="clearBacklog()"
-                            title="Move every job in To Do to Discarded">Clear</button>
+                    <button class="btn-clear-filters" onclick="clearColumnFilters(this)"
+                            title="Clear this column's text and score filters">Clear filters</button>
                 </div>
                 <div class="column-filters">
                     <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                     <select class="column-filter score-filter" title="Minimum score" onchange="filterColumn(this)">
-                        <option value="">Any score</option>
-                        <option value="8">8+</option>
-                        <option value="9">9+</option>
-                        <option value="10">10</option>
+                        <option value="">All</option>
+                        <option value="6.5">6.5+</option>
+                        <option value="7">7.0+</option>
+                        <option value="7.5">7.5+</option>
+                        <option value="8">8.0+</option>
+                        <option value="8.5">8.5+</option>
+                        <option value="9">9.0+</option>
+                        <option value="9.5">9.5+</option>
                     </select>
                 </div>
                 <div class="kanban-cards"></div>
@@ -101,8 +105,8 @@
             <div class="kanban-column" id="col-failed" data-status="failed">
                 <div class="column-header">
                     <h2>Failed</h2>
-                    <button class="btn-clear-column" onclick="clearFailed()"
-                            title="Move every job in Failed to Discarded">Clear</button>
+                    <button class="btn-clear-filters" onclick="clearColumnFilters(this)"
+                            title="Clear this column's text filter">Clear filters</button>
                 </div>
                 <input type="text" class="column-filter" placeholder="Filter..." onkeyup="filterColumn(this)">
                 <div class="kanban-cards"></div>
@@ -187,15 +191,22 @@
     <div id="add-job-modal" class="modal">
         <div class="modal-content glass-panel" style="max-width: 560px;">
             <span class="close-btn" onclick="closeAddJob()">&times;</span>
-            <h2 style="margin-bottom: 0.4rem;">Add a job by link</h2>
+            <h2 style="margin-bottom: 0.4rem;">Add jobs by link</h2>
             <h3 style="margin-bottom: 1.4rem;">Paste a LinkedIn posting or any employer job page.
-                The advert is read and scored, then lands on the To Do board whatever it scores.
-                Approve it there to write the CV and cover letter.</h3>
+                One link is read and scored, then lands on the To Do board whatever it scores.
+                Several links are read and scored one after another, and filed on To Do or
+                Discarded by their score. Approve a job to write the CV and cover letter.</h3>
 
             <div class="detail-section" style="border-bottom: none; padding-bottom: 0;">
-                <h4>Job URL</h4>
-                <input type="url" id="add-job-url" class="column-filter" style="margin-bottom: 1rem;"
-                       placeholder="https://www.linkedin.com/jobs/view/..." autocomplete="off">
+                <h4>Job URLs <span style="text-transform: none; opacity: 0.6;">(one per line)</span></h4>
+                <textarea id="add-job-url" class="add-job-urls" rows="4" autocomplete="off" spellcheck="false"
+                          placeholder="https://www.linkedin.com/jobs/view/...&#10;https://jobs.example.com/..."></textarea>
+                <div class="add-job-file">
+                    <label class="btn" for="add-job-file">Upload a text file</label>
+                    <input type="file" id="add-job-file" accept=".txt,.csv,.md,.html,.htm,text/plain,text/html"
+                           onchange="loadAddJobFile(this)" hidden>
+                    <span id="add-job-count"></span>
+                </div>
 
                 <h4>Extra instructions <span style="text-transform: none; opacity: 0.6;">(optional)</span></h4>
                 <textarea id="add-job-instructions" placeholder="e.g. the company is Microsoft, or emphasise the cloud work"
@@ -224,6 +235,7 @@
         </div>
     </div>
 
+    <script>window.SALARY_CURRENCY = {{ salary_currency|default('EUR')|tojson }};</script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

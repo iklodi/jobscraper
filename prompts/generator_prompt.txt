@@ -1,13 +1,15 @@
-You are an expert career advisor. I am applying for the '{title}' role.
-{custom_instructions}{track_instruction}{cv_norms}
-Here is the job description:
-{description}
+You are an expert career advisor.
 
 Here is my current Base CV (the one being customized):
 {cv_text}
 
 Here is my full Career Dossier (containing all deep historical details of my career):
 {dossier_text}
+
+I am applying for the '{title}' role.
+{custom_instructions}{track_instruction}{cv_norms}
+Here is the job description:
+{description}
 
 Task 1: Write a tailored 3-4 sentence professional summary for my CV that specifically highlights my fit for this role.
 Task 2: Customize my CV bullet points, skills, and title. You must output EXACT text from my Base CV that you want to replace or remove. 

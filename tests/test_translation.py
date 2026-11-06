@@ -84,8 +84,8 @@ def test_english_letter_header_is_not_translated(tmp_path, fake_translator):
 
 def test_requested_letter_language_goes_into_the_prompt(monkeypatch):
     seen = []
-    monkeypatch.setattr(generator.infomaniak, 'chat_json',
-                        lambda prompt, schema: seen.append(prompt) or {
+    monkeypatch.setattr(generator.llm, 'chat_json',
+                        lambda prompt, schema, **kw: seen.append(prompt) or {
                             'cv_summary': 's', 'cv_replacements': [], 'cv_removals': [],
                             'cover_letter_body': 'b', 'company_hq': 'h', 'display_company': 'd'})
     job = ('1', 'Role', 'Example AG', 'Bern', 'desc', 'x', 8, '', 'approved', '', 0, '', 0, None, 'French', '')

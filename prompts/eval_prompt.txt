@@ -25,8 +25,8 @@ Provide a brief reasoning, and list any key missing skills.
 
 Whatever the score, you MUST also report these facts about the job itself:
 - "work_arrangement": "on-site", "hybrid", "remote" or "unknown", from the location line and the description.
-- "country": the country the job is based in (for a remote job, the country it is tied to, if any; else null).
-- "canton": for a job in Switzerland, its canton as the two-letter code (VD, GE, ZH, ...); else null.
+- "country": the country the job is based in, by its common English name (for a remote job, the country it is tied to, if any; else null).
+{region_fact}
 Report them as facts, independently of the rules: the location rules are checked against them afterwards.
 
 Whatever the score, you MUST also file the job under one of my search tracks, as "track":
@@ -55,6 +55,6 @@ Your response must be valid JSON in the following format:
     "jd_language": "English",
     "work_arrangement": "hybrid",
     "country": "Switzerland",
-    "canton": "VD",
+    "region": "VD",
     "track": "Enterprise architect"
 }

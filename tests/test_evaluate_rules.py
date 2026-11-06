@@ -7,18 +7,19 @@ import evaluate
 
 @pytest.fixture
 def rules(monkeypatch):
-    monkeypatch.setenv('ONSITE_CANTONS', 'VD,VS,FR')
+    monkeypatch.delenv('HOME_COUNTRY', raising=False)
+    monkeypatch.setenv('ONSITE_REGIONS', 'VD,VS,FR')
     monkeypatch.setenv('HYBRID_COUNTRIES', 'Switzerland')
 
 
 @pytest.mark.parametrize('facts, broken', [
-    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'GE'}, True),
-    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'VD'}, False),
-    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': None}, True),
-    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'canton': 'ZH'}, False),
-    ({'work_arrangement': 'hybrid', 'country': 'Germany', 'canton': None}, True),
-    ({'work_arrangement': 'remote', 'country': 'United Kingdom', 'canton': None}, False),
-    ({'work_arrangement': 'unknown', 'country': None, 'canton': None}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': 'GE'}, True),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': 'VD'}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': None}, True),
+    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'region': 'ZH'}, False),
+    ({'work_arrangement': 'hybrid', 'country': 'Germany', 'region': None}, True),
+    ({'work_arrangement': 'remote', 'country': 'United Kingdom', 'region': None}, False),
+    ({'work_arrangement': 'unknown', 'country': None, 'region': None}, False),
     ({}, False),                                     # a model that sent no facts
 ])
 def test_location_gate(rules, facts, broken):
@@ -26,15 +27,16 @@ def test_location_gate(rules, facts, broken):
 
 
 def test_no_settings_no_rule(monkeypatch):
-    monkeypatch.delenv('ONSITE_CANTONS', raising=False)
+    monkeypatch.delenv('HOME_COUNTRY', raising=False)
+    monkeypatch.delenv('ONSITE_REGIONS', raising=False)
     monkeypatch.delenv('HYBRID_COUNTRIES', raising=False)
-    assert evaluate.location_gate({'work_arrangement': 'on-site', 'canton': 'GE'}) is None
+    assert evaluate.location_gate({'work_arrangement': 'on-site', 'region': 'GE'}) is None
 
 
 def test_a_broken_rule_caps_the_score_whatever_the_model_said(rules, monkeypatch):
     monkeypatch.setattr(evaluate, '_ask_evaluator', lambda *a, **k: {
         'score': 9, 'reasoning': 'Exceptional fit.', 'work_arrangement': 'on-site',
-        'country': 'Switzerland', 'canton': 'GE'})
+        'country': 'Switzerland', 'region': 'GE'})
     result = evaluate.evaluate_job(None, None, 'Role', 'Example AG', 'Geneva (On-site)', 'text',
                                    'cv', [], 'rules', False)
     assert result['score'] == 2
@@ -73,7 +75,7 @@ def relocation(rules, monkeypatch):
     # Not on the list: no pay is enough.
     ({'work_arrangement': 'on-site', 'country': 'Singapore', 'salary_chf_annual': 400000}, True),
     # The ordinary rules still apply at home.
-    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'VD'}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': 'VD'}, False),
 ])
 def test_a_move_abroad_needs_the_pay(relocation, facts, broken):
     assert bool(evaluate.location_gate(facts)) is broken
@@ -87,9 +89,10 @@ def test_the_reason_says_what_pay_was_needed(relocation):
 
 @pytest.fixture
 def penalties(relocation, monkeypatch):
+    monkeypatch.setenv('HOME_COUNTRY', 'Switzerland')
     monkeypatch.setenv('RELOCATION_PENALTY', '1')
-    monkeypatch.setenv('HOME_CANTONS', 'VD,VS,FR')
-    monkeypatch.setenv('SWISS_MOVE_PENALTY', '0')
+    monkeypatch.setenv('HOME_REGIONS', 'VD,VS,FR')
+    monkeypatch.setenv('REGION_MOVE_PENALTY', '0')
 
 
 @pytest.mark.parametrize('facts, points', [
@@ -97,19 +100,19 @@ def penalties(relocation, monkeypatch):
     ({'work_arrangement': 'on-site', 'country': 'United Arab Emirates'}, 1),
     ({'work_arrangement': 'unknown', 'country': 'Germany'}, 1),
     ({'work_arrangement': 'remote', 'country': 'United Kingdom'}, 0),     # no move
-    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'canton': 'ZH'}, 0),
-    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'VD'}, 0),
+    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'region': 'ZH'}, 0),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'region': 'VD'}, 0),
 ])
 def test_a_move_abroad_costs_points(penalties, facts, points):
     assert evaluate.location_penalty(facts)[0] == points
 
 
 def test_a_move_within_switzerland_can_cost_points_too(penalties, monkeypatch):
-    monkeypatch.setenv('SWISS_MOVE_PENALTY', '1')
+    monkeypatch.setenv('REGION_MOVE_PENALTY', '1')
     assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland',
-                                      'canton': 'ZH'})[0] == 1
+                                      'region': 'ZH'})[0] == 1
     assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland',
-                                      'canton': 'VD'})[0] == 0
+                                      'region': 'VD'})[0] == 0
 
 
 def test_the_penalty_comes_off_the_score_and_says_so(penalties, monkeypatch):
@@ -138,7 +141,7 @@ def test_jobs_already_scored_get_the_penalty_once(penalties, tmp_path, monkeypat
     facts = {'uk9': ('hybrid', 'United Kingdom', None), 'uk7': ('on-site', 'United Kingdom', None),
              'ch9': ('hybrid', 'Switzerland', 'VD')}
     order = iter(['uk9', 'uk7', 'ch9'])
-    ask = lambda prompt: dict(zip(('work_arrangement', 'country', 'canton'), facts[next(order)]))
+    ask = lambda prompt: dict(zip(('work_arrangement', 'country', 'region'), facts[next(order)]))
     assert evaluate.apply_move_penalty(ask=ask) == {'checked': 3, 'lowered': 2, 'dropped': 1}
     conn = db.get_connection()
     rows = dict((r[0], r[1:]) for r in conn.execute('SELECT job_id, score, status, country FROM jobs'))
@@ -147,3 +150,44 @@ def test_jobs_already_scored_get_the_penalty_once(penalties, tmp_path, monkeypat
                     'ch9': (9, 'to_apply', 'Switzerland')}
     # A second run finds nothing left to do.
     assert evaluate.apply_move_penalty(ask=lambda p: 1 / 0) == {'checked': 0, 'lowered': 0, 'dropped': 0}
+
+
+@pytest.fixture
+def germany(monkeypatch):
+    """Another candidate's setup: based in Germany, on-site only in two states."""
+    for name in ('HYBRID_COUNTRIES', 'RELOCATION_COUNTRIES', 'HOME_REGIONS'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('HOME_COUNTRY', 'Germany')
+    monkeypatch.setenv('ONSITE_REGIONS', 'BE,BB')
+    monkeypatch.setenv('REGION_TYPE', 'federal state, as its ISO code (BY, BE, HH, ...)')
+
+
+@pytest.mark.parametrize('facts, broken', [
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'region': 'BE'}, False),
+    ({'work_arrangement': 'on-site', 'country': 'Germany', 'region': 'BY'}, True),
+    ({'work_arrangement': 'on-site', 'country': 'Austria', 'region': None}, True),
+    ({'work_arrangement': 'hybrid', 'country': 'Germany', 'region': 'BY'}, False),    # anywhere at home
+    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'region': 'ZH'}, True),
+])
+def test_the_home_country_is_a_setting(germany, facts, broken):
+    assert bool(evaluate.location_gate(facts)) is broken
+
+
+def test_without_regions_the_whole_home_country_is_fine(germany, monkeypatch):
+    monkeypatch.delenv('ONSITE_REGIONS')
+    assert evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany', 'region': 'BY'}) is None
+    assert evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'France', 'region': None})
+
+
+def test_the_prompt_asks_for_the_region_in_the_home_countrys_terms(germany, monkeypatch):
+    assert evaluate.region_fact() == ('- "region": for a job in Germany, its federal state, '
+                                      'as its ISO code (BY, BE, HH, ...); else null.')
+    monkeypatch.delenv('HOME_COUNTRY')
+    monkeypatch.delenv('REGION_TYPE')
+    assert evaluate.region_fact().startswith('- "region": for any job, its first-level region')
+
+
+def test_a_move_abroad_from_germany_costs_points(germany, monkeypatch):
+    monkeypatch.setenv('RELOCATION_PENALTY', '1')
+    assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland'})[0] == 1
+    assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Germany', 'region': 'BY'})[0] == 0

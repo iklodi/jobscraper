@@ -97,10 +97,14 @@ def init_db():
     # fallback description when the full advert cannot be read.
     # track: which of the search tracks in search_criteria.md the job belongs
     # to, as the scorer filed it ("Other" when none fits).
-    # work_arrangement / country / canton: the scorer's location facts, kept
+    # work_arrangement / country / region: the scorer's location facts, kept
     # so location rules can be applied again without asking the model.
+    try:      # 'canton' was this column's first, Swiss-only name
+        cursor.execute('ALTER TABLE jobs RENAME COLUMN canton TO region')
+    except sqlite3.OperationalError:
+        pass
     for column in ('apply_type TEXT', 'fetch_attempts INTEGER DEFAULT 0', 'apply_url TEXT',
-                   'snippet TEXT', 'track TEXT', 'work_arrangement TEXT', 'country TEXT', 'canton TEXT'):
+                   'snippet TEXT', 'track TEXT', 'work_arrangement TEXT', 'country TEXT', 'region TEXT'):
         try:
             cursor.execute(f'ALTER TABLE jobs ADD COLUMN {column}')
         except sqlite3.OperationalError:
@@ -213,10 +217,10 @@ def update_job_score(job_id, score, reasoning, estimated_salary=None, is_recruit
     conn.close()
 
 def set_location_facts(job_id, facts):
-    """Store the scorer's work arrangement, country and canton for a job."""
+    """Store the scorer's work arrangement, country and region for a job."""
     conn = get_connection()
-    conn.execute('UPDATE jobs SET work_arrangement = ?, country = ?, canton = ? WHERE job_id = ?',
-                 (facts.get('work_arrangement') or 'unknown', facts.get('country'), facts.get('canton'), job_id))
+    conn.execute('UPDATE jobs SET work_arrangement = ?, country = ?, region = ? WHERE job_id = ?',
+                 (facts.get('work_arrangement') or 'unknown', facts.get('country'), facts.get('region'), job_id))
     conn.commit()
     conn.close()
 

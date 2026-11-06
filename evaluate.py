@@ -54,10 +54,10 @@ EVAL_SCHEMA = {
         # Facts, not judgements: location_gate() applies the rules to them.
         'work_arrangement': {'type': 'string', 'enum': ['on-site', 'hybrid', 'remote', 'unknown']},
         'country': {'type': ['string', 'null']},
-        'canton': {'type': ['string', 'null']},
+        'region': {'type': ['string', 'null']},
         'track': {'type': ['string', 'null']},
     },
-    'required': ['work_arrangement', 'country', 'canton', 'score', 'reasoning'],
+    'required': ['work_arrangement', 'country', 'region', 'score', 'reasoning'],
 }
 
 COMPARE_SCHEMA = {
@@ -151,24 +151,45 @@ def _allowed(setting):
     return {v.strip().lower() for v in os.environ.get(setting, '').split(',') if v.strip()}
 
 
+DEFAULT_REGION_TYPE = 'first-level region (state, province, canton, department...), as its usual short code'
+
+
+def region_fact():
+    """The prompt's line asking for the job's region, in the home country's terms."""
+    home = os.environ.get('HOME_COUNTRY', '').strip()
+    kind = os.environ.get('REGION_TYPE', '').strip() or DEFAULT_REGION_TYPE
+    where = f'for a job in {home}' if home else 'for any job'
+    return f'- "region": {where}, its {kind}; else null.'
+
+
+def _home():
+    return os.environ.get('HOME_COUNTRY', '').strip().lower()
+
+
 def location_gate(result):
     """The hard location rules, applied in code to the facts the model reports.
-    The model knows a town's canton, but it does not reliably apply a rule
-    such as "on-site only in VD, VS or FR": asked directly, it called an
-    on-site Geneva role compliant. Settings (.env, empty = no rule):
-    ONSITE_CANTONS (two-letter codes), HYBRID_COUNTRIES, and for a move
-    abroad RELOCATION_COUNTRIES with RELOCATION_MIN_SALARY_CHF: a job there
-    that breaks the other rules passes when the model's annual pay estimate
-    (salary_chf_annual) reaches the bar. Returns the reason when a rule is
-    broken, else None."""
+    The model knows a town's region, but it does not reliably apply a rule
+    such as "on-site only in these three regions": asked directly, it called
+    an on-site role outside them compliant. Settings (.env, empty = no rule):
+    HOME_COUNTRY - on-site and hybrid jobs are fine anywhere in it;
+    ONSITE_REGIONS - on-site jobs only in these regions (of HOME_COUNTRY when
+    set); HYBRID_COUNTRIES - hybrid jobs also in these countries; and for a
+    move abroad RELOCATION_COUNTRIES with RELOCATION_MIN_SALARY_CHF: a job
+    there that breaks the other rules passes when the model's annual pay
+    estimate (salary_chf_annual) reaches the bar. Returns the reason when a
+    rule is broken, else None."""
     arrangement = (result.get('work_arrangement') or '').lower()
     country = (result.get('country') or '').strip()
-    canton = (result.get('canton') or '').strip()
-    cantons, countries = _allowed('ONSITE_CANTONS'), _allowed('HYBRID_COUNTRIES')
+    region = (result.get('region') or '').strip()
+    home, regions = _home(), _allowed('ONSITE_REGIONS')
+    hybrid = _allowed('HYBRID_COUNTRIES') | ({home} if home else set())
     broken = None
-    if arrangement == 'on-site' and cantons and canton.lower() not in cantons:
-        broken = f"Location mismatch: on-site in {canton or country or 'an unknown place'}"
-    elif arrangement == 'hybrid' and countries and country.lower() not in countries:
+    if arrangement == 'on-site':
+        if home and country.lower() != home:
+            broken = f"Location mismatch: on-site in {country or 'an unknown place'}"
+        elif regions and region.lower() not in regions:
+            broken = f"Location mismatch: on-site in {region or country or 'an unknown place'}"
+    elif arrangement == 'hybrid' and hybrid and country.lower() not in hybrid:
         broken = f"Location mismatch: hybrid in {country or 'an unknown country'}"
     if broken and country.lower() in _allowed('RELOCATION_COUNTRIES'):
         bar = int(os.environ.get('RELOCATION_MIN_SALARY_CHF', '0') or 0)
@@ -182,22 +203,23 @@ def location_gate(result):
 
 def location_penalty(result):
     """Points off a job that passes the rules but means moving: (points, why).
-    Without it a London role and a Lausanne one with the same fit both scored
-    9. Settings (.env, 0 = none): RELOCATION_PENALTY for a job that is not
-    remote in one of the RELOCATION_COUNTRIES; HOME_CANTONS with
-    SWISS_MOVE_PENALTY for an on-site or hybrid job elsewhere in Switzerland."""
+    Without it a London role and one near home with the same fit both scored
+    9. Settings (.env, 0 = none): RELOCATION_PENALTY for a job outside
+    HOME_COUNTRY that is not remote; REGION_MOVE_PENALTY for an on-site or
+    hybrid job in HOME_COUNTRY outside HOME_REGIONS."""
     arrangement = (result.get('work_arrangement') or '').lower()
     country = (result.get('country') or '').strip()
-    canton = (result.get('canton') or '').strip()
-    if arrangement == 'remote':
+    region = (result.get('region') or '').strip()
+    home = _home()
+    if arrangement == 'remote' or not home or not country:
         return 0, None
-    if country.lower() in _allowed('RELOCATION_COUNTRIES'):
+    if country.lower() != home:
         points = int(os.environ.get('RELOCATION_PENALTY', '0') or 0)
         return (points, f'A move to {country}: -{points}') if points else (0, None)
-    home = _allowed('HOME_CANTONS')
-    if home and canton and arrangement in ('on-site', 'hybrid') and canton.lower() not in home:
-        points = int(os.environ.get('SWISS_MOVE_PENALTY', '0') or 0)
-        return (points, f'{arrangement.capitalize()} in {canton}, away from home: -{points}') if points else (0, None)
+    regions = _allowed('HOME_REGIONS')
+    if regions and region and arrangement in ('on-site', 'hybrid') and region.lower() not in regions:
+        points = int(os.environ.get('REGION_MOVE_PENALTY', '0') or 0)
+        return (points, f'{arrangement.capitalize()} in {region}, away from home: -{points}') if points else (0, None)
     return 0, None
 
 
@@ -292,7 +314,8 @@ def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_locat
                             .replace('{rules_text}', rules_text) \
                             .replace('{previous_applications}', chr(10).join(previous_applications)) \
                             .replace('{min_score}', str(min_pass_score())) \
-                            .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)')
+                            .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)') \
+                            .replace('{region_fact}', region_fact())
     
     if custom_instructions:
         prompt += f"\n\nCRITICAL CUSTOM INSTRUCTIONS FROM USER FOR RE-EVALUATION:\n{custom_instructions}\n"
@@ -609,9 +632,9 @@ LOCATION_SCHEMA = {
     'properties': {
         'work_arrangement': {'type': 'string', 'enum': ['on-site', 'hybrid', 'remote', 'unknown']},
         'country': {'type': ['string', 'null']},
-        'canton': {'type': ['string', 'null']},
+        'region': {'type': ['string', 'null']},
     },
-    'required': ['work_arrangement', 'country', 'canton'],
+    'required': ['work_arrangement', 'country', 'region'],
 }
 LOCATION_PROMPT = """Where is this job based?
 
@@ -623,8 +646,8 @@ Description (start):
 
 Report, as JSON:
 - "work_arrangement": "on-site", "hybrid", "remote" or "unknown", from the location line and the description.
-- "country": the country the job is based in (for a remote job, the country it is tied to, if any; else null).
-- "canton": for a job in Switzerland, its canton as the two-letter code (VD, GE, ZH, ...); else null.
+- "country": the country the job is based in, by its common English name (for a remote job, the country it is tied to, if any; else null).
+{region_fact}
 """
 
 
@@ -644,7 +667,8 @@ def apply_move_penalty(statuses=('to_apply', 'generated'), ask=None):
     stats = {'checked': 0, 'lowered': 0, 'dropped': 0}
     for index, (job_id, title, company, location, description, score, reasoning, status) in enumerate(jobs, 1):
         facts = ask(LOCATION_PROMPT.format(title=title or '', company=company or '', location=location or '',
-                                           description=(description or '')[:3000]))
+                                           description=(description or '')[:3000],
+                                           region_fact=region_fact()))
         if not facts:
             print(f'[{index}/{len(jobs)}] {job_id}: no answer, left as it was')
             continue

@@ -178,16 +178,18 @@ cannot drift apart. The salary estimate is asked for every job, whatever it
 scores: a job added by link lands on To Do even at 2/10, and should show one.
 
 **Hard location rules are applied in code** (`location_gate`), not left to the
-model. It reports facts - work arrangement, country, Swiss canton - which it
-gets right, and `ONSITE_CANTONS` / `HYBRID_COUNTRIES` in `.env` cap a job
-that breaks them at 2. Asked to apply such a rule itself, gemma called an
+model. It reports facts - work arrangement, country, region - which it gets
+right, and `HOME_COUNTRY` / `ONSITE_REGIONS` / `HYBRID_COUNTRIES` in `.env` cap
+a job that breaks them at 2. Nothing is tied to one country: "region" is
+whatever `REGION_TYPE` says (a Swiss canton, a US state, a French
+department), and the prompt asks for it in that form (`region_fact`). Asked to apply such a rule itself, gemma called an
 on-site Geneva role compliant and scored it 9. A job abroad in one of the
 `RELOCATION_COUNTRIES` passes those rules when the model's `salary_chf_annual`
 (its pay estimate as one annual CHF figure) reaches `RELOCATION_MIN_SALARY_CHF`. A job that
 passes but means a move loses points (`location_penalty`): `RELOCATION_PENALTY`
-abroad, `SWISS_MOVE_PENALTY` outside `HOME_CANTONS`; the reasoning starts
+outside `HOME_COUNTRY`, `REGION_MOVE_PENALTY` outside `HOME_REGIONS`; the reasoning starts
 "A move to <country>: -1 (fit 9)". The facts are stored (`work_arrangement`,
-`country`, `canton`), and `python evaluate.py --move-penalty` applies the
+`country`, `region`), and `python evaluate.py --move-penalty` applies the
 penalty once to To Do jobs scored before it. The "already applied" list
 holds only real applications (Applied, Interviewing, Offer, Declined, or Rejected after
 Applied) at the job's own company: the full list, with every hand-rejected

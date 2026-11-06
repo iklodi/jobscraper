@@ -338,6 +338,7 @@ function renderBoard() {
 
     setupDragAndDrop();
     reapplyFilters();          // a redraw must not drop the user's filters
+    renderColumnNav();
     Object.keys(columns).forEach(status => {
         const ids = new Set((groupedJobs[status] || []).map(j => j.job_id));
         selectionFor(status).forEach(id => { if (!ids.has(id)) selectionFor(status).delete(id); });
@@ -345,6 +346,50 @@ function renderBoard() {
     });
 }
 
+
+// Phones: a strip of the column names with their counts. Tapping one scrolls
+// the board to that column; swiping the board marks the column in view. The
+// strip is hidden on wider screens by CSS.
+function renderColumnNav() {
+    const nav = document.getElementById('column-nav');
+    const board = document.getElementById('kanban-board');
+    if (!nav || !board) return;
+    const columns = [...board.querySelectorAll('.kanban-column')];
+    nav.innerHTML = columns.map((col, i) => {
+        const h2 = col.querySelector('h2');
+        const name = h2 ? (h2.getAttribute('data-title') || h2.innerText) : col.id;
+        const count = (h2 ? h2.innerText : '').match(/\((\d+)\)\s*$/);
+        return `<button type="button" data-index="${i}">${name.replace(/\s*\(Backlog\)/i, '')}${count ? ` ${count[1]}` : ''}</button>`;
+    }).join('');
+    nav.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => {
+        const col = columns[Number(btn.dataset.index)];
+        board.scrollTo({ left: col.offsetLeft, behavior: 'smooth' });
+    }));
+    if (!board.dataset.navWatched) {
+        board.dataset.navWatched = '1';
+        let timer;
+        board.addEventListener('scroll', () => {
+            clearTimeout(timer);
+            timer = setTimeout(markColumnInView, 80);
+        }, { passive: true });
+    }
+    markColumnInView();
+}
+
+function markColumnInView() {
+    const nav = document.getElementById('column-nav');
+    const board = document.getElementById('kanban-board');
+    if (!nav || !board || getComputedStyle(nav).display === 'none') return;
+    const columns = [...board.querySelectorAll('.kanban-column')];
+    const left = board.scrollLeft;
+    let best = 0;
+    columns.forEach((col, i) => {
+        if (Math.abs(col.offsetLeft - left) < Math.abs(columns[best].offsetLeft - left)) best = i;
+    });
+    nav.querySelectorAll('button').forEach((btn, i) => btn.classList.toggle('active', i === best));
+    const active = nav.querySelector('button.active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
 
 // "2026-09-20 14:38:42.834506" -> "20 Sep 2026, 14:38". The value is written
 // by the server in local time, so it is parsed as local, not UTC.

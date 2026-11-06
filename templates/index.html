@@ -18,13 +18,13 @@
     <div class="container">
         <header>
             <h1>💼 Job Application Pipeline <span id="mode-badge" class="mode-badge"></span></h1>
-            <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div class="header-actions">
                 <button id="add-job-btn" class="btn-add" title="Add a job by URL"
                         onclick="openAddJob()" aria-label="Add a job by URL">+</button>
                 <button class="btn" onclick="openSettings()" title="Edit search keywords and scoring rules">⚙️ Search Settings</button>
                 <button class="btn" onclick="pullUpdates(this)">☁️ Pull Updates</button>
                 <button class="btn" onclick="manualRefresh(this)">🔄 Refresh</button>
-                <div class="pipeline-controls" style="display: flex; gap: 0.5rem; position: relative;">
+                <div class="pipeline-controls">
                     <style>
                         .pipeline-status-box {
                             display: none;
@@ -71,6 +71,9 @@
             </label>
         </div>
 
+
+        <!-- Phones: one column fills the screen, so this strip jumps between them. -->
+        <nav class="column-nav" id="column-nav" aria-label="Columns"></nav>
 
         <main class="kanban-board" id="kanban-board">
             <div class="kanban-column" id="col-new" data-status="new">

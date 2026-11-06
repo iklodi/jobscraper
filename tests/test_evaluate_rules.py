@@ -209,3 +209,17 @@ def test_the_prompt_asks_for_pay_in_the_configured_currency(monkeypatch):
     assert evaluate.salary_currency() == 'GBP'
     monkeypatch.delenv('SALARY_CURRENCY')
     assert evaluate.salary_currency() == 'EUR'
+
+
+def test_the_prompts_example_answer_uses_the_candidates_own_settings(monkeypatch):
+    monkeypatch.setenv('HOME_COUNTRY', 'Germany')
+    monkeypatch.setenv('HOME_REGIONS', 'BE,BB')
+    monkeypatch.setenv('SALARY_CURRENCY', 'EUR')
+    facts = evaluate.prompt_example_facts()
+    assert facts == {'{example_country}': '"Germany"', '{example_region}': '"BE"',
+                     '{salary_currency}': 'EUR', '{other_currency}': 'USD'}
+    monkeypatch.delenv('HOME_COUNTRY')
+    assert evaluate.prompt_example_facts()['{example_country}'] == 'null'
+    template = evaluate.load_prompt('eval_prompt.txt')
+    for placeholder in facts:
+        assert placeholder in template

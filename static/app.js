@@ -674,10 +674,10 @@ function openJobDetails(jobId) {
                 <div id="regen-options-${job.job_id}" style="display: none; margin-top: 15px;">
                     <div class="regen-languages" id="regen-languages-${job.job_id}">
                         <label>CV language
-                            <select id="regen-cv-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`)}</select>
+                            <select id="regen-cv-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`, job.jd_language)}</select>
                         </label>
                         <label>Cover letter language
-                            <select id="regen-cl-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`)}</select>
+                            <select id="regen-cl-lang-${job.job_id}">${languageOptions(`Default (${job.jd_language || 'posting language'})`, job.jd_language)}</select>
                         </label>
                     </div>
                     <textarea id="regen-instructions-${job.job_id}" placeholder="Optional custom instructions for the AI (e.g. 'Emphasize my cloud architecture skills more')..." style="width: 100%; height: 80px; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: white; margin-bottom: 10px; font-family: inherit; resize: vertical;"></textarea>
@@ -808,9 +808,12 @@ function openJobDetails(jobId) {
     }
 }
 
-// Regenerate's language dropdowns: the languages most applications here are
-// written in first, then every language alphabetically (those again included).
-const MAIN_LANGUAGES = ['English', 'German', 'French', 'Italian'];
+// Regenerate's language dropdowns: English, the home country's languages
+// (/api/locale) and the job's own first, then every language alphabetically
+// (those again included).
+let MAIN_LANGUAGES = ['English'];
+fetch('/api/locale').then(r => r.json()).then(d => { MAIN_LANGUAGES = d.main_languages || MAIN_LANGUAGES; })
+    .catch(() => {});
 const ALL_LANGUAGES = [
     'Arabic', 'Bulgarian', 'Catalan', 'Chinese (Simplified)', 'Croatian', 'Czech', 'Danish',
     'Dutch', 'English', 'Estonian', 'Finnish', 'French', 'German', 'Greek', 'Hebrew', 'Hindi',
@@ -820,11 +823,13 @@ const ALL_LANGUAGES = [
     'Ukrainian', 'Vietnamese'
 ];
 
-function languageOptions(defaultLabel) {
-    const opts = names => names.map(n => `<option value="${n}">${n}</option>`).join('');
-    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+function languageOptions(defaultLabel, jobLanguage) {
+    const esc = t => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const opts = names => names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    const own = ALL_LANGUAGES.find(l => l.toLowerCase() === String(jobLanguage || '').trim().toLowerCase());
+    const main = own && !MAIN_LANGUAGES.includes(own) ? [...MAIN_LANGUAGES, own] : MAIN_LANGUAGES;
     return `<option value="">${esc(defaultLabel)}</option>`
-        + `<optgroup label="Main languages">${opts(MAIN_LANGUAGES)}</optgroup>`
+        + `<optgroup label="Main languages">${opts(main)}</optgroup>`
         + `<optgroup label="All languages">${opts(ALL_LANGUAGES)}</optgroup>`;
 }
 

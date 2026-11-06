@@ -126,14 +126,17 @@ def test_swiss_german_has_no_eszett(tmp_path):
     p.add_run('Mit großem Interesse').bold = True
     p.add_run(' und freundlichen Grüßen')
     doc.save(path)
-    generator.swiss_spelling(str(path))
+    generator.apply_spelling(str(path), generator.spelling_for('German', 'Zurich, Switzerland'))
     runs = Document(path).paragraphs[0].runs
     assert [(r.text, r.bold) for r in runs] == [('Mit grossem Interesse', True), (' und freundlichen Grüssen', None)]
 
 
-def test_swiss_places():
-    assert generator.is_swiss('Zurich, Switzerland') and generator.is_swiss('', 'Bern, Schweiz')
-    assert not generator.is_swiss('Berlin, Germany', None)
+def test_national_spelling_follows_the_jobs_country():
+    assert generator.spelling_for('German', 'Zurich, Switzerland')
+    assert generator.spelling_for('German', '', 'Bern, Schweiz')
+    assert not generator.spelling_for('German', 'Berlin, Germany', None)
+    assert not generator.spelling_for('French', 'Geneva, Switzerland')
+    assert not generator.spelling_for('German', 'Bern', 'Bern')           # no country named
 
 
 def test_review_summary_counts_open_forms_apart():

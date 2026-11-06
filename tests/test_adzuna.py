@@ -56,6 +56,7 @@ class FakeSession:
 
 def test_locations_map_to_countries_cities_and_wide_areas(monkeypatch):
     monkeypatch.delenv('ADZUNA_COUNTRY', raising=False)
+    monkeypatch.setenv('HOME_COUNTRY', 'Switzerland')           # cities are searched there
     monkeypatch.delenv('ADZUNA_WIDE_COUNTRIES', raising=False)
     keywords = [('Head of Example', None), ('Interim Manager', ['Switzerland'])]
     searches, skipped = adzuna.plan_searches(keywords, ['Switzerland', 'Zürich', 'Worldwide'])
@@ -224,3 +225,11 @@ def test_a_country_without_an_adzuna_site_is_skipped_not_searched_at_home():
     searches, skipped = adzuna.plan_searches([('X', None)], ['Germany', 'Luxembourg', 'United Arab Emirates'])
     assert searches == [('X', 'de', None)]
     assert skipped == ['Luxembourg', 'United Arab Emirates']
+
+
+def test_a_city_needs_a_country_to_be_searched_in(monkeypatch):
+    for name in ('ADZUNA_COUNTRY', 'HOME_COUNTRY', 'ADZUNA_WIDE_COUNTRIES'):
+        monkeypatch.delenv(name, raising=False)
+    assert adzuna.plan_searches([('X', None)], ['Zürich', 'Germany']) == ([('X', 'de', None)], ['Zürich'])
+    monkeypatch.setenv('HOME_COUNTRY', 'Germany')
+    assert adzuna.plan_searches([('X', None)], ['Berlin'])[0] == [('X', 'de', 'Berlin')]

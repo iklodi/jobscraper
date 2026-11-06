@@ -1778,19 +1778,27 @@ def phone_variants(value):
     A validator that rejects "+41 12 345 67 89" usually wants E.164 with no
     spaces, and a few insist on the national form. Ordered most standard first.
     """
+    import locales
     raw = str(value or '').strip()
     digits = re.sub(r'[^\d+]', '', raw)
     out = [raw, digits]
+    # The dialling code: as written ("+41 79 ..."), else PHONE_COUNTRY_CODE,
+    # else HOME_COUNTRY's.
+    written = re.match(r'^(?:\+|00)(\d{1,3})[\s.\-/(]', raw)
+    code = (written.group(1) if written else None) \
+        or os.environ.get('PHONE_COUNTRY_CODE', '').strip().lstrip('+') \
+        or locales.phone_code(locales.home_country())
+    trunk = locales.trunk_prefix(code) if code else None
     if digits.startswith('+'):
         body = digits[1:]
         out.append('00' + body)
-        # Swiss numbers: +41 79... -> 079...
-        if body.startswith('41') and len(body) > 2:
-            out.append('0' + body[2:])
+        # The national form: +41 79... -> 079..., +1 212... -> 212...
+        if code and body.startswith(code) and len(body) > len(code):
+            out.append(trunk + body[len(code):])
     elif digits.startswith('00'):
         out.append('+' + digits[2:])
-    elif digits.startswith('0'):
-        out.append('+41' + digits[1:])
+    elif code and trunk and digits.startswith(trunk):
+        out.append(f'+{code}' + digits[len(trunk):])
     seen, uniq = set(), []
     for v in out:
         if v and v not in seen:

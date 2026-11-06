@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 import time
 import progress_tracker
+import locales
 import infomaniak
 from evaluate import GEMINI_MODELS, GROQ_MODELS, any_model_configured
 from playwright.async_api import async_playwright
@@ -408,24 +409,33 @@ def translate_paragraphs(paragraphs, language, extra=()):
     return translated[len(targets):]
 
 
-SWISS_MARKERS = ('switzerland', 'schweiz', 'suisse', 'svizzera', 'swiss')
-
-
-def is_swiss(*places):
-    return any(m in (p or '').lower() for p in places for m in SWISS_MARKERS)
-
-
-def swiss_spelling(path):
-    """Swiss German has no ß: "grossem", not "großem"."""
+def apply_spelling(path, pairs):
+    """National spelling, as (from, to) replacements from locales.py - Swiss
+    German has no ß: "grossem", not "großem"."""
+    if not pairs:
+        return
     doc = Document(path)
     changed = False
     for p in all_paragraphs(doc):
         for run in p.runs:
-            if 'ß' in run.text or 'ẞ' in run.text:
-                run.text = run.text.replace('ß', 'ss').replace('ẞ', 'SS')
+            text = run.text
+            for old, new in pairs:
+                text = text.replace(old, new)
+            if text != run.text:
+                run.text = text
                 changed = True
     if changed:
         doc.save(path)
+
+
+def spelling_for(language, *places):
+    """The spelling rules of any country named in `places`, for `language`."""
+    pairs = []
+    for place in places:
+        for pair in locales.spelling(language, locales.country_of(place)):
+            if pair not in pairs:
+                pairs.append(pair)
+    return pairs
 
 
 def translate_docx(path, language):
@@ -468,21 +478,20 @@ def sanitize_generated_texts(texts, company, location, jd_language, requested=No
             if first[-1] not in ',:':
                 lines[i] = f"{first},"
         elif len(first) <= 40 and len(first.split()) <= 4 and first[-1] not in '.!?:':
-            jl = (jd_language or '').lower()
-            prefix = 'Bonjour' if 'french' in jl else 'Guten Tag' if 'german' in jl else 'Dear'
+            forms = locales.letter_formulas(jd_language)
+            prefix = forms['dear'] if forms else 'Dear'
             lines[i] = f"{prefix} {first.rstrip(',')},"
         break
-    texts['cover_letter_body'] = localise_letter_formulas('\n'.join(lines), jd_language)
+    # The country's usage: the office the letter is addressed to, else the
+    # job's location, else the candidate's own country.
+    country = locales.country_of(texts['company_hq'], location, default=locales.home_country())
+    texts['cover_letter_body'] = localise_letter_formulas('\n'.join(lines), jd_language, country)
     return jd_language
 
 
 # The model sometimes writes a French or German letter and still opens it with
-# "Dear" and signs off "Sincerely". Swiss usage for the closings.
-LETTER_FORMULAS = {
-    'french': {'dear': 'Bonjour', 'team': 'Madame, Monsieur,', 'closing': 'Meilleures salutations,'},
-    'german': {'dear': 'Guten Tag', 'team': 'Sehr geehrte Damen und Herren,', 'closing': 'Freundliche Grüsse,'},
-    'italian': {'dear': 'Gentile', 'team': 'Gentili Signore e Signori,', 'closing': 'Cordiali saluti,'},
-}
+# "Dear" and signs off "Sincerely". The replacements, by language and by the
+# country's own usage, are in locales.py.
 ENGLISH_CLOSINGS = ('sincerely', 'yours sincerely', 'sincerely yours', 'yours faithfully',
                     'best regards', 'kind regards', 'warm regards', 'warmest regards',
                     'regards', 'best', 'with best regards', 'with kind regards',
@@ -508,11 +517,11 @@ def letter_language(body):
     return lang.capitalize() if best >= 5 else None
 
 
-def localise_letter_formulas(body, jd_language):
-    """Translate an English greeting and closing in a letter written in another language."""
+def localise_letter_formulas(body, jd_language, country=None):
+    """Translate an English greeting and closing in a letter written in another
+    language, as they are written in `country` (a locales.py key)."""
     import re
-    jl = (jd_language or '').lower()
-    forms = next((f for lang, f in LETTER_FORMULAS.items() if lang in jl), None)
+    forms = locales.letter_formulas(jd_language, country)
     if not forms:
         return body
     lines = body.split('\n')
@@ -562,14 +571,16 @@ def adapt_cl(base_cl_path, new_cl_path, body_text, company, display_company, loc
                 print(f"Letter header left in English: {e}")
         
         # Replace the hard-coded addressee info in the header (paragraphs before "Dear ")
-        today_str = datetime.datetime.now().strftime("%d.%m.%Y")
+        # The date as the addressee's country writes it.
+        country = locales.country_of(location, default=locales.home_country())
+        today_str = datetime.datetime.now().strftime(locales.letter_date_format(country))
+        home_city = os.environ.get('HOME_CITY', '')
+        local_city = locales.home_city(jd_language) if jd_language and not is_english(jd_language) else None
         for p in doc.paragraphs[:start_idx]:
-            if jd_language and "french" in jd_language.lower():
-                # Localise the sender's own city line for French-language letters.
-                home_city = os.environ.get('HOME_CITY', '')
-                home_city_fr = os.environ.get('HOME_CITY_FR', '')
-                if home_city and home_city_fr:
-                    replace_text_in_paragraph(p, home_city, home_city_fr)
+            if home_city and local_city:
+                # The sender's own city line, in the letter's language
+                # (HOME_CITY_FR for French, HOME_CITY_DE for German...).
+                replace_text_in_paragraph(p, home_city, local_city)
                 
             if display_company and display_company.lower() != "hiring team":
                 replace_text_in_paragraph(p, "[COMPANY]", display_company)
@@ -809,10 +820,8 @@ async def generate_for_job(job_id, custom_instructions=None, final_status='gener
         company_hq = texts['company_hq']
         display_company = texts['display_company']
         adapt_cl(CL_PATH, new_cl_docx, texts['cover_letter_body'], company, display_company, company_hq, hiring_manager_name, letter_lang)
-        if is_swiss(location, company_hq):
-            for path, lang in ((new_cv_docx, cv_language), (new_cl_docx, letter_lang)):
-                if 'german' in (lang or '').lower():
-                    swiss_spelling(path)
+        for path, lang in ((new_cv_docx, cv_language), (new_cl_docx, letter_lang)):
+            apply_spelling(path, spelling_for(lang, location, company_hq))
         
         # Save MD format
         with open(new_cv_md, 'w') as f:

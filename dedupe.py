@@ -31,10 +31,21 @@ def title_key(title):
 
 
 # What differs between one employer's names on different boards: legal forms
-# and the country of the local entity ("Example Switzerland", "Example AG", "Example").
-COMPANY_NOISE = re.compile(
-    r'\b(?:ag|sa|gmbh|sarl|s a r l|s a|ltd|limited|inc|llc|plc|se|nv|bv|spa|srl|co|kg|'
-    r'holding|group|groupe|gruppe|international|switzerland|schweiz|suisse|svizzera|swiss)\b')
+# and the country of the local entity ("Example Switzerland", "Example AG",
+# "Example"). The country is HOME_COUNTRY, in its own spellings (locales.py).
+LEGAL_FORMS = ('ag', 'sa', 'gmbh', 'sarl', 's a r l', 's a', 'ltd', 'limited', 'inc', 'llc', 'plc',
+               'se', 'nv', 'bv', 'spa', 'srl', 'co', 'kg', 'holding', 'group', 'groupe', 'gruppe',
+               'international')
+_noise = {}
+
+
+def company_noise():
+    import locales
+    home = locales.home_country()
+    if home not in _noise:
+        words = LEGAL_FORMS + tuple(_norm(w) for w in locales.country_words(home))
+        _noise[home] = re.compile(r'\b(?:' + '|'.join(re.escape(w) for w in words) + r')\b')
+    return _noise[home]
 
 def company_aliases():
     """One firm under two names, where a board shows one and LinkedIn the other.
@@ -52,7 +63,7 @@ def company_aliases():
 def company_key(company):
     """The employer, with legal forms and country names left out."""
     text = _norm(company).replace('&', ' ')
-    text = re.sub(r'\s+', ' ', COMPANY_NOISE.sub(' ', text)).strip() or _norm(company)
+    text = re.sub(r'\s+', ' ', company_noise().sub(' ', text)).strip() or _norm(company)
     return company_aliases().get(text, text)
 
 

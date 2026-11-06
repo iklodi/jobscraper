@@ -167,6 +167,21 @@ def salary_currency():
     return os.environ.get('SALARY_CURRENCY', '').strip().upper() or 'EUR'
 
 
+def prompt_example_facts():
+    """The example answer's location and currencies, from the candidate's own
+    settings, so the example points to no particular country."""
+    home = os.environ.get('HOME_COUNTRY', '').strip()
+    regions = [r.strip() for r in (os.environ.get('HOME_REGIONS', '') or os.environ.get('ONSITE_REGIONS', '')).split(',')
+               if r.strip()]
+    currency = salary_currency()
+    return {
+        '{example_country}': json.dumps(home) if home else 'null',
+        '{example_region}': json.dumps(regions[0]) if home and regions else 'null',
+        '{salary_currency}': currency,
+        '{other_currency}': 'USD' if currency == 'EUR' else 'EUR',
+    }
+
+
 def _home():
     return os.environ.get('HOME_COUNTRY', '').strip().lower()
 
@@ -310,6 +325,8 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
 
 def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_location, job_desc, cv_text, previous_applications, rules_text, is_promoted, custom_instructions=None):
     prompt_template = load_prompt('eval_prompt.txt')
+    for placeholder, value in prompt_example_facts().items():
+        prompt_template = prompt_template.replace(placeholder, value)
     prompt = prompt_template.replace('{cv_text}', cv_text) \
                             .replace('{job_title}', job_title) \
                             .replace('{job_company}', job_company) \
@@ -319,7 +336,6 @@ def _ask_evaluator(groq_client, gemini_client, job_title, job_company, job_locat
                             .replace('{rules_text}', rules_text) \
                             .replace('{previous_applications}', chr(10).join(previous_applications)) \
                             .replace('{min_score}', str(min_pass_score())) \
-                            .replace('{salary_currency}', salary_currency()) \
                             .replace('{tracks}', tracks_text(get_tracks()) or '(none configured)') \
                             .replace('{region_fact}', region_fact())
     

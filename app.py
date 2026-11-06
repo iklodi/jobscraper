@@ -413,6 +413,15 @@ def run_applier_bg(limit, job_ids, auto_submit=False):
         progress_tracker.clear_status()
         apply_thread = None
 
+@app.route('/api/locale', methods=['GET'])
+def get_locale():
+    """The languages listed first in Regenerate's menus: English and those of
+    HOME_COUNTRY (locales.py); the job's own language is added on the page."""
+    import locales
+    main = ['English'] + [l for l in locales.languages(locales.home_country()) if l != 'English']
+    return jsonify({'main_languages': main})
+
+
 @app.route('/api/mode', methods=['GET'])
 def get_mode():
     """The current mode, and which features need the logged-in LinkedIn session.

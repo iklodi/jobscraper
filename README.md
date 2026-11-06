@@ -113,6 +113,9 @@ code - not the model - applies your rules, capping a job that breaks them at 2
   breaks the rules still passes when the estimated pay is worth a move. The
   bar is in `SALARY_CURRENCY` (EUR, CHF, GBP...), and the scorer converts its
   estimate to it.
+- What else depends on a country - letter greetings, closings, date and
+  spelling, phone formats, the languages offered first - follows the job's
+  country, and `HOME_COUNTRY` where that is unknown (`locales.py`).
 - `RELOCATION_PENALTY` and `REGION_MOVE_PENALTY` (with `HOME_REGIONS`) take
   points off a job that means moving, so it ranks below an equal fit nearer
   home. The reasoning says so: "A move to United Kingdom: -1 (fit 9)". Jobs

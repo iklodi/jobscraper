@@ -137,8 +137,8 @@ call. A broken feed is reported in the summary, never fatal.
 `already_listed(title, company)`: the cross-source duplicate check every source
 uses before inserting - Adzuna, the employer feeds, the alerts and the
 scraper. Titles match once punctuation, gender markers and workload are gone;
-companies once legal forms and country names are ("Example Switzerland" is
-"Example"; `COMPANY_ALIASES` in `.env` adds firms known by two names), with
+companies once legal forms and the home country's name are ("Example
+Switzerland" is "Example" for a candidate in Switzerland; `COMPANY_ALIASES` in `.env` adds firms known by two names), with
 Job-Room as a re-lister. `sweep()` runs nightly after the
 sources: in each group of copies the one furthest along is kept, and a copy
 still waiting, or approved when the advert was already applied to through
@@ -223,11 +223,24 @@ then translated stretch by stretch of
 formatting (`translate_docx`); a letter not in English gets its header -
 "Hiring Team", country names, the sender band's text box - translated on the
 template, before the company's name is filled in. An English greeting or
-closing left in a French, German or Italian letter is replaced in code. A
+closing left in a letter in another language is replaced in code, as the
+office's country writes it (`locales.letter_formulas`: "Freundliche Grüsse"
+in Switzerland, "Mit freundlichen Grüßen" in Germany); the date follows that
+country too, and the candidate's HOME_COUNTRY where the letter's country is
+unknown. A
 failed CV translation leaves it in English with a note in the job's history.
 The job's track and its description go into the prompt, so a business
-analyst application reads like one (`track_vocabulary`). German
-documents for a Swiss job use Swiss spelling (ss, never ß).
+analyst application reads like one (`track_vocabulary`). A country's own
+spelling is applied in code (`locales` `spelling`): German documents for a
+Swiss job use ss, never ß.
+
+### `locales.py` — what differs by country
+One table (`COUNTRIES`): names in a country's own languages, its languages,
+letter date format, dialling code and trunk prefix, letter closings that
+differ from the language's standard (`LETTER_FORMULAS`), and spelling rules.
+`country_of(place..., default=)` reads a country off free text. Conventions
+belong here, not in the code that uses them; only adzuna.py and ats_feeds.py
+keep their own maps of place names, for their APIs.
 
 ### `applier.py`
 Walks from the LinkedIn posting to the employer's form, fills it from

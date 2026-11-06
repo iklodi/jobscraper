@@ -34,7 +34,7 @@ Whatever the score, you MUST also file the job under one of my search tracks, as
 Give the track's name exactly as written before the colon. Pick the track the role itself belongs to, by what the job is, not by its title alone. If none fits, output "Other".
 
 Whatever the score, you MUST determine:
-- "salary_estimate": An estimate of the salary range (e.g. "120k-150k CHF", "100k-120k EUR", or a day rate for contract roles) based on the location, role, and typical market rates. Use the advert's own figure when it states one. If completely unknown, output "Unknown".
+- "salary_estimate": An estimate of the salary range (e.g. "120k-150k {salary_currency}", "100k-120k {other_currency}", or a day rate for contract roles) based on the location, role, and typical market rates. Use the advert's own figure when it states one. If completely unknown, output "Unknown".
 - "salary_annual": the same estimate as one number - the middle of the range, as an annual gross amount converted to {salary_currency} (for a day rate, the rate times 200 working days). null only if salary_estimate is "Unknown".
 
 If the score you are giving is {min_score} or higher, you MUST also determine:
@@ -48,13 +48,13 @@ Your response must be valid JSON in the following format:
     "score": 8,
     "reasoning": "Strong match with enterprise architecture experience...",
     "missing_skills": ["AWS", "Kubernetes"],
-    "salary_estimate": "130k-160k CHF",
+    "salary_estimate": "130k-160k {salary_currency}",
     "salary_annual": 145000,
     "is_recruiter": false,
     "hiring_manager_name": "Jane Doe",
     "jd_language": "English",
     "work_arrangement": "hybrid",
-    "country": "Switzerland",
-    "region": "VD",
+    "country": {example_country},
+    "region": {example_region},
     "track": "Enterprise architect"
 }

@@ -22,7 +22,7 @@ Adzuna's terms: at most 25 calls a minute and 250 a day, and adverts shown must
 be labelled "Jobs by Adzuna" (the dashboard does). Links are kept as Adzuna's
 redirect_url, which its terms require for sending a person to the advert.
 
-Settings (.env): ADZUNA_APP_ID, ADZUNA_APP_KEY, ADZUNA_COUNTRY (default ch),
+Settings (.env): ADZUNA_APP_ID, ADZUNA_APP_KEY, ADZUNA_COUNTRY (default: HOME_COUNTRY's),
 ADZUNA_WIDE_COUNTRIES, ADZUNA_MAX_DAYS_OLD (default 3), ADZUNA_MAX_PAGES
 (default 2), ADZUNA_MAX_CALLS_PER_RUN (default 40).
 """
@@ -93,7 +93,9 @@ def configured():
 def plan_searches(keywords, locations):
     """[(keyword, country, where or None)] for the criteria, plus the
     locations that could not be mapped."""
-    home = os.environ.get('ADZUNA_COUNTRY', 'ch').strip().lower()
+    # A city is searched inside ADZUNA_COUNTRY, by default HOME_COUNTRY's.
+    home = os.environ.get('ADZUNA_COUNTRY', '').strip().lower() \
+        or COUNTRIES.get(os.environ.get('HOME_COUNTRY', '').strip().lower())
     wide = [c.strip().lower() for c in os.environ.get('ADZUNA_WIDE_COUNTRIES', '').split(',') if c.strip()]
     unsupported = [c for c in wide if c not in SUPPORTED]
     if unsupported:
@@ -113,8 +115,11 @@ def plan_searches(keywords, locations):
                 targets = [(c, None) for c in wide]
                 if not wide:
                     skipped.append(location)
-            else:
+            elif home in SUPPORTED:
                 targets = [(home, location.strip())]
+            else:                     # a city, and no country to search it in
+                skipped.append(location)
+                continue
             for country, where in targets:
                 if (keyword, country, where) not in searches:
                     searches.append((keyword, country, where))

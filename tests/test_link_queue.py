@@ -59,18 +59,22 @@ def test_a_read_advert_fills_in_the_job_and_a_known_one_is_retired(board, monkey
     monkeypatch.setattr(generate_from_url, '_read_page', read_page)
     monkeypatch.setattr(generate_from_url, 'extract_metadata', lambda text, title: {'title': title})
     stats = asyncio.run(link_queue.fetch_pending(pause=(0, 0)))
-    assert stats == {'read': 1, 'duplicates': 1, 'failed': 0, 'pending': 0}
+    assert stats == {'read': 1, 'duplicates': 1, 'closed': 0, 'failed': 0, 'pending': 0}
     conn = db.get_connection()
     rows = conn.execute("SELECT title, company, status FROM jobs WHERE job_id LIKE 'url-%' ORDER BY title").fetchall()
     conn.close()
     assert rows == [('Data Lead', 'Sample SA', 'new'), ('Senior Architect', 'Example AG Switzerland', 'rejected')]
 
 
-def test_an_unreadable_page_counts_an_attempt_and_stays_queued(board, monkeypatch):
-    link_queue.queue(['https://jobs.example.com/gone'])
+def test_a_refused_page_stays_queued_and_a_gone_one_closes(board, monkeypatch):
+    link_queue.queue(['https://jobs.example.com/refused', 'https://jobs.example.com/gone'])
+    codes = {'https://jobs.example.com/refused': 403, 'https://jobs.example.com/gone': 410}
 
     async def read_page(page, url):
-        return {'description': '', 'status': 404, 'final_url': url, 'page_text': ''}
+        return {'description': '', 'status': codes[url], 'final_url': url, 'page_text': ''}
     monkeypatch.setattr(generate_from_url, '_read_page', read_page)
     stats = asyncio.run(link_queue.fetch_pending(pause=(0, 0)))
-    assert stats['failed'] == 1 and stats['pending'] == 1
+    assert (stats['failed'], stats['closed'], stats['pending']) == (1, 1, 1)
+    conn = db.get_connection()
+    assert conn.execute("SELECT status, score FROM jobs WHERE link = 'https://jobs.example.com/gone'").fetchone() == ('scored', 0)
+    conn.close()

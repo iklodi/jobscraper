@@ -85,6 +85,18 @@ def failed(job_id):
     conn.close()
 
 
+GONE = {404, 410}
+
+
+def closed(job_id, status):
+    """The advert is gone from its site: nothing to apply for, nothing to score."""
+    conn = db.get_connection()
+    conn.execute("UPDATE jobs SET status = 'scored', score = 0, reasoning = ? WHERE job_id = ?",
+                 (f'Listing closed - the advert is no longer online (HTTP {status}).', job_id))
+    conn.commit()
+    conn.close()
+
+
 def store(job_id, meta, description, final_url):
     """Fill in the queued job, or retire it when the advert is already on the
     board. Returns (summary line, whether it was a duplicate)."""
@@ -106,11 +118,13 @@ def store(job_id, meta, description, final_url):
 
 
 async def fetch_pending(max_jobs=None, pause=PAUSE):
-    """Read queued links. Returns {'read': n, 'duplicates': n, 'failed': n, 'pending': n}."""
+    """Read queued links. Returns {'read': n, 'duplicates': n, 'closed': n,
+    'failed': n, 'pending': n}. A 404 or 410 closes the job; anything else that
+    cannot be read (a 403 refusal, a login) is tried again on later runs."""
     db.init_db()
     max_jobs = max_jobs or int(os.environ.get('LINK_FETCH_MAX_PER_RUN', '60'))
     jobs = pending(max_jobs)
-    stats = {'read': 0, 'duplicates': 0, 'failed': 0, 'pending': 0}
+    stats = {'read': 0, 'duplicates': 0, 'closed': 0, 'failed': 0, 'pending': 0}
     if jobs:
         async with async_playwright() as p:
             # A fresh browser, never the LinkedIn profile: these are other sites.
@@ -131,6 +145,11 @@ async def fetch_pending(max_jobs=None, pause=PAUSE):
                     finally:
                         await page.close()
                     description = (data.get('description') or '').strip()
+                    if data.get('status') in GONE:
+                        print(f'  -> {url}: the advert is gone (HTTP {data["status"]})')
+                        closed(job_id, data['status'])
+                        stats['closed'] += 1
+                        continue
                     if (data.get('status') or 200) >= 400 or len(description) < 200 \
                             or by_link.LOGIN_WALL.search(data.get('page_text', '')):
                         print(f'  -> {url}: no advert to read (HTTP {data.get("status")})')

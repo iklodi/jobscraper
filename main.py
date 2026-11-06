@@ -134,7 +134,7 @@ async def main():
             link_stats = await link_queue.fetch_pending()
             if any(link_stats.values()):
                 line = (f"Queued links: {link_stats['read']} read, {link_stats['duplicates']} already on "
-                        f"the board, {link_stats['failed']} could not be read, "
+                        f"the board, {link_stats['closed']} closed, {link_stats['failed']} could not be read, "
                         f"{link_stats['pending']} still to read")
                 print(line)
                 source_notes.append(line)

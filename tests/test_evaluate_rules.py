@@ -83,3 +83,67 @@ def test_the_reason_says_what_pay_was_needed(relocation):
     reason = evaluate.location_gate({'work_arrangement': 'on-site', 'country': 'Germany',
                                      'salary_chf_annual': 120000})
     assert reason == 'Location mismatch: on-site in Germany, worth a move only from CHF 150,000 a year (estimated: CHF 120,000)'
+
+
+@pytest.fixture
+def penalties(relocation, monkeypatch):
+    monkeypatch.setenv('RELOCATION_PENALTY', '1')
+    monkeypatch.setenv('HOME_CANTONS', 'VD,VS,FR')
+    monkeypatch.setenv('SWISS_MOVE_PENALTY', '0')
+
+
+@pytest.mark.parametrize('facts, points', [
+    ({'work_arrangement': 'hybrid', 'country': 'United Kingdom'}, 1),
+    ({'work_arrangement': 'on-site', 'country': 'United Arab Emirates'}, 1),
+    ({'work_arrangement': 'unknown', 'country': 'Germany'}, 1),
+    ({'work_arrangement': 'remote', 'country': 'United Kingdom'}, 0),     # no move
+    ({'work_arrangement': 'hybrid', 'country': 'Switzerland', 'canton': 'ZH'}, 0),
+    ({'work_arrangement': 'on-site', 'country': 'Switzerland', 'canton': 'VD'}, 0),
+])
+def test_a_move_abroad_costs_points(penalties, facts, points):
+    assert evaluate.location_penalty(facts)[0] == points
+
+
+def test_a_move_within_switzerland_can_cost_points_too(penalties, monkeypatch):
+    monkeypatch.setenv('SWISS_MOVE_PENALTY', '1')
+    assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland',
+                                      'canton': 'ZH'})[0] == 1
+    assert evaluate.location_penalty({'work_arrangement': 'hybrid', 'country': 'Switzerland',
+                                      'canton': 'VD'})[0] == 0
+
+
+def test_the_penalty_comes_off_the_score_and_says_so(penalties, monkeypatch):
+    monkeypatch.setattr(evaluate, '_ask_evaluator', lambda *a, **k: {
+        'score': 9, 'reasoning': 'Strong fit.', 'work_arrangement': 'hybrid',
+        'country': 'United Kingdom', 'salary_chf_annual': 200000})
+    monkeypatch.setattr(evaluate, 'get_tracks', lambda: [])
+    result = evaluate.evaluate_job(None, None, 'Role', 'Example Ltd', 'London', 'text', 'cv', [], 'rules', False)
+    assert result['score'] == 8
+    assert result['reasoning'] == 'A move to United Kingdom: -1 (fit 9). Strong fit.'
+
+
+def test_a_broken_rule_is_not_penalised_twice(penalties):
+    result = evaluate.apply_location_rules({'score': 8, 'reasoning': '', 'work_arrangement': 'on-site',
+                                            'country': 'Germany', 'salary_chf_annual': 100000})
+    assert result['score'] == 2
+
+
+def test_jobs_already_scored_get_the_penalty_once(penalties, tmp_path, monkeypatch):
+    monkeypatch.setattr(db, 'DB_FILE', str(tmp_path / 'jobs.db'))
+    monkeypatch.setenv('MIN_PASS_SCORE', '7')
+    db.init_db()
+    for job_id, score in [('uk9', 9), ('uk7', 7), ('ch9', 9)]:
+        db.add_job(job_id, 'Role', 'Example', '', 'text', 'x')
+        db.update_job_score(job_id, score, 'Fit.')
+    facts = {'uk9': ('hybrid', 'United Kingdom', None), 'uk7': ('on-site', 'United Kingdom', None),
+             'ch9': ('hybrid', 'Switzerland', 'VD')}
+    order = iter(['uk9', 'uk7', 'ch9'])
+    ask = lambda prompt: dict(zip(('work_arrangement', 'country', 'canton'), facts[next(order)]))
+    assert evaluate.apply_move_penalty(ask=ask) == {'checked': 3, 'lowered': 2, 'dropped': 1}
+    conn = db.get_connection()
+    rows = dict((r[0], r[1:]) for r in conn.execute('SELECT job_id, score, status, country FROM jobs'))
+    conn.close()
+    assert rows == {'uk9': (8, 'to_apply', 'United Kingdom'), 'uk7': (6, 'scored', 'United Kingdom'),
+                    'ch9': (9, 'to_apply', 'Switzerland')}
+    # A second run finds nothing left to do.
+    assert evaluate.apply_move_penalty(ask=lambda p: 1 / 0) == {'checked': 0, 'lowered': 0, 'dropped': 0}

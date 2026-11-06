@@ -180,6 +180,43 @@ def location_gate(result):
     return broken
 
 
+def location_penalty(result):
+    """Points off a job that passes the rules but means moving: (points, why).
+    Without it a London role and a Lausanne one with the same fit both scored
+    9. Settings (.env, 0 = none): RELOCATION_PENALTY for a job that is not
+    remote in one of the RELOCATION_COUNTRIES; HOME_CANTONS with
+    SWISS_MOVE_PENALTY for an on-site or hybrid job elsewhere in Switzerland."""
+    arrangement = (result.get('work_arrangement') or '').lower()
+    country = (result.get('country') or '').strip()
+    canton = (result.get('canton') or '').strip()
+    if arrangement == 'remote':
+        return 0, None
+    if country.lower() in _allowed('RELOCATION_COUNTRIES'):
+        points = int(os.environ.get('RELOCATION_PENALTY', '0') or 0)
+        return (points, f'A move to {country}: -{points}') if points else (0, None)
+    home = _allowed('HOME_CANTONS')
+    if home and canton and arrangement in ('on-site', 'hybrid') and canton.lower() not in home:
+        points = int(os.environ.get('SWISS_MOVE_PENALTY', '0') or 0)
+        return (points, f'{arrangement.capitalize()} in {canton}, away from home: -{points}') if points else (0, None)
+    return 0, None
+
+
+def apply_location_rules(result):
+    """The location gate, then the move penalty, on a model's answer (in place)."""
+    score = result.get('score') or 0
+    broken = location_gate(result)
+    if broken:
+        if score > 2:
+            result['score'] = 2
+            result['reasoning'] = f"{broken}. {result.get('reasoning') or ''}".strip()
+        return result
+    points, why = location_penalty(result)
+    if points and score > 1:
+        result['score'] = max(1, score - points)
+        result['reasoning'] = f"{why} (fit {score}). {result.get('reasoning') or ''}".strip()
+    return result
+
+
 OTHER_TRACK = 'Other'
 
 
@@ -240,10 +277,7 @@ def evaluate_job(groq_client, gemini_client, job_title, job_company, job_locatio
                             cv_text, previous_applications, rules_text, is_promoted, custom_instructions)
     if result:
         result['track'] = normalise_track(result.get('track'), get_tracks())
-        broken = location_gate(result)
-        if broken and (result.get('score') or 0) > 2:
-            result['score'] = 2
-            result['reasoning'] = f"{broken}. {result.get('reasoning') or ''}".strip()
+        apply_location_rules(result)
     return result
 
 
@@ -461,6 +495,7 @@ def run_evaluation():
 
             db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
                                 hiring_manager_name, jd_language, track)
+            db.set_location_facts(job_id, result)
         else:
             print("--> Failed to evaluate.")
             
@@ -518,6 +553,7 @@ def evaluate_single_job(job_id, custom_instructions=None):
         
         db.update_job_score(job_id, score, reasoning, estimated_salary, is_recruiter,
                             hiring_manager_name, jd_language, result.get('track'))
+        db.set_location_facts(job_id, result)
         return True
     else:
         print("Failed to evaluate.")
@@ -568,8 +604,79 @@ def classify_tracks(statuses=ACTIVE_STATUSES, ask=None):
     return counts
 
 
+LOCATION_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'work_arrangement': {'type': 'string', 'enum': ['on-site', 'hybrid', 'remote', 'unknown']},
+        'country': {'type': ['string', 'null']},
+        'canton': {'type': ['string', 'null']},
+    },
+    'required': ['work_arrangement', 'country', 'canton'],
+}
+LOCATION_PROMPT = """Where is this job based?
+
+Job title: {title}
+Company: {company}
+Location line: {location}
+Description (start):
+{description}
+
+Report, as JSON:
+- "work_arrangement": "on-site", "hybrid", "remote" or "unknown", from the location line and the description.
+- "country": the country the job is based in (for a remote job, the country it is tied to, if any; else null).
+- "canton": for a job in Switzerland, its canton as the two-letter code (VD, GE, ZH, ...); else null.
+"""
+
+
+def apply_move_penalty(statuses=('to_apply', 'generated'), ask=None):
+    """Apply location_penalty to jobs scored before it existed, without
+    re-scoring them: a short prompt for the location facts, stored, then the
+    points off. A job whose facts are already stored is left alone, so the
+    penalty is never taken twice. A job that falls below the pass mark moves
+    to Discarded's below-the-bar list (scored). Returns {'checked', 'lowered', 'dropped'}."""
+    ask = ask or (lambda prompt: infomaniak.chat_json(prompt, LOCATION_SCHEMA))
+    conn = db.get_connection()
+    marks = ','.join('?' * len(statuses))
+    jobs = conn.execute(f"SELECT job_id, title, company, location, description, score, reasoning, status "
+                        f"FROM jobs WHERE country IS NULL AND work_arrangement IS NULL "
+                        f"AND status IN ({marks})", statuses).fetchall()
+    conn.close()
+    stats = {'checked': 0, 'lowered': 0, 'dropped': 0}
+    for index, (job_id, title, company, location, description, score, reasoning, status) in enumerate(jobs, 1):
+        facts = ask(LOCATION_PROMPT.format(title=title or '', company=company or '', location=location or '',
+                                           description=(description or '')[:3000]))
+        if not facts:
+            print(f'[{index}/{len(jobs)}] {job_id}: no answer, left as it was')
+            continue
+        stats['checked'] += 1
+        db.set_location_facts(job_id, facts)
+        result = dict(facts, score=score or 0, reasoning=reasoning or '')
+        points, why = location_penalty(result)
+        if not points or (score or 0) <= 1:
+            continue
+        new = max(1, score - points)
+        new_status = status if new >= min_pass_score() else 'scored'
+        conn = db.get_connection()
+        conn.execute('UPDATE jobs SET score = ?, reasoning = ? WHERE job_id = ?',
+                     (new, f'{why} (fit {score}). {reasoning or ""}'.strip(), job_id))
+        conn.commit()
+        conn.close()
+        if new_status != status:
+            db.update_job_status(job_id, new_status)
+            stats['dropped'] += 1
+        stats['lowered'] += 1
+        print(f'[{index}/{len(jobs)}] {title} at {company}: {score} -> {new} ({why})')
+    return stats
+
+
 if __name__ == '__main__':
     import sys
+    if '--move-penalty' in sys.argv:
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+        db.init_db()
+        print(apply_move_penalty())
+        sys.exit()
     if '--classify-tracks' in sys.argv:
         # --all includes Pending Eval and Rejected too.
         print(classify_tracks(('new', 'scored', 'rejected') + ACTIVE_STATUSES
